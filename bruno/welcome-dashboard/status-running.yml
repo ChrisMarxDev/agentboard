@@ -1,0 +1,27 @@
+info:
+  name: Flip status back to running (Status)
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/welcome.status"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "state": "running",
+        "label": "AgentBoard",
+        "detail": "All systems go"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

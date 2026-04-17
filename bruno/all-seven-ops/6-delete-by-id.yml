@@ -1,0 +1,16 @@
+info:
+  name: 6. DELETE by id (remove item from array)
+  type: http
+  seq: 6
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/data/demo.items/abc"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

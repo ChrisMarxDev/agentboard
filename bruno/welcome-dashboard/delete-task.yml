@@ -1,0 +1,16 @@
+info:
+  name: Delete task (Kanban — delete by id)
+  type: http
+  seq: 7
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/data/welcome.tasks/4"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

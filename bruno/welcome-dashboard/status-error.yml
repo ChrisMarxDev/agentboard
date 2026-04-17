@@ -1,0 +1,27 @@
+info:
+  name: Flip status to error (Status)
+  type: http
+  seq: 3
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/welcome.status"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "state": "error",
+        "label": "AgentBoard",
+        "detail": "Something went wrong"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

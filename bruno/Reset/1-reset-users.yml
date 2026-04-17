@@ -1,0 +1,23 @@
+info:
+  name: Reset welcome.users
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/welcome.users"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      42
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

@@ -1,0 +1,55 @@
+info:
+  name: Upload ScoreBadge component
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/components/ScoreBadge"
+  headers:
+    - name: Content-Type
+      value: application/javascript
+  body:
+    type: text
+    data: |-
+      import { useData } from '@agentboard/client'
+
+      export const meta = {
+        name: 'ScoreBadge',
+        description: 'A colored badge showing a numeric score with a threshold.',
+        props: {
+          source: { type: 'string', required: true },
+          good: { type: 'number', default: 80 }
+        }
+      }
+
+      export default function ScoreBadge({ source, good = 80 }) {
+        const { data, loading } = useData(source)
+        if (loading) return null
+        const n = Number(data) || 0
+        const color = n >= good ? 'var(--success)' : n >= good / 2 ? 'var(--warning)' : 'var(--error)'
+        return (
+          <span style={{
+            display: 'inline-block',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '9999px',
+            background: color,
+            color: 'white',
+            fontWeight: 600,
+          }}>
+            {n}
+          </span>
+        )
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("returns 200 when --allow-component-upload is enabled", function() {
+          if (res.status === 403) {
+            throw new Error("403 FORBIDDEN — start the server with --allow-component-upload first");
+          }
+          expect(res.status).to.equal(200);
+          expect(res.body.name).to.equal("ScoreBadge");
+        });

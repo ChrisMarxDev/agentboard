@@ -1,0 +1,28 @@
+info:
+  name: Seed List items
+  type: http
+  seq: 5
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/demo.list"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      [
+        { "title": "Build the API",       "status": "done" },
+        { "title": "Wire up the SSE",     "status": "done" },
+        { "title": "Polish the dashboard", "status": "in_progress" },
+        { "title": "Write the docs",       "status": "todo" }
+      ]
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

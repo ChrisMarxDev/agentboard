@@ -1,0 +1,27 @@
+info:
+  name: Reset welcome.progress
+  type: http
+  seq: 2
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/welcome.progress"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "value": 3,
+        "max": 10,
+        "label": "Getting Started"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

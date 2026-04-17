@@ -1,0 +1,16 @@
+info:
+  name: Delete ScoreBadge
+  type: http
+  seq: 5
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/components/ScoreBadge"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

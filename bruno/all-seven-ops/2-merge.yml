@@ -1,0 +1,27 @@
+info:
+  name: 2. MERGE (deep merge into object)
+  type: http
+  seq: 2
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/api/data/demo.obj"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "a": 1,
+        "b": 2,
+        "nested": { "x": "hello" }
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

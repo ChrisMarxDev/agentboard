@@ -1,0 +1,26 @@
+info:
+  name: Update progress bar (Progress)
+  type: http
+  seq: 2
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/api/data/welcome.progress"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "value": 7,
+        "label": "Almost there"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

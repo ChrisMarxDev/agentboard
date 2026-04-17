@@ -1,0 +1,32 @@
+info:
+  name: Append TimeSeries point (run repeatedly to see line grow)
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/data/demo.metrics"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "x": "t+0",
+        "y": 42
+      }
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const offset = Math.floor(Math.random() * 100);
+        const value = Math.floor(Math.random() * 100);
+        bru.setVar("tsX", "t+" + offset);
+        bru.setVar("tsY", value);
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

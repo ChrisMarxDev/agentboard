@@ -1,0 +1,29 @@
+info:
+  name: Seed Chart data
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/demo.chart"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      [
+        { "name": "Mon", "value": 12 },
+        { "name": "Tue", "value": 19 },
+        { "name": "Wed", "value": 8 },
+        { "name": "Thu", "value": 24 },
+        { "name": "Fri", "value": 16 }
+      ]
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

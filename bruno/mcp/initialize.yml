@@ -1,0 +1,32 @@
+info:
+  name: MCP initialize
+  type: http
+  seq: 1
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2024-11-05",
+          "capabilities": {},
+          "clientInfo": { "name": "bruno", "version": "1.0" }
+        }
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

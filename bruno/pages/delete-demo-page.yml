@@ -1,0 +1,16 @@
+info:
+  name: Delete /demo page
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/pages/demo"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

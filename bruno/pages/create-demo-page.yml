@@ -1,0 +1,71 @@
+info:
+  name: Create /demo page (mounts all 9 components)
+  type: http
+  seq: 1
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/pages/demo"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Component Showcase
+
+      Live data from the `demo.*` keys seeded by the `component-demos` folder.
+      Open http://localhost:3000/demo and watch values update as you re-fire requests.
+
+      ## Headline
+
+      <Deck>
+        <Card title="Active Users">
+          <Metric source="welcome.users" />
+        </Card>
+        <Card title="Status">
+          <Status source="welcome.status" />
+        </Card>
+        <Card title="Onboarding">
+          <Progress source="welcome.progress" />
+        </Card>
+      </Deck>
+
+      ## Trends
+
+      <Deck min={400}>
+        <Card title="Daily volume">
+          <Chart source="demo.chart" variant="bar" />
+        </Card>
+        <Card title="Live metrics">
+          <TimeSeries source="demo.metrics" variant="line" />
+        </Card>
+      </Deck>
+
+      ## Activity
+
+      <Deck min={320}>
+        <Card title="Team" span={2}>
+          <Table source="demo.rows" />
+        </Card>
+        <Card title="Backlog">
+          <List source="demo.list" />
+        </Card>
+        <Card title="Events" span={2}>
+          <Log source="demo.events" />
+        </Card>
+      </Deck>
+
+      ## Tasks
+
+      <Card title="All tasks">
+        <Kanban source="welcome.tasks" groupBy="status" />
+      </Card>
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

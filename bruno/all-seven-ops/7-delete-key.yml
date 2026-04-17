@@ -1,0 +1,16 @@
+info:
+  name: 7. DELETE (remove entire key)
+  type: http
+  seq: 7
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/data/demo.obj"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

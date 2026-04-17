@@ -1,0 +1,98 @@
+version: "3"
+
+vars:
+  BINARY: agentboard
+  PORT: "3000"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task -l
+    silent: true
+
+  build:
+    desc: Build frontend + Go binary
+    deps: [build:frontend]
+    cmds:
+      - go build -ldflags="-s -w" -o {{.BINARY}} ./cmd/agentboard
+    sources:
+      - "**/*.go"
+      - frontend/dist/**/*
+    generates:
+      - "{{.BINARY}}"
+
+  build:frontend:
+    desc: Build the React frontend
+    deps: [install:frontend]
+    dir: frontend
+    cmds:
+      - npm run build
+    sources:
+      - src/**/*
+      - index.html
+      - vite.config.*
+      - package.json
+    generates:
+      - dist/**/*
+
+  install:frontend:
+    desc: Install frontend npm dependencies
+    dir: frontend
+    cmds:
+      - npm install
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+
+  dev:
+    desc: Run frontend dev server + Go backend in parallel (Vite HMR + --dev proxy)
+    deps: [dev:frontend, dev:backend]
+
+  dev:frontend:
+    desc: Run Vite dev server with HMR
+    dir: frontend
+    cmds:
+      - npm run dev
+    internal: true
+
+  dev:backend:
+    desc: Run Go server in dev mode (proxies to Vite at localhost:5173)
+    cmds:
+      - go run ./cmd/agentboard --dev --no-open --port {{.PORT}}
+    internal: true
+
+  run:
+    desc: Run the built binary (pass flags with -- e.g. task run -- --port 3001)
+    deps: [build]
+    cmds:
+      - ./{{.BINARY}} {{.CLI_ARGS}}
+
+  test:
+    desc: Run all tests (Go + frontend)
+    deps: [test:go, test:frontend]
+
+  test:go:
+    desc: Run Go unit tests
+    cmds:
+      - go test ./...
+
+  test:frontend:
+    desc: Run frontend vitest suite
+    dir: frontend
+    cmds:
+      - npm run test
+
+  test:integration:
+    desc: Build and run the end-to-end integration test script
+    deps: [build]
+    cmds:
+      - ./scripts/integration-test.sh
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f {{.BINARY}}
+      - rm -rf frontend/dist
