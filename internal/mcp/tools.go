@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/christophermarx/agentboard/internal/components"
+	"github.com/christophermarx/agentboard/internal/files"
 )
 
 func (s *Server) toolDefinitions() []ToolDef {
@@ -145,6 +148,37 @@ func (s *Server) toolDefinitions() []ToolDef {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			Name:        "agentboard_write_file",
+			Description: "Upload (or replace) a binary file under the project's files/ folder. Pass the bytes base64-encoded. File is served at /api/files/<name>; reference from pages with <Image source=\"...\"> or <File source=\"...\">.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name":           map[string]string{"type": "string", "description": "Relative file path (e.g. hero.png, exports/q1.csv). Letters/digits/._- only, no leading dot, no ..)"},
+					"content_base64": map[string]string{"type": "string", "description": "File contents encoded as base64."},
+				},
+				"required": []string{"name", "content_base64"},
+			},
+		},
+		{
+			Name:        "agentboard_list_files",
+			Description: "List all files in the project with size, MIME type, and URL.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "agentboard_delete_file",
+			Description: "Delete a file from the project's files/ folder.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]string{"type": "string", "description": "File name to delete (same format as agentboard_write_file)"},
+				},
+				"required": []string{"name"},
+			},
+		},
 	}
 
 	// Component upload tools are only advertised when the server was started
@@ -226,6 +260,12 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolWriteComponent(args)
 	case "agentboard_delete_component":
 		return s.toolDeleteComponent(args)
+	case "agentboard_write_file":
+		return s.toolWriteFile(args)
+	case "agentboard_list_files":
+		return s.toolListFiles()
+	case "agentboard_delete_file":
+		return s.toolDeleteFile(args)
 	default:
 		return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -250,6 +290,52 @@ func (s *Server) toolWriteComponent(args map[string]json.RawMessage) (interface{
 		return nil, &RPCError{Code: code, Message: err.Error()}
 	}
 	return mcpContent(fmt.Sprintf("Component %s written successfully", name)), nil
+}
+
+func (s *Server) toolWriteFile(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	name := getString(args, "name")
+	content := getString(args, "content_base64")
+	if name == "" || content == "" {
+		return nil, &RPCError{Code: -32602, Message: "name and content_base64 required"}
+	}
+	raw, err := base64.StdEncoding.DecodeString(content)
+	if err != nil {
+		return nil, &RPCError{Code: -32602, Message: "content_base64 is not valid base64"}
+	}
+	info, err := s.Files.Write(name, bytes.NewReader(raw))
+	if err != nil {
+		code := -32000
+		if errors.Is(err, files.ErrInvalidName) || errors.Is(err, files.ErrTooLarge) {
+			code = -32602
+		}
+		return nil, &RPCError{Code: code, Message: err.Error()}
+	}
+	pretty, _ := json.MarshalIndent(info, "", "  ")
+	return mcpContent(string(pretty)), nil
+}
+
+func (s *Server) toolListFiles() (interface{}, *RPCError) {
+	list, err := s.Files.List()
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: err.Error()}
+	}
+	pretty, _ := json.MarshalIndent(list, "", "  ")
+	return mcpContent(string(pretty)), nil
+}
+
+func (s *Server) toolDeleteFile(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	name := getString(args, "name")
+	if name == "" {
+		return nil, &RPCError{Code: -32602, Message: "name required"}
+	}
+	if err := s.Files.Delete(name); err != nil {
+		code := -32000
+		if errors.Is(err, files.ErrInvalidName) || errors.Is(err, files.ErrNotFound) {
+			code = -32602
+		}
+		return nil, &RPCError{Code: code, Message: err.Error()}
+	}
+	return mcpContent(fmt.Sprintf("File %s deleted", name)), nil
 }
 
 func (s *Server) toolDeleteComponent(args map[string]json.RawMessage) (interface{}, *RPCError) {

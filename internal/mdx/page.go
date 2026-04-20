@@ -59,10 +59,10 @@ func (pm *PageManager) ScanPages() {
 		}
 	}
 
-	// Scan pages/ directory
-	pagesDir := pm.project.PagesDir()
+	// Scan content/ directory
+	contentDir := pm.project.ContentDir()
 	order := 1
-	filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -75,7 +75,7 @@ func (pm *PageManager) ScanPages() {
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(pagesDir, path)
+		relPath, _ := filepath.Rel(contentDir, path)
 		pagePath := strings.TrimSuffix(relPath, ".md")
 		urlPath := "/" + pagePath
 
@@ -86,7 +86,7 @@ func (pm *PageManager) ScanPages() {
 
 		pm.pages[pagePath] = &PageInfo{
 			Path:   urlPath,
-			File:   filepath.Join("pages", relPath),
+			File:   filepath.Join("content", relPath),
 			Title:  title,
 			Source: source,
 			Order:  order,
@@ -125,7 +125,7 @@ func (pm *PageManager) WritePage(pagePath string, source string) error {
 		filePath = pm.project.IndexFile()
 	} else {
 		pagePath = strings.TrimSuffix(pagePath, ".md")
-		filePath = filepath.Join(pm.project.PagesDir(), pagePath+".md")
+		filePath = filepath.Join(pm.project.ContentDir(), pagePath+".md")
 	}
 
 	// Ensure parent directory exists
@@ -146,7 +146,7 @@ func (pm *PageManager) WritePage(pagePath string, source string) error {
 // DeletePage removes a page file and re-scans.
 func (pm *PageManager) DeletePage(pagePath string) error {
 	pagePath = strings.TrimSuffix(pagePath, ".md")
-	filePath := filepath.Join(pm.project.PagesDir(), pagePath+".md")
+	filePath := filepath.Join(pm.project.ContentDir(), pagePath+".md")
 
 	if err := os.Remove(filePath); err != nil {
 		return err

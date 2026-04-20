@@ -1,0 +1,37 @@
+info:
+  name: Wire data keys → files (so pages can reference via source=...)
+  type: http
+  seq: 6
+
+# The <Image source="..."/> and <File source="..."/> components resolve a data
+# key whose value is { file, alt?, label? }. This request seeds three data keys
+# pointing at the three files we just uploaded. Agents typically do this in one
+# go via the MCP tool agentboard_set, but REST works the same.
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/demo.files.banner"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      { "file": "demo/banner.svg", "alt": "Demo banner" }
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        // Also seed the PDF and CSV references so the next request can just
+        // write the page without worrying about sequencing.
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+        await axios.put(`${baseUrl}/api/data/demo.files.report`, { file: "demo/report.pdf", label: "Q4 financials (PDF)" }, {
+          headers: { "Content-Type": "application/json" },
+        });
+        await axios.put(`${baseUrl}/api/data/demo.files.export`, { file: "demo/users.csv", label: "Team export (CSV)" }, {
+          headers: { "Content-Type": "application/json" },
+        });
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });

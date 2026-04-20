@@ -53,7 +53,7 @@ Then ask Claude to build you something. For example:
 ## Learn more
 
 - Edit this page: open index.md in your project folder
-- Add pages to pages/
+- Add pages and docs to content/
 - Add custom components to components/
 - Docs: https://agentboard.dev/docs
 `

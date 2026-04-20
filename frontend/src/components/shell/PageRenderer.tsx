@@ -21,7 +21,7 @@ export default function PageRenderer() {
       let pagePath = location.pathname === '/' ? 'index' : location.pathname.slice(1)
 
       // Fetch raw MDX source
-      const resp = await fetch(`/api/pages/${pagePath}`, {
+      const resp = await fetch(`/api/content/${pagePath}`, {
         headers: { 'Accept': 'text/markdown' },
       })
 

@@ -1,0 +1,51 @@
+info:
+  name: Create /files demo page (<Image> + <File> rendered)
+  type: http
+  seq: 7
+
+# After running this, open http://localhost:3000/files in the browser to see:
+#   - the uploaded SVG banner rendered inline
+#   - two download cards for the PDF + CSV with icon, size, and MIME type
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/content/files"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Files demo
+
+      Everything below is powered by `demo/*` files in the project's `files/`
+      folder, wired through `demo.files.*` data keys.
+
+      ## Inline image
+
+      <Card title="Banner">
+        <Image source="demo.files.banner" />
+      </Card>
+
+      ## Downloads
+
+      <Deck min={380}>
+        <Card title="PDF report">
+          <File source="demo.files.report" />
+        </Card>
+        <Card title="CSV export">
+          <File source="demo.files.export" />
+        </Card>
+      </Deck>
+
+      ## Direct URL (no data-key indirection)
+
+      <Card title="Hardcoded src=">
+        <Image src="/api/files/demo/banner.svg" width={400} />
+      </Card>
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("compiled", function() { expect(res.body.compiled).to.equal(true); });

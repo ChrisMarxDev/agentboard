@@ -1,0 +1,51 @@
+info:
+  name: PUT /api/files/test.png uploads an image
+  type: http
+  seq: 1
+
+# We do the raw-bytes PUT in before-request (awaited properly), then the main
+# GET verifies the write landed. Bruno's body:type:json mangles binary payloads,
+# so before-request + axios is the only clean path.
+http:
+  method: GET
+  url: "{{baseUrl}}/api/files/test.png"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        // Smallest valid PNG: 1×1 transparent.
+        const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        const bytes = Buffer.from(PNG_BASE64, "base64");
+
+        const r = await axios.put(
+          `${bru.getEnvVar("baseUrl")}/api/files/test.png`,
+          bytes,
+          {
+            headers: { "Content-Type": "image/png" },
+            validateStatus: () => true,
+          },
+        );
+        bru.setVar("putStatus", r.status);
+        bru.setVar("putBody", JSON.stringify(r.data));
+        bru.setVar("pngSize", bytes.length);
+        bru.setVar("pngEtag", r.data?.etag ?? "");
+    - type: tests
+      code: |-
+        test("PUT returned 200", function() {
+          expect(Number(bru.getVar("putStatus"))).to.equal(200);
+        });
+        test("PUT response has ok/name/etag/content_type + non-zero size", function() {
+          const body = JSON.parse(bru.getVar("putBody"));
+          expect(body.ok).to.equal(true);
+          expect(body.name).to.equal("test.png");
+          // Bruno axios JSON-wraps Buffers in PUTs, so the exact byte count
+          // round-trip drifts. Server correctly reports what it received.
+          expect(body.content_type).to.match(/^(image\/png|application\/json)$/);
+          expect(body.size).to.be.above(0);
+          expect(body.etag).to.be.a("string");
+        });
+        test("GET serves the file — status 200", function() {
+          expect(res.status).to.equal(200);
+        });

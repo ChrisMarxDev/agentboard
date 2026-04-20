@@ -25,10 +25,10 @@ func (pm *PageManager) StartWatcher(onChange WatchCallback) error {
 		log.Printf("Warning: could not watch %s: %v", projectDir, err)
 	}
 
-	// Watch pages/ directory
-	pagesDir := pm.project.PagesDir()
-	if err := watcher.Add(pagesDir); err != nil {
-		log.Printf("Warning: could not watch %s: %v", pagesDir, err)
+	// Watch content/ directory
+	contentDir := pm.project.ContentDir()
+	if err := watcher.Add(contentDir); err != nil {
+		log.Printf("Warning: could not watch %s: %v", contentDir, err)
 	}
 
 	go func() {

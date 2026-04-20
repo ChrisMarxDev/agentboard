@@ -1,0 +1,27 @@
+info:
+  name: Unknown tool returns JSON-RPC error
+  type: http
+  seq: 12
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":99,"method":"tools/call","params":{"name":"does_not_exist","arguments":{}}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200 (JSON-RPC errors ride inside the body)", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("body has error object", function() {
+          expect(res.body.error).to.exist;
+          expect(res.body.error.code).to.equal(-32601);
+        });

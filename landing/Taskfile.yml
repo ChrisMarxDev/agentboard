@@ -1,0 +1,54 @@
+version: "3"
+
+# Tasks for the Astro marketing/landing site (landing/).
+#
+# Included from the repo root Taskfile under the 'landing:' namespace.
+# Run any of these with: `task landing:<name>`  (e.g. `task landing:dev`).
+# Running `task` from inside landing/ works too and shows this list by default.
+
+tasks:
+  default:
+    desc: List landing tasks
+    cmds:
+      - task -l
+    silent: true
+
+  install:
+    desc: Install landing page npm dependencies
+    cmds:
+      - npm install
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+
+  dev:
+    desc: Run the Astro dev server (http://localhost:4321)
+    deps: [install]
+    cmds:
+      - npm run dev
+
+  build:
+    desc: Build the landing page to landing/dist/ (static output, deploy to CDN)
+    deps: [install]
+    cmds:
+      - npm run build
+    sources:
+      - src/**/*
+      - public/**/*
+      - astro.config.mjs
+      - package.json
+    generates:
+      - dist/**/*
+
+  preview:
+    desc: Build and preview the production output locally (Astro preview server)
+    deps: [build]
+    cmds:
+      - npm run preview
+
+  clean:
+    desc: Remove landing build artifacts (dist/, .astro/)
+    cmds:
+      - rm -rf dist .astro

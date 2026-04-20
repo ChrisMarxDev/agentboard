@@ -1,0 +1,33 @@
+info:
+  name: tools/call agentboard_set writes a key
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agentboard_set","arguments":{"key":"test.mcp.val","value":123}}}
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+        const r = await axios.get(`${baseUrl}/api/data/test.mcp.val`);
+        bru.setVar("mcpSetValue", r.data.value);
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("result success (no error)", function() {
+          expect(res.body.error).to.be.undefined;
+        });
+        test("value actually written (verified via REST)", function() {
+          expect(Number(bru.getVar("mcpSetValue"))).to.equal(123);
+        });

@@ -54,6 +54,20 @@ AI is the universal adapter — but adapters have overhead, latency, and failure
 
 AgentBoard must remain connector-friendly: stable APIs, documented data shapes, no AI in the critical path of data flow. The AI sits *on top* of the rails, not inside them.
 
+## 8. Schemas document, don't enforce
+
+Data shapes live in `meta.props`, in component source, in `/api/data/schema` — as **documentation for the author** (Claude), not as runtime validation gates. Components are liberal in what they accept (`Chart` already takes array-of-objects OR `{labels, values}` OR `{name, value}` pairs); Claude is conservative in what it sends because it has read the docs.
+
+This is Postel's Law, inverted: the "conservative send" is the AI's job, not the server's. Don't sprinkle `ajv`, Zod, or hand-rolled validators into handlers to reject non-conforming content. If Claude produces the wrong shape, the fix is better docs (or a clearer `meta`), not a 400.
+
+**Carve-out — keep strict for trust boundaries and resource limits:**
+- Filename and key validation (path traversal, reserved prefixes, length caps)
+- Body size caps
+- Auth tokens, reserved keys (`_system.*`), authorization checks
+- JSON well-formedness (can't parse it → 400)
+
+These aren't format enforcement; they're safety. Keep rejecting malformed paths, oversized uploads, and missing credentials. The rule applies to *content format*, not *safety invariants*.
+
 ---
 
 ## How to use this file

@@ -1,0 +1,6 @@
+type: environment
+name: Hosted
+variables:
+  - name: baseUrl
+    value: "{{process.env.AGENTBOARD_URL}}"
+    secret: false

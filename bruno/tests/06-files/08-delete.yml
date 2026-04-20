@@ -1,0 +1,48 @@
+info:
+  name: DELETE removes file, cleanup nested + oversized paths
+  type: http
+  seq: 8
+
+# Do all the mutation + verification in before-request (awaited). The main
+# request is a harmless health check so we still have `res` for one sync test.
+http:
+  method: GET
+  url: "{{baseUrl}}/api/health"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+
+        try {
+          const r = await axios.delete(`${baseUrl}/api/files/test.png`, { validateStatus: () => true });
+          bru.setVar("deleteStatus", r.status);
+        } catch (e) {
+          bru.setVar("deleteStatus", e.response?.status ?? 0);
+          bru.setVar("deleteErr", e.message);
+        }
+
+        try {
+          const r = await axios.get(`${baseUrl}/api/files/test.png`, { validateStatus: () => true });
+          bru.setVar("afterDeleteStatus", r.status);
+        } catch (e) {
+          bru.setVar("afterDeleteStatus", e.response?.status ?? 0);
+          bru.setVar("afterDeleteErr", e.message);
+        }
+
+        // Best-effort cleanup.
+        try { await axios.delete(`${baseUrl}/api/files/exports/report.csv`, { validateStatus: () => true }); } catch {}
+        try { await axios.delete(`${baseUrl}/api/files/huge.bin`, { validateStatus: () => true }); } catch {}
+    - type: tests
+      code: |-
+        test("health reachable", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("DELETE returned 200", function() {
+          expect(Number(bru.getVar("deleteStatus"))).to.equal(200);
+        });
+        test("GET after delete → 404", function() {
+          expect(Number(bru.getVar("afterDeleteStatus"))).to.equal(404);
+        });

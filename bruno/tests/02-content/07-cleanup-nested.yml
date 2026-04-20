@@ -1,0 +1,14 @@
+info:
+  name: Cleanup the nested page
+  type: http
+  seq: 7
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/content/ops/deploys"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("delete status 200", function() { expect(res.status).to.equal(200); });

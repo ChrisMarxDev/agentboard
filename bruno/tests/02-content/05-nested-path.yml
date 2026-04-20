@@ -1,0 +1,34 @@
+info:
+  name: Nested content path works
+  type: http
+  seq: 5
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/content/ops/deploys"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Deploys
+
+      Nested page body.
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+        const r = await axios.get(`${baseUrl}/api/content/ops/deploys`, {
+          headers: { Accept: 'text/markdown' },
+        });
+        bru.setVar("nestedSource", String(r.data));
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("nested page reads back", function() {
+          expect(bru.getVar("nestedSource")).to.include("# Deploys");
+        });

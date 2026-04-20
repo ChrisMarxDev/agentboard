@@ -1,0 +1,26 @@
+info:
+  name: PUT /api/content/test-page creates a page
+  type: http
+  seq: 2
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/content/test-page"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Test Page
+
+      Hello from the test suite.
+
+      <Metric source="welcome.users" label="Users" />
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("compiled flag true", function() { expect(res.body.compiled).to.equal(true); });

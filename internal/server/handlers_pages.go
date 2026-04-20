@@ -12,7 +12,7 @@ func (s *Server) handleListPages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
-	pagePath := strings.TrimPrefix(r.URL.Path, "/api/pages/")
+	pagePath := strings.TrimPrefix(r.URL.Path, "/api/content/")
 	if pagePath == "" {
 		pagePath = "index"
 	}
@@ -37,7 +37,7 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
-	pagePath := strings.TrimPrefix(r.URL.Path, "/api/pages/")
+	pagePath := strings.TrimPrefix(r.URL.Path, "/api/content/")
 	if pagePath == "" {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "page path required")
 		return
@@ -67,7 +67,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
-	pagePath := strings.TrimPrefix(r.URL.Path, "/api/pages/")
+	pagePath := strings.TrimPrefix(r.URL.Path, "/api/content/")
 
 	if pagePath == "index" || pagePath == "index.md" {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "cannot delete index page")

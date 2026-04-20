@@ -1,0 +1,37 @@
+info:
+  name: MCP tools/call agentboard_write_page
+  type: http
+  seq: 11
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+          "name": "agentboard_write_page",
+          "arguments": {
+            "path": "mcp-written",
+            "source": "# Written via MCP\n\nThis page was created from a Bruno test."
+          }
+        }
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("no JSON-RPC error", function() {
+          expect(res.body.error).to.be.undefined;
+        });

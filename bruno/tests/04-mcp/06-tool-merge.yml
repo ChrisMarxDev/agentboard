@@ -1,0 +1,35 @@
+info:
+  name: tools/call agentboard_merge
+  type: http
+  seq: 6
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"agentboard_set","arguments":{"key":"test.mcp.obj","value":{"a":1}}}}
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+        // Now merge into it
+        await axios.post(`${baseUrl}/mcp`, {
+          jsonrpc: "2.0", id: 7, method: "tools/call",
+          params: { name: "agentboard_merge", arguments: { key: "test.mcp.obj", value: { b: 2 } } },
+        });
+        const r = await axios.get(`${baseUrl}/api/data/test.mcp.obj`);
+        bru.setVar("mergedKeys", Object.keys(r.data.value).sort().join(","));
+    - type: tests
+      code: |-
+        test("set step ok", function() { expect(res.status).to.equal(200); });
+        test("merge preserved a and added b", function() {
+          expect(bru.getVar("mergedKeys")).to.equal("a,b");
+        });

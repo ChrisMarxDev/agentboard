@@ -1,0 +1,19 @@
+info:
+  name: DELETE /api/content/index is blocked (400)
+  type: http
+  seq: 4
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/content/index"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 400", function() {
+          expect(res.status).to.equal(400);
+        });
+        test("error code is INVALID_KEY", function() {
+          expect(res.body.code).to.equal("INVALID_KEY");
+        });

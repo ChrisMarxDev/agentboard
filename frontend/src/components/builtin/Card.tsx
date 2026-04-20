@@ -18,7 +18,7 @@ export function Card({ children, title, span = 1 }: CardProps) {
   }
 
   return (
-    <div style={style}>
+    <div className="ab-card" style={style}>
       {title && (
         <div
           className="text-xs font-semibold uppercase tracking-wide mb-2"

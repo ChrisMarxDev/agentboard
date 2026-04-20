@@ -1,0 +1,26 @@
+info:
+  name: GET /api/files/test.png serves the bytes
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/files/test.png"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("content-type is image/png", function() {
+          expect((res.headers['content-type'] || '').toLowerCase()).to.include("image/png");
+        });
+        test("x-content-type-options nosniff", function() {
+          expect((res.headers['x-content-type-options'] || '').toLowerCase()).to.equal("nosniff");
+        });
+        test("etag is set and quoted", function() {
+          expect(res.headers['etag']).to.match(/^".+"$/);
+        });
+        test("content-disposition is inline for image", function() {
+          expect((res.headers['content-disposition'] || '').toLowerCase()).to.include("inline");
+        });

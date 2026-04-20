@@ -1,0 +1,33 @@
+info:
+  name: PUT with invalid JSON body returns 400
+  type: http
+  seq: 13
+
+# Bruno's body: type:text serializer wraps strings as JSON when Content-Type is
+# application/json, masking our 400 path. Use a no-op main request and make the
+# real invalid-JSON call via axios so we exercise the validation code path.
+http:
+  method: GET
+  url: "{{baseUrl}}/api/health"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("health reachable (preamble)", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("PUT invalid JSON returns 400 with INVALID_VALUE", async function() {
+          const r = await axios.put(
+            `${bru.getEnvVar("baseUrl")}/api/data/test.bad`,
+            'this is not json at all',
+            {
+              headers: { 'Content-Type': 'application/json' },
+              transformRequest: [(d) => d],
+              validateStatus: () => true,
+            },
+          );
+          expect(r.status).to.equal(400);
+          expect(r.data.code).to.equal("INVALID_VALUE");
+        });

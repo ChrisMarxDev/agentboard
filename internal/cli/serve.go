@@ -28,6 +28,7 @@ var serveCmd = &cobra.Command{
 func init() {
 	serveCmd.Flags().BoolVar(&noOpen, "no-open", false, "Don't open browser on startup")
 	serveCmd.Flags().BoolVar(&allowComponentUpload, "allow-component-upload", false, "Enable PUT/DELETE /api/components/:name and MCP write/delete component tools. UNSAFE: components run as arbitrary JS in every visitor's browser.")
+	serveCmd.Flags().StringVar(&authToken, "auth-token", "", "Shared token required for every request (except /api/health). Accepts Bearer, Basic Auth, or ?token= query. Falls back to AGENTBOARD_AUTH_TOKEN env var.")
 }
 
 func resolveProjectPath() string {
@@ -115,6 +116,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Flag overrides config (off by default in both).
 	uploadEnabled := proj.Config.AllowComponentUpload || allowComponentUpload
 
+	// Flag wins over env var; both can be empty (auth disabled).
+	token := authToken
+	if token == "" {
+		token = os.Getenv("AGENTBOARD_AUTH_TOKEN")
+	}
+
 	// Create server
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
@@ -124,10 +131,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 		DevMode:              devMode,
 		DevProxy:             "http://localhost:5173",
 		AllowComponentUpload: uploadEnabled,
+		MaxFileSizeMB:        proj.Config.MaxFileSizeMB,
+		AuthToken:            token,
 	})
 
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")
+	}
+	if token == "" {
+		log.Printf("WARNING: no auth token configured. Server is open to anyone who can reach it — only safe for loopback. Set AGENTBOARD_AUTH_TOKEN to gate access.")
+	} else {
+		log.Printf("Auth token enabled. All routes (except /api/health) require a matching Bearer/Basic/token-query credential.")
 	}
 
 	// Start page watcher
@@ -152,6 +166,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		})
 	}); err != nil {
 		log.Printf("Warning: could not start component watcher: %v", err)
+	}
+
+	// Start files watcher
+	if err := srv.Files.StartWatcher(func(name string, deleted bool) {
+		log.Printf("File %s: %s", map[bool]string{true: "deleted", false: "updated"}[deleted], name)
+		eventData, _ := json.Marshal(map[string]any{"name": name, "deleted": deleted})
+		srv.Broadcaster.Broadcast(server.SSEEvent{
+			Type: "file-updated",
+			Data: eventData,
+		})
+	}); err != nil {
+		log.Printf("Warning: could not start files watcher: %v", err)
 	}
 
 	// Print startup message

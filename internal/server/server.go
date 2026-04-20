@@ -8,6 +8,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/data"
+	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -22,6 +23,7 @@ type Server struct {
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
 	Components           *components.Manager
+	Files                *files.Manager
 	MCP                  *mcp.Server
 	Router               chi.Router
 	SkillFile            string
@@ -37,6 +39,8 @@ type ServerConfig struct {
 	DevMode              bool
 	DevProxy             string // Vite dev server URL for dev mode
 	AllowComponentUpload bool
+	MaxFileSizeMB        int
+	AuthToken            string // when non-empty, every route (except /api/health) requires a matching token
 }
 
 // New creates a new AgentBoard server.
@@ -58,11 +62,13 @@ func New(cfg ServerConfig) *Server {
 
 	pageManager := mdx.NewPageManager(cfg.Project)
 	compManager := components.NewManager(cfg.Project)
+	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
 
 	mcpServer := &mcp.Server{
 		Store:                cfg.Store,
 		Pages:                pageManager,
 		Components:           compManager,
+		Files:                fileManager,
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
 
@@ -72,6 +78,7 @@ func New(cfg ServerConfig) *Server {
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
 		Components:           compManager,
+		Files:                fileManager,
 		MCP:                  mcpServer,
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
@@ -87,6 +94,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(authMiddleware(cfg.AuthToken))
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
@@ -109,11 +117,11 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 			r.Delete("/{id}", s.handleDeleteById)
 		})
 
-		// Page endpoints
-		r.Get("/pages", s.handleListPages)
-		r.Get("/pages/*", s.handleGetPage)
-		r.Put("/pages/*", s.handleWritePage)
-		r.Delete("/pages/*", s.handleDeletePage)
+		// Content endpoints (MDX dashboards + knowledge docs)
+		r.Get("/content", s.handleListPages)
+		r.Get("/content/*", s.handleGetPage)
+		r.Put("/content/*", s.handleWritePage)
+		r.Delete("/content/*", s.handleDeletePage)
 
 		// Component endpoints
 		r.Get("/components", s.handleListComponents)
@@ -121,6 +129,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		r.Get("/components/{name}", s.handleGetComponent)
 		r.Put("/components/{name}", s.handleWriteComponent)
 		r.Delete("/components/{name}", s.handleDeleteComponent)
+
+		// File endpoints (/api/files/*  supports nested paths like exports/q1.csv)
+		r.Get("/files", s.handleListFiles)
+		r.Get("/files/*", s.handleGetFile)
+		r.Put("/files/*", s.handleWriteFile)
+		r.Delete("/files/*", s.handleDeleteFile)
 
 		// SSE
 		r.Get("/events", s.Broadcaster.ServeHTTP)

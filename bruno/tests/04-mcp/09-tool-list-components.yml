@@ -1,0 +1,27 @@
+info:
+  name: tools/call agentboard_list_components returns all builtins
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"agentboard_list_components","arguments":{}}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("content contains Metric and Mermaid", function() {
+          const text = res.body.result.content[0].text;
+          expect(text).to.include("Metric");
+          expect(text).to.include("Mermaid");
+          expect(text).to.include("Deck");
+        });

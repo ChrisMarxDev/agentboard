@@ -3,6 +3,8 @@
 Single-binary dashboard server for agent-driven workflows. Agents write data via REST; humans read live dashboards in the browser.
 
 > **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the product invariants, the stable API/MCP/component contracts, what's in vs out of Phase 1 scope, and the pre-flight checklist for risky changes. Full design is in `spec.md`.
+>
+> **Before widening the trust boundary** (binding to non-loopback, adding hosted mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
 
 ## Task runner
 
@@ -103,7 +105,16 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 - `internal/mdx/` — Page management + file watcher
 - `internal/components/` — Component catalog + file watcher
 - `frontend/src/` — React app, hooks (useData, SSE), 9 built-in components
+- `landing/` — Astro + Tailwind 4 marketing site (separate CDN deploy, **not** embedded in the Go binary)
 - `scripts/` — integration test script
+
+## Deploying (Fly.io + GitHub Actions)
+
+Full deploy guide, cost breakdown, and open decisions live in [`HOSTING.md`](./HOSTING.md). The short version:
+
+- `Dockerfile` + `fly.toml` + `.github/workflows/deploy.yml` ship with the repo; push to `main` redeploys to Fly.
+- State is **ephemeral** today (`AGENTBOARD_PATH=/tmp/agentboard` on a sleeping machine) — data wipes on auto-stop/restart. `HOSTING.md` covers the persistent-volume fix (~$0.15/mo) when you want state to survive.
+- Auth: `AGENTBOARD_AUTH_TOKEN` secret gates every route except `GET /api/health`. Accepts `Authorization: Bearer <token>`, HTTP Basic (password=token), or `?token=<token>`. Unset → server is open (local-only assumption). See `seams_to_watch.md` §"Single-token auth gate".
 
 ## Quick API test cheatsheet
 

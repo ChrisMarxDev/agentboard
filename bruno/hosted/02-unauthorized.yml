@@ -1,0 +1,21 @@
+info:
+  name: GET /api/data without token returns 401
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/data"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 401", function() {
+          expect(res.status).to.equal(401);
+        });
+        test("WWW-Authenticate header present", function() {
+          const h = res.headers["www-authenticate"] || res.headers["WWW-Authenticate"];
+          expect(h).to.be.a("string");
+          expect(h.toLowerCase()).to.contain("basic");
+        });

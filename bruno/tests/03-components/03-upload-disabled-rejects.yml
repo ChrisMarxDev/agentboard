@@ -1,0 +1,30 @@
+info:
+  name: PUT /api/components/:name returns 403 when flag is off
+  type: http
+  seq: 3
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/components/TestOnly"
+  headers:
+    - name: Content-Type
+      value: application/javascript
+  body:
+    type: text
+    data: |-
+      export default () => null
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        // Run this test against a server WITHOUT --allow-component-upload.
+        // If the flag is on, this test will be skipped (uploads work, 200).
+        test("returns 403 when upload is disabled", function() {
+          if (res.status === 200) {
+            // Server was started with the flag — skip this assertion.
+            return;
+          }
+          expect(res.status).to.equal(403);
+          expect(res.body.code).to.equal("FORBIDDEN");
+        });

@@ -1,0 +1,26 @@
+info:
+  name: tools/call agentboard_delete
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"agentboard_delete","arguments":{"key":"test.mcp.val"}}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("delete ok", function() { expect(res.status).to.equal(200); });
+        test("key is gone (404)", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/data/test.mcp.val`, { validateStatus: () => true });
+          expect(r.status).to.equal(404);
+        });

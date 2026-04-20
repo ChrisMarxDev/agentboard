@@ -1,0 +1,38 @@
+info:
+  name: tools/call agentboard_write_page then read_page
+  type: http
+  seq: 11
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"agentboard_write_page","arguments":{"path":"test-mcp-page","source":"# From MCP\n\nBody."}}}
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+        const r = await axios.post(`${baseUrl}/mcp`, {
+          jsonrpc: "2.0", id: 14, method: "tools/call",
+          params: { name: "agentboard_read_page", arguments: { path: "test-mcp-page" } },
+        });
+        bru.setVar("readBack", r.data.result.content[0].text);
+        // Cleanup
+        await axios.post(`${baseUrl}/mcp`, {
+          jsonrpc: "2.0", id: 15, method: "tools/call",
+          params: { name: "agentboard_delete_page", arguments: { path: "test-mcp-page" } },
+        });
+    - type: tests
+      code: |-
+        test("write status 200", function() { expect(res.status).to.equal(200); });
+        test("read_page returns the source we wrote", function() {
+          expect(bru.getVar("readBack")).to.include("# From MCP");
+        });

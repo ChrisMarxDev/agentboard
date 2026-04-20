@@ -15,6 +15,7 @@ var (
 	serverURL            string
 	devMode              bool
 	allowComponentUpload bool
+	authToken            string
 )
 
 var rootCmd = &cobra.Command{

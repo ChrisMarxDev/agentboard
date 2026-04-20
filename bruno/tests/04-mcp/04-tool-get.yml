@@ -1,0 +1,25 @@
+info:
+  name: tools/call agentboard_get reads a key
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"agentboard_get","arguments":{"key":"test.mcp.val"}}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("content contains 123", function() {
+          const text = res.body.result.content[0].text;
+          expect(text).to.include("123");
+        });

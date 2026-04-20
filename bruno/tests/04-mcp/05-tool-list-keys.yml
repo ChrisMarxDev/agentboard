@@ -1,0 +1,33 @@
+info:
+  name: tools/call agentboard_list_keys
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"agentboard_list_keys","arguments":{}}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("content is parseable JSON", function() {
+          const text = res.body.result.content[0].text;
+          const parsed = JSON.parse(text);
+          expect(parsed).to.be.an("array");
+        });
+        test("each entry has key + type", function() {
+          const parsed = JSON.parse(res.body.result.content[0].text);
+          for (const k of parsed) {
+            expect(k).to.have.property("key");
+            expect(k).to.have.property("type");
+          }
+        });

@@ -1,0 +1,14 @@
+info:
+  name: DELETE /api/content/index is forbidden
+  type: http
+  seq: 8
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/content/index"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 400", function() { expect(res.status).to.equal(400); });

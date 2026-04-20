@@ -125,3 +125,8 @@ body {
 /* Cards inside .card-body shouldn't add their own block margins */
 .card-body > *:first-child { margin-top: 0; }
 .card-body > *:last-child { margin-bottom: 0; }
+
+/* Cards always have vertical margin so adjacent siblings breathe, regardless of
+   container. Inside a Deck/Stack this compounds slightly with `gap`, which is
+   the intended tradeoff — a tiny bit of extra spacing beats cards touching. */
+.ab-card { margin: 1rem 0; }

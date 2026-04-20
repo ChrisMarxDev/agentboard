@@ -3,11 +3,18 @@ import { useDataContext } from './DataContext'
 
 export function useData(source: string) {
   const context = useDataContext()
-  const [data, setData] = useState<unknown>(context.get(source))
-  const [loading, setLoading] = useState(data === undefined)
+  const hasSource = Boolean(source)
+  const [data, setData] = useState<unknown>(hasSource ? context.get(source) : undefined)
+  const [loading, setLoading] = useState(hasSource && data === undefined)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
+    if (!hasSource) {
+      setData(undefined)
+      setLoading(false)
+      return
+    }
+
     // Get current value
     const current = context.get(source)
     if (current !== undefined) {
@@ -27,7 +34,7 @@ export function useData(source: string) {
     }
 
     return unsubscribe
-  }, [source, context])
+  }, [source, context, hasSource])
 
   return { data, loading, error }
 }

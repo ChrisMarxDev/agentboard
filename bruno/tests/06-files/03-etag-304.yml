@@ -1,0 +1,52 @@
+info:
+  name: If-None-Match returns 304
+  type: http
+  seq: 3
+
+# before-request probes with both a matching and a mismatching ETag so the
+# sync tests below can assert without async plumbing.
+http:
+  method: GET
+  url: "{{baseUrl}}/api/health"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        const etag = bru.getVar("pngEtag");
+        const baseUrl = bru.getEnvVar("baseUrl");
+        bru.setVar("haveEtag", etag ? "yes" : "no");
+
+        // axios throws on 304 regardless of validateStatus in this harness —
+        // wrap and read the thrown response.
+        try {
+          const match = await axios.get(`${baseUrl}/api/files/test.png`, {
+            headers: { "If-None-Match": etag },
+            validateStatus: () => true,
+          });
+          bru.setVar("matchStatus", match.status);
+        } catch (e) {
+          bru.setVar("matchStatus", e.response?.status ?? 0);
+        }
+
+        try {
+          const mismatch = await axios.get(`${baseUrl}/api/files/test.png`, {
+            headers: { "If-None-Match": '"deadbeef"' },
+            validateStatus: () => true,
+          });
+          bru.setVar("mismatchStatus", mismatch.status);
+        } catch (e) {
+          bru.setVar("mismatchStatus", e.response?.status ?? 0);
+        }
+    - type: tests
+      code: |-
+        test("have an etag from the earlier upload", function() {
+          expect(bru.getVar("haveEtag")).to.equal("yes");
+        });
+        test("matching If-None-Match → 304", function() {
+          expect(Number(bru.getVar("matchStatus"))).to.equal(304);
+        });
+        test("mismatching If-None-Match → 200", function() {
+          expect(Number(bru.getVar("mismatchStatus"))).to.equal(200);
+        });

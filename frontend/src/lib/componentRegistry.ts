@@ -10,6 +10,14 @@ import { List } from '../components/builtin/List'
 import { Kanban } from '../components/builtin/Kanban'
 import { Deck } from '../components/builtin/Deck'
 import { Card } from '../components/builtin/Card'
+import { Stack } from '../components/builtin/Stack'
+import { Markdown } from '../components/builtin/Markdown'
+import { Badge } from '../components/builtin/Badge'
+import { Counter } from '../components/builtin/Counter'
+import { Code } from '../components/builtin/Code'
+import { Mermaid } from '../components/builtin/Mermaid'
+import { Image } from '../components/builtin/Image'
+import { File as FileComponent } from '../components/builtin/File'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyComponent = ComponentType<any>
@@ -28,6 +36,14 @@ registry.set('List', List)
 registry.set('Kanban', Kanban)
 registry.set('Deck', Deck)
 registry.set('Card', Card)
+registry.set('Stack', Stack)
+registry.set('Markdown', Markdown)
+registry.set('Badge', Badge)
+registry.set('Counter', Counter)
+registry.set('Code', Code)
+registry.set('Mermaid', Mermaid)
+registry.set('Image', Image)
+registry.set('File', FileComponent)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)

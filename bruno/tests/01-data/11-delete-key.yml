@@ -1,0 +1,19 @@
+info:
+  name: DELETE removes entire key
+  type: http
+  seq: 11
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/data/test.scalar"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("delete returns 200", function() { expect(res.status).to.equal(200); });
+        test("get after delete is 404", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/data/test.scalar`, { validateStatus: () => true });
+          expect(r.status).to.equal(404);
+        });

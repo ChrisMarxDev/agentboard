@@ -8,6 +8,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/data"
+	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
@@ -16,6 +17,7 @@ type Server struct {
 	Store                data.DataStore
 	Pages                *mdx.PageManager
 	Components           *components.Manager
+	Files                *files.Manager
 	AllowComponentUpload bool
 }
 

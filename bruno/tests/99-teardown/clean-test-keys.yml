@@ -1,0 +1,24 @@
+info:
+  name: Clean up all test.* keys
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/data"
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        const baseUrl = bru.getEnvVar("baseUrl");
+        const keys = Object.keys(res.body).filter(k => k.startsWith('test.'));
+        for (const k of keys) {
+          try {
+            await fetch(`${baseUrl}/api/data/${encodeURIComponent(k)}`, { method: 'DELETE' });
+          } catch (e) {}
+        }
+        bru.setVar("cleaned", keys.length);
+    - type: tests
+      code: |-
+        test("teardown reachable", function() { expect(res.status).to.equal(200); });

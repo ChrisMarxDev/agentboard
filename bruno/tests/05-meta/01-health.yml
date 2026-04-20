@@ -1,0 +1,18 @@
+info:
+  name: GET /api/health
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/health"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("ok true", function() { expect(res.body.ok).to.equal(true); });
+        test("version is a string", function() {
+          expect(res.body.version).to.be.a("string");
+        });

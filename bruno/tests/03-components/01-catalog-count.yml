@@ -1,0 +1,29 @@
+info:
+  name: Component catalog has all 19 built-ins
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/components"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const EXPECTED = [
+          "Badge", "Card", "Chart", "Code", "Counter", "Deck", "File", "Image",
+          "Kanban", "List", "Log", "Markdown", "Mermaid", "Metric", "Progress",
+          "Stack", "Status", "Table", "TimeSeries",
+        ];
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("returns array", function() { expect(res.body).to.be.an("array"); });
+        test("every builtin present", function() {
+          const names = res.body.filter(c => c.type === "builtin").map(c => c.name).sort();
+          for (const name of EXPECTED) {
+            expect(names, `missing builtin: ${name}`).to.include(name);
+          }
+        });
+        test("catalog count is at least 19", function() {
+          expect(res.body.length).to.be.at.least(19);
+        });

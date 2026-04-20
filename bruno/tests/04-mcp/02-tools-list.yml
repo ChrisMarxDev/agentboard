@@ -1,0 +1,43 @@
+info:
+  name: tools/list returns all 16 core tools
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const CORE_TOOLS = [
+          "agentboard_set", "agentboard_merge", "agentboard_append",
+          "agentboard_delete", "agentboard_get", "agentboard_list_keys",
+          "agentboard_list_pages", "agentboard_read_page", "agentboard_write_page",
+          "agentboard_delete_page", "agentboard_list_components",
+          "agentboard_read_component", "agentboard_get_data_schema",
+          "agentboard_write_file", "agentboard_list_files", "agentboard_delete_file",
+        ];
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("tools array present", function() {
+          expect(res.body.result.tools).to.be.an("array");
+        });
+        test("all 16 core tools advertised", function() {
+          const names = res.body.result.tools.map(t => t.name);
+          for (const t of CORE_TOOLS) expect(names).to.include(t);
+        });
+        test("every tool has name + description + inputSchema", function() {
+          for (const tool of res.body.result.tools) {
+            expect(tool.name).to.be.a("string");
+            expect(tool.description).to.be.a("string");
+            expect(tool.inputSchema).to.exist;
+          }
+        });

@@ -1,0 +1,110 @@
+version: "3"
+
+# Clean-room playground for AgentBoard. Pretends the parent repo is "the internet":
+# `task install` is the local stand-in for the future `curl | bash` installer at agentboard.dev.
+
+vars:
+  BINARY: ./bin/agentboard
+  PORT: "3000"
+  URL: http://localhost:{{.PORT}}
+  PROJECT_DIR: ./agentboard-data
+  LOG: ./agentboard.log
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task -l
+    silent: true
+
+  install:
+    desc: Build AgentBoard from the parent repo and drop the binary in ./bin/
+    cmds:
+      - mkdir -p ./bin
+      - task -d .. build
+      - cp ../agentboard {{.BINARY}}
+      - 'echo ""'
+      - 'echo "Installed {{.BINARY}}. Next:"'
+      - 'echo "  task start:bg   (run the server)"'
+      - 'echo "  task mcp:add    (register MCP with Claude Code)"'
+    generates:
+      - "{{.BINARY}}"
+
+  start:
+    desc: Run AgentBoard in the foreground
+    deps: [_check:installed]
+    cmds:
+      - "{{.BINARY}} --project {{.PROJECT_DIR}} --port {{.PORT}} --no-open"
+
+  start:bg:
+    desc: Run AgentBoard in the background (logs to ./agentboard.log)
+    deps: [_check:installed]
+    cmds:
+      - nohup {{.BINARY}} --project {{.PROJECT_DIR}} --port {{.PORT}} --no-open > {{.LOG}} 2>&1 &
+      - sleep 1
+      - echo "AgentBoard started. Logs -> {{.LOG}}  Dashboard -> {{.URL}}"
+
+  stop:
+    desc: Stop any AgentBoard started from this folder
+    cmds:
+      - pkill -f '{{.BINARY}}' || echo "Nothing to stop."
+
+  mcp:add:
+    desc: Register this AgentBoard instance with Claude Code over MCP
+    cmds:
+      - claude mcp add agentboard {{.URL}}/mcp
+      - echo "Registered. Restart your Claude session to pick up the new MCP server."
+
+  mcp:remove:
+    desc: Remove the agentboard MCP entry from Claude Code
+    cmds:
+      - claude mcp remove agentboard || true
+
+  open:
+    desc: Open the dashboard in your browser
+    cmds:
+      - open {{.URL}}
+
+  reset:
+    desc: Stop the server and wipe all local state (binary, data, logs)
+    cmds:
+      - task: stop
+      - rm -rf {{.PROJECT_DIR}} ./bin {{.LOG}}
+      - echo "Reset complete. Run `task install` to start over."
+
+  doctor:
+    desc: Sanity-check the playground (binary, port, REST, MCP)
+    cmds:
+      - |
+        if [ -x {{.BINARY}} ]; then
+          echo "OK  binary present at {{.BINARY}}"
+        else
+          echo "FAIL  missing {{.BINARY}} — run: task install"
+          exit 1
+        fi
+      - |
+        if curl -fsS {{.URL}}/api/health > /dev/null; then
+          echo "OK  REST responding at {{.URL}}"
+        else
+          echo "FAIL  REST not responding — run: task start:bg"
+          exit 1
+        fi
+      - |
+        if curl -fsS -X POST {{.URL}}/mcp \
+             -H 'Content-Type: application/json' \
+             -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' > /dev/null; then
+          echo "OK  MCP responding at {{.URL}}/mcp"
+        else
+          echo "FAIL  MCP not responding"
+          exit 1
+        fi
+
+  _check:installed:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        if [ ! -x {{.BINARY}} ]; then
+          echo "Binary missing. Run: task install"
+          exit 1
+        fi

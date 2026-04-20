@@ -1,0 +1,18 @@
+info:
+  name: Delete the CSV (watch the File card swap to a 404 state)
+  type: http
+  seq: 8
+
+# Open /files in the browser first, then fire this. The CSV download card
+# becomes broken (card still renders but the href 404s). SSE broadcasts a
+# `file-updated` event with { name, deleted: true } — any <Image source=...>
+# pointing at a deleted file re-renders to nothing.
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/files/demo/users.csv"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });

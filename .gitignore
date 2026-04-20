@@ -4,6 +4,9 @@
 frontend/dist/
 frontend/node_modules/
 frontend/tsconfig.tsbuildinfo
+landing/dist/
+landing/node_modules/
+landing/.astro/
 *.tsbuildinfo
 
 # Runtime / caches
@@ -24,5 +27,14 @@ frontend/tsconfig.tsbuildinfo
 # Machine-local Claude Code config and installed skills
 /.claude/
 
+# test_claude playground — runtime artifacts (scaffolding is tracked)
+test_claude/bin/
+test_claude/agentboard-data/
+test_claude/.agentboard/
+
 # Logs
 *.log
+.gstack/
+
+# Bruno dotenv — holds the hosted-instance auth token (see bruno/.env.example)
+bruno/.env

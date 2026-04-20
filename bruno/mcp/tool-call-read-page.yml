@@ -1,0 +1,34 @@
+info:
+  name: MCP tools/call agentboard_read_page
+  type: http
+  seq: 10
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+          "name": "agentboard_read_page",
+          "arguments": { "path": "index" }
+        }
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("no JSON-RPC error", function() {
+          expect(res.body.error).to.be.undefined;
+        });

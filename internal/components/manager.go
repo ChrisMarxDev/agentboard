@@ -212,6 +212,99 @@ func (m *Manager) registerBuiltins() {
 				},
 			},
 		},
+		{
+			Name: "Stack", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Stack",
+				Description: "A vertical flex container. Children flow top-to-bottom with configurable gap.",
+				Props: map[string]PropMeta{
+					"gap":   {Type: "number", Description: "Spacing between children in pixels", Default: 16},
+					"align": {Type: "string", Description: "start | center | end | stretch", Default: "stretch"},
+				},
+			},
+		},
+		{
+			Name: "Markdown", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Markdown",
+				Description: "Renders a data key's string value as live markdown. Updates via SSE when the value changes.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Data key. Expects a string, or { text } object.", Required: true},
+				},
+			},
+		},
+		{
+			Name: "Badge", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Badge",
+				Description: "A small inline pill. Useful for versions, environment labels, or inline status.",
+				Props: map[string]PropMeta{
+					"source":  {Type: "string", Description: "Data key. Expects a string, or { text, variant? } object.", Required: true},
+					"variant": {Type: "string", Description: "default | accent | success | warning | error"},
+				},
+			},
+		},
+		{
+			Name: "Counter", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Counter",
+				Description: "Like Metric but flashes green on increase / red on decrease when the value updates.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Data key. Expects a number or { value } object.", Required: true},
+					"label":  {Type: "string", Description: "Optional label rendered below the number"},
+					"format": {Type: "string", Description: "number | currency | percent"},
+				},
+			},
+		},
+		{
+			Name: "Code", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Code",
+				Description: "A syntax-highlighted code block. If the data is a non-string value, it renders as formatted JSON.",
+				Props: map[string]PropMeta{
+					"source":   {Type: "string", Description: "Data key. Expects a string, or { code, language? } object.", Required: true},
+					"language": {Type: "string", Description: "Prism language id (e.g. js, ts, json, bash, sql). Default: text."},
+				},
+			},
+		},
+		{
+			Name: "Mermaid", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Mermaid",
+				Description: "Renders a Mermaid diagram (flowchart, sequence, gantt, class, state, ER, etc.) from a data key. The library loads lazily on first render.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Data key. Expects a Mermaid source string, or { code } object.", Required: true},
+					"theme":  {Type: "string", Description: "default | dark | forest | neutral | base (follows system color scheme by default)"},
+				},
+			},
+		},
+		{
+			Name: "Image", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Image",
+				Description: "Renders an uploaded image inline. Resolves source/src to /api/files/<name> for bare names, passes through absolute URLs.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Data key. Expects a filename string or { file, alt?, width?, height? } object."},
+					"src":    {Type: "string", Description: "Direct URL override (takes precedence over source)."},
+					"alt":    {Type: "string", Description: "Alt text."},
+					"width":  {Type: "number", Description: "Width in pixels."},
+					"height": {Type: "number", Description: "Height in pixels."},
+					"fit":    {Type: "string", Description: "contain | cover | fill | none (default: contain)"},
+				},
+			},
+		},
+		{
+			Name: "File", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "File",
+				Description: "Renders a downloadable file as a card with filename, size, and MIME type. Falls back gracefully for remote URLs.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Data key. Expects a filename string or { file, label? } object."},
+					"src":    {Type: "string", Description: "Direct URL override."},
+					"label":  {Type: "string", Description: "Override the display name on the card."},
+				},
+			},
+		},
 	}
 
 	for _, b := range builtins {

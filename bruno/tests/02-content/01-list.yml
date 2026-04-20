@@ -1,0 +1,19 @@
+info:
+  name: GET /api/content returns an array
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/content"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("returns array", function() { expect(res.body).to.be.an("array"); });
+        test("includes index page", function() {
+          const paths = res.body.map(p => p.path);
+          expect(paths).to.include("/");
+        });

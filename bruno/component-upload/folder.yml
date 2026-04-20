@@ -1,2 +1,6 @@
-type: folder
-name: Component Upload
+info:
+  name: Component Upload
+  type: folder
+  seq: 9
+
+request: {}

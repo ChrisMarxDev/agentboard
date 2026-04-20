@@ -55,6 +55,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
         window.dispatchEvent(new CustomEvent('agentboard:components-updated'))
       })
 
+      es.addEventListener('file-updated', (event) => {
+        try {
+          const detail = JSON.parse(event.data) as { name?: string; deleted?: boolean }
+          window.dispatchEvent(new CustomEvent('agentboard:file-updated', { detail }))
+        } catch {
+          // ignore
+        }
+      })
+
       es.addEventListener('connected', () => {
         retryDelay = 1000
       })

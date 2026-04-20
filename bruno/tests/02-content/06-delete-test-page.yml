@@ -1,0 +1,19 @@
+info:
+  name: DELETE removes test-page
+  type: http
+  seq: 6
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/content/test-page"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("delete status 200", function() { expect(res.status).to.equal(200); });
+        test("page gone (404 after delete)", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/content/test-page`, { validateStatus: () => true });
+          expect(r.status).to.equal(404);
+        });

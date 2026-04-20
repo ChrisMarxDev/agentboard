@@ -17,7 +17,7 @@ export function Deck({ children, min = 280, gap = 16, columns }: DeckProps) {
   }
 
   return (
-    <div className="my-4" style={style}>
+    <div className="my-4 ab-deck" style={style}>
       {children}
     </div>
   )

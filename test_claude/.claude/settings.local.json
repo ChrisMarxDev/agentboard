@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(task:*)",
+      "Bash(task -l)",
+      "Bash(./bin/agentboard:*)",
+      "Bash(curl -fsS http://localhost:3000/*)",
+      "Bash(curl -fsS -X POST http://localhost:3000/*)",
+      "Bash(curl -s http://localhost:3000/*)",
+      "Bash(curl -s -X PUT http://localhost:3000/*)",
+      "Bash(curl -s -X POST http://localhost:3000/*)",
+      "Bash(curl -s -X PATCH http://localhost:3000/*)",
+      "Bash(curl -s -X DELETE http://localhost:3000/*)",
+      "Bash(open http://localhost:3000)",
+      "Bash(open http://localhost:3000/*)",
+      "Bash(pkill -f ./bin/agentboard)",
+      "Bash(claude mcp add agentboard *)",
+      "Bash(claude mcp remove agentboard)",
+      "Bash(claude mcp list)",
+      "mcp__agentboard__agentboard_set",
+      "mcp__agentboard__agentboard_merge",
+      "mcp__agentboard__agentboard_append",
+      "mcp__agentboard__agentboard_delete",
+      "mcp__agentboard__agentboard_get",
+      "mcp__agentboard__agentboard_list_keys",
+      "mcp__agentboard__agentboard_get_data_schema",
+      "mcp__agentboard__agentboard_list_pages",
+      "mcp__agentboard__agentboard_read_page",
+      "mcp__agentboard__agentboard_write_page",
+      "mcp__agentboard__agentboard_delete_page",
+      "mcp__agentboard__agentboard_list_components",
+      "mcp__agentboard__agentboard_read_component"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+bin/
+agentboard-data/
+.agentboard/
+*.log

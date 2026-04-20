@@ -1,0 +1,33 @@
+info:
+  name: PUT /api/data/demo.bruno.hosted
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/data/demo.bruno.hosted"
+  headers:
+    - name: Authorization
+      value: "Bearer {{process.env.AGENTBOARD_AUTH_TOKEN}}"
+      enabled: true
+    - name: Content-Type
+      value: application/json
+      enabled: true
+    - name: X-Agent-Source
+      value: bruno-hosted
+      enabled: true
+  body:
+    type: json
+    data: |-
+      {
+        "message": "hello from bruno",
+        "written_at": "{{$isoTimestamp}}"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });

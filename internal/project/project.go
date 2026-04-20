@@ -1,6 +1,7 @@
 package project
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -42,14 +43,52 @@ func (p *Project) DatabasePath() string {
 	return filepath.Join(p.DataDir(), "data.sqlite")
 }
 
-// PagesDir returns the pages/ directory path.
+// ContentDir returns the content/ directory path — where MDX dashboards and
+// knowledge docs live.
+func (p *Project) ContentDir() string {
+	return filepath.Join(p.Path, "content")
+}
+
+// PagesDir returns the legacy pages/ directory path.
+//
+// Deprecated: Use ContentDir(). Kept for one release cycle so EnsureDirs can
+// detect and migrate projects created before the rename.
 func (p *Project) PagesDir() string {
 	return filepath.Join(p.Path, "pages")
+}
+
+// MigrateLegacyPagesDir renames pages/ → content/ if content/ does not already
+// exist. Safe to call on every startup: returns (false, nil) when there's
+// nothing to do. See spec-knowledge.md §5.
+func (p *Project) MigrateLegacyPagesDir() (bool, error) {
+	contentDir := p.ContentDir()
+	pagesDir := p.PagesDir()
+
+	if _, err := os.Stat(contentDir); err == nil {
+		if _, err := os.Stat(pagesDir); err == nil {
+			log.Printf("agentboard: both pages/ and content/ exist in %s — using content/, ignoring pages/", p.Path)
+		}
+		return false, nil
+	}
+	if _, err := os.Stat(pagesDir); os.IsNotExist(err) {
+		return false, nil
+	}
+	if err := os.Rename(pagesDir, contentDir); err != nil {
+		return false, err
+	}
+	log.Printf("agentboard: migrated %s → %s", pagesDir, contentDir)
+	return true, nil
 }
 
 // ComponentsDir returns the components/ directory path.
 func (p *Project) ComponentsDir() string {
 	return filepath.Join(p.Path, "components")
+}
+
+// FilesDir returns the files/ directory path — where user-uploaded images,
+// PDFs, exports, etc. live. Served via /api/files/*.
+func (p *Project) FilesDir() string {
+	return filepath.Join(p.Path, "files")
 }
 
 // IndexFile returns the path to index.md.
@@ -63,12 +102,17 @@ func (p *Project) BuildDir() string {
 }
 
 // EnsureDirs creates all required directories for the project.
+// Runs the pages/ → content/ migration first so callers never see the old layout.
 func (p *Project) EnsureDirs() error {
+	if _, err := p.MigrateLegacyPagesDir(); err != nil {
+		return err
+	}
 	dirs := []string{
 		p.DataDir(),
 		p.BuildDir(),
-		p.PagesDir(),
+		p.ContentDir(),
 		p.ComponentsDir(),
+		p.FilesDir(),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {

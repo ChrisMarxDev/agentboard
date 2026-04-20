@@ -1,0 +1,156 @@
+info:
+  name: Create /showcase page (uses every built-in)
+  type: http
+  seq: 2
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/content/showcase"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Component Showcase
+
+      Live demo of every built-in. Re-fire `Showcase / 03 Pulse counter` to watch the **Counter** flash.
+
+      ## Numbers
+
+      <Deck>
+        <Card title="Users">
+          <Metric source="showcase.users" />
+        </Card>
+        <Card title="Revenue">
+          <Metric source="showcase.revenue" format="currency" />
+        </Card>
+        <Card title="Completion">
+          <Metric source="showcase.completion" format="percent" />
+        </Card>
+        <Card title="Live counter">
+          <Counter source="showcase.live" label="re-fire pulse to flash" />
+        </Card>
+      </Deck>
+
+      ## Status
+
+      <Deck>
+        <Card title="Dev server">
+          <Status source="showcase.status.running" />
+        </Card>
+        <Card title="CI">
+          <Status source="showcase.status.passing" />
+        </Card>
+        <Card title="Deploy">
+          <Status source="showcase.status.failing" />
+        </Card>
+      </Deck>
+
+      ## Badges
+
+      <Card title="Inline badges (Stack vertical, align=start)">
+        <Stack gap={8} align="start">
+          <Badge source="showcase.badge.version" />
+          <Badge source="showcase.badge.prod" />
+          <Badge source="showcase.badge.staging" />
+          <Badge source="showcase.badge.warn" />
+          <Badge source="showcase.badge.error" />
+        </Stack>
+      </Card>
+
+      ## Progress
+
+      <Deck>
+        <Card title="Setup">
+          <Progress source="showcase.progress.early" />
+        </Card>
+        <Card title="Build">
+          <Progress source="showcase.progress.late" />
+        </Card>
+        <Card title="Deploy">
+          <Progress source="showcase.progress.done" />
+        </Card>
+      </Deck>
+
+      ## Charts
+
+      <Deck min={400}>
+        <Card title="Bar — daily volume">
+          <Chart source="showcase.chart.bar" variant="bar" />
+        </Card>
+        <Card title="Pie — browser share">
+          <Chart source="showcase.chart.pie" variant="pie" />
+        </Card>
+        <Card title="Horizontal bar">
+          <Chart source="showcase.chart.bar" variant="horizontal_bar" />
+        </Card>
+      </Deck>
+
+      <Card title="TimeSeries — 24h metrics (line)" span={2}>
+        <TimeSeries source="showcase.metrics" variant="line" />
+      </Card>
+
+      ## Tabular data
+
+      <Card title="Team">
+        <Table source="showcase.table" />
+      </Card>
+
+      <Deck min={350}>
+        <Card title="List with status dots">
+          <List source="showcase.list" />
+        </Card>
+        <Card title="Event log" span={2}>
+          <Log source="showcase.log" limit={10} />
+        </Card>
+      </Deck>
+
+      ## Kanban
+
+      <Card title="Sprint board">
+        <Kanban source="showcase.tasks" groupBy="status" columns={["todo", "in_progress", "review", "done"]} />
+      </Card>
+
+      ## Rich content
+
+      <Deck min={400}>
+        <Card title="Live Markdown">
+          <Markdown source="showcase.markdown" />
+        </Card>
+        <Card title="Code (syntax highlighted)">
+          <Code source="showcase.code" />
+        </Card>
+      </Deck>
+
+      ## Diagrams
+
+      <Deck min={420}>
+        <Card title="Architecture (flowchart)">
+          <Mermaid source="showcase.mermaid.flow" />
+        </Card>
+        <Card title="Request lifecycle (sequence)">
+          <Mermaid source="showcase.mermaid.sequence" />
+        </Card>
+      </Deck>
+
+      ## Files
+
+      <Deck min={400}>
+        <Card title="Uploaded image">
+          <Image source="showcase.file.hero" />
+        </Card>
+        <Card title="Downloadable attachments">
+          <Stack gap={8}>
+            <File source="showcase.file.report" />
+            <File source="showcase.file.export" />
+          </Stack>
+        </Card>
+      </Deck>
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("compiled", function() { expect(res.body.compiled).to.equal(true); });

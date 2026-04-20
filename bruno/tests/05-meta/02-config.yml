@@ -1,0 +1,21 @@
+info:
+  name: GET /api/config returns merged config
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/config"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("returns object", function() {
+          expect(res.body).to.be.an("object");
+        });
+        test("has title and port", function() {
+          expect(res.body).to.have.property("title");
+          expect(res.body).to.have.property("port");
+        });

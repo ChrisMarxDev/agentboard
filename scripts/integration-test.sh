@@ -96,11 +96,11 @@ assert_status "Invalid JSON" PUT "/api/data/bad" 400 -d 'not json' -H 'Content-T
 # Schema
 assert_status "GET schema" GET "/api/data/schema" 200
 
-# Pages
-assert_status "GET pages list" GET "/api/pages" 200
-assert_status "GET index page" GET "/api/pages/index" 200
-assert_status "Write new page" PUT "/api/pages/test-page" 200 -d '# Test Page' -H 'Content-Type: text/markdown'
-assert_status "Cannot delete index" DELETE "/api/pages/index" 400
+# Content (pages + docs)
+assert_status "GET content list" GET "/api/content" 200
+assert_status "GET index page" GET "/api/content/index" 200
+assert_status "Write new page" PUT "/api/content/test-page" 200 -d '# Test Page' -H 'Content-Type: text/markdown'
+assert_status "Cannot delete index" DELETE "/api/content/index" 400
 
 # Components
 assert_status "GET components" GET "/api/components" 200

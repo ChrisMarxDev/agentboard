@@ -1,30 +1,20 @@
-import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-
-interface PageEntry {
-  path: string
-  title: string
-  order: number
-}
+import { ThemeSwitch } from './ThemeSwitch'
+import Kbd from './Kbd'
+import type { PageEntry } from '../../hooks/usePages'
 
 interface NavProps {
+  pages: PageEntry[]
   onCollapse?: () => void
+  onOpenHelp?: () => void
 }
 
-export default function Nav({ onCollapse }: NavProps) {
-  const [pages, setPages] = useState<PageEntry[]>([])
+export default function Nav({ pages, onCollapse, onOpenHelp }: NavProps) {
   const location = useLocation()
-
-  useEffect(() => {
-    const load = () => fetch('/api/pages').then(r => r.json()).then(setPages).catch(() => {})
-    load()
-    window.addEventListener('agentboard:page-updated', load)
-    return () => window.removeEventListener('agentboard:page-updated', load)
-  }, [])
 
   return (
     <nav
-      className="w-56 shrink-0 border-r p-4 flex flex-col gap-1"
+      className="w-56 shrink-0 border-r p-4 flex flex-col gap-1 h-screen sticky top-0"
       style={{ borderColor: 'var(--border)', background: 'var(--bg-secondary)' }}
     >
       <div className="flex items-center justify-between mb-4">
@@ -36,7 +26,7 @@ export default function Nav({ onCollapse }: NavProps) {
             onClick={onCollapse}
             aria-label="Hide navigation"
             title="Hide navigation"
-            className="w-7 h-7 flex items-center justify-center rounded-md text-sm leading-none"
+            className="h-7 flex items-center gap-1 rounded-md px-1.5 leading-none"
             style={{
               background: 'transparent',
               border: '1px solid transparent',
@@ -52,26 +42,64 @@ export default function Nav({ onCollapse }: NavProps) {
               e.currentTarget.style.borderColor = 'transparent'
             }}
           >
-            ‹
+            <span className="text-sm">‹</span>
+            <Kbd>B</Kbd>
           </button>
         )}
       </div>
-      {pages.map(page => {
-        const isActive = location.pathname === page.path
-        return (
-          <Link
-            key={page.path}
-            to={page.path}
-            className="block px-3 py-2 rounded-md text-sm transition-colors"
+
+      <div
+        className="flex items-center justify-between px-3 pb-2 text-[10px] uppercase tracking-wide"
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        <span>Pages</span>
+        <div className="flex items-center gap-1">
+          <Kbd>J</Kbd>
+          <Kbd>K</Kbd>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
+        {pages.map((page, idx) => {
+          const isActive = location.pathname === page.path
+          const digit = idx < 9 ? String(idx + 1) : null
+          return (
+            <Link
+              key={page.path}
+              to={page.path}
+              className="flex items-center justify-between gap-2 px-3 py-2 rounded-md text-sm transition-colors"
+              style={{
+                background: isActive ? 'var(--accent-light)' : 'transparent',
+                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+              }}
+            >
+              <span className="truncate">{page.title}</span>
+              {digit && <Kbd active={isActive}>{digit}</Kbd>}
+            </Link>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center gap-2 pt-2">
+        <div className="flex-1">
+          <ThemeSwitch />
+        </div>
+        {onOpenHelp && (
+          <button
+            onClick={onOpenHelp}
+            aria-label="Show keyboard shortcuts"
+            title="Keyboard shortcuts"
+            className="h-8 flex items-center justify-center rounded-md px-2"
             style={{
-              background: isActive ? 'var(--accent-light)' : 'transparent',
-              color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+              cursor: 'pointer',
             }}
           >
-            {page.title}
-          </Link>
-        )
-      })}
+            <Kbd>?</Kbd>
+          </button>
+        )}
+      </div>
     </nav>
   )
 }

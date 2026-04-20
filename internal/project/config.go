@@ -26,6 +26,9 @@ type Config struct {
 	// when you trust every caller of localhost:3000 — component source runs
 	// as arbitrary JavaScript in every dashboard visitor's browser.
 	AllowComponentUpload bool `yaml:"allow_component_upload" json:"allow_component_upload"`
+	// MaxFileSizeMB caps per-file uploads to /api/files/:name. Default 50,
+	// hard upper bound 500 (enforced by internal/files). See spec-files.md §5.
+	MaxFileSizeMB int `yaml:"max_file_size_mb" json:"max_file_size_mb"`
 }
 
 // DefaultConfig returns configuration with sensible defaults.
@@ -77,6 +80,9 @@ func LoadConfig(projectPath string) (*Config, error) {
 	}
 	if fileCfg.AllowComponentUpload {
 		cfg.AllowComponentUpload = true
+	}
+	if fileCfg.MaxFileSizeMB > 0 {
+		cfg.MaxFileSizeMB = fileCfg.MaxFileSizeMB
 	}
 
 	return cfg, nil

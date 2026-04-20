@@ -1,0 +1,38 @@
+info:
+  name: Bad filenames are rejected (path traversal, dotfiles)
+  type: http
+  seq: 6
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/health"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+
+        async function tryPut(url, body) {
+          try {
+            const r = await axios.put(url, body, {
+              headers: { "Content-Type": "text/plain" },
+              validateStatus: () => true,
+            });
+            return r.status;
+          } catch (e) {
+            return e.response?.status ?? 0;
+          }
+        }
+
+        bru.setVar("travStatus", await tryPut(`${baseUrl}/api/files/..%2Fetc%2Fpasswd`, "nope"));
+        bru.setVar("dotStatus",  await tryPut(`${baseUrl}/api/files/.env`, "SECRET=x"));
+    - type: tests
+      code: |-
+        test("..%2Fetc%2Fpasswd rejected (400 or 404)", function() {
+          expect([400, 404]).to.include(Number(bru.getVar("travStatus")));
+        });
+        test(".env (dotfile) → 400", function() {
+          expect(Number(bru.getVar("dotStatus"))).to.equal(400);
+        });

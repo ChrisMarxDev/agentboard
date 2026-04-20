@@ -1,0 +1,25 @@
+info:
+  name: Unknown JSON-RPC method returns -32601
+  type: http
+  seq: 13
+
+http:
+  method: POST
+  url: "{{baseUrl}}/mcp"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"jsonrpc":"2.0","id":100,"method":"totally/made/up","params":{}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("error code -32601", function() {
+          expect(res.body.error).to.exist;
+          expect(res.body.error.code).to.equal(-32601);
+        });

@@ -1,0 +1,26 @@
+info:
+  name: Every catalog entry has name / type / meta
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/components"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("every entry has required fields", function() {
+          for (const c of res.body) {
+            expect(c, `${c.name ?? '?'}`).to.have.property("name");
+            expect(c, `${c.name}`).to.have.property("type");
+            expect(c, `${c.name}`).to.have.property("meta");
+            expect(c.type).to.be.oneOf(["builtin", "user"]);
+          }
+        });
+        test("Metric has source prop required", function() {
+          const m = res.body.find(c => c.name === "Metric");
+          expect(m).to.exist;
+          expect(m.meta.props.source.required).to.equal(true);
+        });

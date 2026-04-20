@@ -21,7 +21,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	projPath := filepath.Join(dir, "project")
 	os.MkdirAll(projPath, 0755)
 	os.WriteFile(filepath.Join(projPath, "index.md"), []byte("# Test\n\nHello world"), 0644)
-	os.MkdirAll(filepath.Join(projPath, "pages"), 0755)
+	os.MkdirAll(filepath.Join(projPath, "content"), 0755)
 	os.MkdirAll(filepath.Join(projPath, "components"), 0755)
 	os.MkdirAll(filepath.Join(projPath, ".agentboard"), 0755)
 
@@ -233,7 +233,7 @@ func TestPagesEndpoints(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	// List pages
-	resp, _ := http.Get(ts.URL + "/api/pages")
+	resp, _ := http.Get(ts.URL + "/api/content")
 	var pages []map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&pages)
 	resp.Body.Close()
@@ -243,7 +243,7 @@ func TestPagesEndpoints(t *testing.T) {
 	}
 
 	// Get page source
-	resp, _ = http.Get(ts.URL + "/api/pages/index")
+	resp, _ = http.Get(ts.URL + "/api/content/index")
 	var page map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&page)
 	resp.Body.Close()
@@ -253,7 +253,7 @@ func TestPagesEndpoints(t *testing.T) {
 	}
 
 	// Write a new page
-	req, _ := http.NewRequest("PUT", ts.URL+"/api/pages/test-page",
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/content/test-page",
 		strings.NewReader("# Test Page\n\nHello"))
 	req.Header.Set("Content-Type", "text/markdown")
 	resp, _ = http.DefaultClient.Do(req)
@@ -263,7 +263,7 @@ func TestPagesEndpoints(t *testing.T) {
 	}
 
 	// Cannot delete index
-	req, _ = http.NewRequest("DELETE", ts.URL+"/api/pages/index", nil)
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/content/index", nil)
 	resp, _ = http.DefaultClient.Do(req)
 	resp.Body.Close()
 	if resp.StatusCode != 400 {
@@ -409,4 +409,145 @@ func post(t *testing.T, ts *httptest.Server, path, body string) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+}
+
+func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
+	t.Helper()
+
+	dir := t.TempDir()
+	projPath := filepath.Join(dir, "project")
+	os.MkdirAll(projPath, 0755)
+	os.MkdirAll(filepath.Join(projPath, "content"), 0755)
+	os.MkdirAll(filepath.Join(projPath, "components"), 0755)
+	os.MkdirAll(filepath.Join(projPath, ".agentboard"), 0755)
+
+	proj, err := project.Load(projPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := data.NewSQLiteStore(filepath.Join(dir, "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+
+	srv := New(ServerConfig{
+		Project:   proj,
+		Store:     store,
+		SkillFile: "# Test skill",
+		AuthToken: token,
+	})
+
+	ts := httptest.NewServer(srv.Router)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestAuthMiddleware(t *testing.T) {
+	const token = "s3cret-token"
+	ts := newAuthedTestServer(t, token)
+
+	do := func(t *testing.T, req *http.Request) *http.Response {
+		t.Helper()
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	t.Run("missing credentials return 401 with WWW-Authenticate", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", resp.StatusCode)
+		}
+		if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Basic") {
+			t.Errorf("WWW-Authenticate = %q, want to contain Basic", got)
+		}
+	})
+
+	t.Run("valid Bearer token allowed", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("wrong Bearer token returns 401", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		req.Header.Set("Authorization", "Bearer wrong")
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", resp.StatusCode)
+		}
+	})
+
+	t.Run("valid Basic Auth with password=token allowed", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		req.SetBasicAuth("anyuser", token)
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("query param token allowed", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", ts.URL+"/api/data?token="+token, nil)
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("/api/health exempted from auth", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("OPTIONS preflight passes through without auth", func(t *testing.T) {
+		req, _ := http.NewRequest("OPTIONS", ts.URL+"/api/data", nil)
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("write endpoint gated", func(t *testing.T) {
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/data/foo", strings.NewReader(`"bar"`))
+		req.Header.Set("Content-Type", "application/json")
+		resp := do(t, req)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", resp.StatusCode)
+		}
+	})
+}
+
+func TestAuthDisabledWhenTokenEmpty(t *testing.T) {
+	ts := newAuthedTestServer(t, "")
+
+	resp, err := http.Get(ts.URL + "/api/data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200 (auth should be disabled when token empty)", resp.StatusCode)
+	}
 }

@@ -1,0 +1,38 @@
+info:
+  name: tools/call agentboard_append
+  type: http
+  seq: 7
+
+# Before-request: clean the key, then call MCP append twice. Main request reads
+# the key back so sync tests can inspect the array length.
+http:
+  method: GET
+  url: "{{baseUrl}}/api/data/test.mcp.arr"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        const baseUrl = bru.getEnvVar("baseUrl");
+
+        // Start clean so repeat runs don't pile up items.
+        await axios.delete(`${baseUrl}/api/data/test.mcp.arr`, { validateStatus: () => true });
+
+        for (const n of [1, 2]) {
+          const r = await axios.post(`${baseUrl}/mcp`, {
+            jsonrpc: "2.0", id: 8, method: "tools/call",
+            params: { name: "agentboard_append", arguments: { key: "test.mcp.arr", item: { n } } },
+          }, { validateStatus: () => true });
+          if (n === 1) bru.setVar("firstAppendStatus", r.status);
+        }
+    - type: tests
+      code: |-
+        test("first append ok (MCP returned 200)", function() {
+          expect(Number(bru.getVar("firstAppendStatus"))).to.equal(200);
+        });
+        test("array has 2 items", function() {
+          expect(res.status).to.equal(200);
+          expect(res.body.value).to.be.an("array");
+          expect(res.body.value.length).to.equal(2);
+        });

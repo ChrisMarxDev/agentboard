@@ -1,0 +1,19 @@
+info:
+  name: Get /skill (Claude plugin manifest)
+  type: http
+  seq: 8
+
+http:
+  method: GET
+  url: "{{baseUrl}}/skill"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status is 200", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("returns non-empty skill text", function() {
+          expect(res.body).to.not.be.empty;
+        });
