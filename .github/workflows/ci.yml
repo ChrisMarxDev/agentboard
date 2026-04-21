@@ -23,6 +23,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Stub frontend/dist for go:embed
+        # The root `frontend_embed.go` declares `//go:embed all:frontend/dist`,
+        # which go vet / test / build all resolve transitively through
+        # internal/cli/serve.go. The real frontend is built in the separate
+        # `frontend` job, so this job just needs a non-empty directory to
+        # satisfy the embed pattern. A single placeholder file is enough.
+        run: |
+          mkdir -p frontend/dist
+          touch frontend/dist/.ci-placeholder
+
       - name: gofmt
         run: |
           unformatted=$(gofmt -l cmd internal frontend_embed.go)
