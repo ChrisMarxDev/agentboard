@@ -15,6 +15,7 @@ const ROWS: Row[] = [
   { keys: ['J'], label: 'Next page' },
   { keys: ['K'], label: 'Previous page' },
   { keys: ['1', '…', '9'], label: 'Jump to page' },
+  { keys: ['C'], label: 'Copy page source' },
   { keys: ['?'], label: 'Open this help' },
   { keys: ['Esc'], label: 'Close this help' },
 ]

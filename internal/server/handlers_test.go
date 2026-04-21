@@ -469,8 +469,8 @@ func TestMCPToolsList(t *testing.T) {
 	// 13 data/page/component core + 3 file tools + 2 error tools + 1 grab tool = 19.
 	// (Component-upload write/delete are gated on --allow-component-upload and
 	//  aren't advertised in the default test config.)
-	if len(tools) != 19 {
-		t.Errorf("expected 19 MCP tools, got %d", len(tools))
+	if len(tools) != 21 {
+		t.Errorf("expected 21 MCP tools, got %d", len(tools))
 	}
 }
 

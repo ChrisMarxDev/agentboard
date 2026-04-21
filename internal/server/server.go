@@ -147,6 +147,10 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		r.Put("/files/*", s.handleWriteFile)
 		r.Delete("/files/*", s.handleDeleteFile)
 
+		// Skills — a read view on top of files/skills/<slug>/SKILL.md
+		r.Get("/skills", s.handleListSkills)
+		r.Get("/skills/{slug}", s.handleGetSkill)
+
 		// Render-error beacons from frontend components (Mermaid, Markdown, Image, …)
 		r.Get("/errors", s.handleListErrors)
 		r.Post("/errors", s.handleRecordError)

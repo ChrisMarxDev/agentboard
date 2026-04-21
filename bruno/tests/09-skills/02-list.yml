@@ -1,0 +1,22 @@
+info:
+  name: GET /api/skills returns the seeded skill
+  type: http
+  seq: 2
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/skills"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("body is an array", function() { expect(res.body).to.be.an("array"); });
+        test("seeded skill appears with name + description", function() {
+          const entry = res.body.find(s => s.slug === "bruno-demo");
+          expect(entry).to.exist;
+          expect(entry.name).to.equal("bruno-demo");
+          expect(entry.description).to.match(/bruno test suite/);
+          expect(entry.path).to.equal("skills/bruno-demo");
+        });

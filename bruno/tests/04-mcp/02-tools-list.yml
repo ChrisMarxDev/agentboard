@@ -1,5 +1,5 @@
 info:
-  name: tools/list returns all 19 core tools
+  name: tools/list returns all 21 core tools
   type: http
   seq: 2
 
@@ -25,6 +25,7 @@ runtime:
           "agentboard_delete_page", "agentboard_list_components",
           "agentboard_read_component", "agentboard_get_data_schema",
           "agentboard_write_file", "agentboard_list_files", "agentboard_delete_file",
+          "agentboard_list_skills", "agentboard_get_skill",
           "agentboard_list_errors", "agentboard_clear_errors",
           "agentboard_grab",
         ];
@@ -32,7 +33,7 @@ runtime:
         test("tools array present", function() {
           expect(res.body.result.tools).to.be.an("array");
         });
-        test("all 19 core tools advertised", function() {
+        test("all 21 core tools advertised", function() {
           const names = res.body.result.tools.map(t => t.name);
           for (const t of CORE_TOOLS) expect(names).to.include(t);
         });
