@@ -28,6 +28,18 @@ When you ship a feature, add/refresh its page and bump the relevant `dev.*` data
 
 **All run commands go through [Taskfile.dev](https://taskfile.dev/).** Use `task` instead of invoking `go`, `npm`, or `make` directly. Run `task` (or `task -l`) to see every available task.
 
+## Go tooling for agents
+
+**Reach for `go doc` and `gopls` before grepping vendored source.** For *running* code use `task` (above); for *understanding* code, these tools are faster and more accurate than reading files:
+
+- `go doc <pkg>` / `go doc <pkg>.<symbol>` — authoritative API + doc comments for a package or specific identifier. Works on stdlib, third-party deps, and our own packages (e.g. `go doc github.com/go-chi/chi/v5.Router`, `go doc ./internal/data.Store`).
+- `gopls symbols <file>` — every symbol in a file with line numbers. Faster than reading the whole file when you just need the surface.
+- `gopls references <file>:<line>:<col>` — every call site of a symbol across the module. Replaces grep for "where is this used".
+- `gopls definition <file>:<line>:<col>` — jump to definition. Resolves across modules.
+- `go vet ./...` and `go list -m all` — catch obvious bugs and inspect the dependency graph without building.
+
+These are allowlisted in `.claude/settings.json` so they run without permission prompts. They're read-only — no code executes, no files change.
+
 ## Build
 
 ```bash

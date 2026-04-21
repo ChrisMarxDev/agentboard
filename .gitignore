@@ -33,7 +33,7 @@ landing/.astro/
 /.claude/skills/*
 !/.claude/skills/agentboard/
 !/.claude/skills/agentboard/**
-/.claude/settings*.json
+/.claude/settings.local.json
 
 # test_claude playground — runtime artifacts (scaffolding is tracked)
 test_claude/bin/
