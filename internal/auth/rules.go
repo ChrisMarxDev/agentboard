@@ -89,9 +89,18 @@ func methodMatches(methods []string, method string) bool {
 // in patterns (the matcher does not anchor automatically); paths and patterns
 // are compared as-is.
 //
+// Ergonomic shorthand: a pattern ending in "/**" also matches the parent
+// prefix without the trailing slash, so `/api/data/**` covers both
+// `/api/data` and `/api/data/foo/bar`. This mirrors .gitignore behavior
+// and what users intuitively write.
+//
 // The implementation is iterative with a single level of backtracking so a
 // pathological pattern can't exponentially blow up (unlike full regex).
 func pathMatches(pattern, path string) bool {
+	// Ergonomic shorthand: foo/** also matches foo.
+	if strings.HasSuffix(pattern, "/**") && path == strings.TrimSuffix(pattern, "/**") {
+		return true
+	}
 	p, s := 0, 0 // pattern index, path index
 	// Backtrack anchors for ** wildcard.
 	var starP, starS int = -1, -1

@@ -85,6 +85,7 @@ func New(cfg ServerConfig) *Server {
 	s := &Server{
 		Project:              cfg.Project,
 		Store:                cfg.Store,
+		Auth:                 cfg.Auth,
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
 		Components:           compManager,
@@ -115,6 +116,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
+		// Admin routes — SessionMiddleware is scoped inside registerAdminRoutes
+		// so it only touches /api/admin/*. TokenMiddleware already skips this
+		// subtree via a prefix check; AuthorizeMiddleware is a no-op when no
+		// agent identity is in context.
+		s.registerAdminRoutes(r)
+
 		// Data endpoints
 		r.Get("/data", s.handleGetAllData)
 		r.Get("/data/schema", s.handleGetSchema)
