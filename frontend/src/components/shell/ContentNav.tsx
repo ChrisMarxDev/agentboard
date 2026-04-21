@@ -54,8 +54,7 @@ export default function ContentNav({
         }
 
         const isOpen = expanded.has(node.path)
-        const indexPage = node.indexPage
-        const isActive = indexPage != null && activePath === indexPage.href
+        const isActive = activePath === node.href
 
         return (
           <div key={`folder:${node.path}`} className="flex flex-col gap-1">
@@ -93,31 +92,14 @@ export default function ContentNav({
                   {isOpen ? '▼' : '▶'}
                 </span>
               </button>
-              {indexPage ? (
-                <Link
-                  to={indexPage.href}
-                  onClick={() => onExpand(node.path)}
-                  className="flex-1 flex items-center truncate py-1.5"
-                  style={{ color: 'inherit', paddingLeft: 4 }}
-                >
-                  <span className="truncate">{node.title}</span>
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onToggle(node.path)}
-                  className="flex-1 flex items-center text-left truncate py-1.5"
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    paddingLeft: 4,
-                  }}
-                >
-                  <span className="truncate">{node.title}</span>
-                </button>
-              )}
+              <Link
+                to={node.href}
+                onClick={() => onExpand(node.path)}
+                className="flex-1 flex items-center truncate py-1.5"
+                style={{ color: 'inherit', paddingLeft: 4 }}
+              >
+                <span className="truncate">{node.title}</span>
+              </Link>
             </div>
             {isOpen && (
               <ContentNav

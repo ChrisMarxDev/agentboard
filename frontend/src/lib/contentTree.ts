@@ -33,6 +33,7 @@ export interface ContentFolder {
   name: string
   title: string
   path: string
+  href: string // always set — either the indexPage's href or the folder path itself
   indexPage?: ContentPageLeaf
   children: ContentTreeNode[]
 }
@@ -161,6 +162,7 @@ function materialize(folder: MutableFolder): ContentTreeNode[] {
       name: f.name,
       title: humanize(f.name),
       path: f.path,
+      href: f.indexPage?.href ?? `/${f.path}`,
       indexPage: f.indexPage,
       children: materialize(f).filter(c => {
         // Drop a page leaf that is ALSO used as this folder's indexPage —
@@ -197,6 +199,22 @@ export function collectContentFolderPaths(nodes: ContentTreeNode[]): string[] {
   }
   walk(nodes)
   return out
+}
+
+/**
+ * Find a folder node in the tree by its path (disk-relative, no leading slash).
+ * Returns null if no folder matches.
+ */
+export function findFolder(nodes: ContentTreeNode[], path: string): ContentFolder | null {
+  for (const n of nodes) {
+    if (n.kind !== 'folder') continue
+    if (n.path === path) return n
+    if (path.startsWith(n.path + '/')) {
+      const nested = findFolder(n.children, path)
+      if (nested) return nested
+    }
+  }
+  return null
 }
 
 export function ancestorFolderPathsForHref(href: string): string[] {
