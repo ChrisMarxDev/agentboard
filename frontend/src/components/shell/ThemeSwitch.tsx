@@ -57,7 +57,7 @@ export function ThemeSwitch() {
       onClick={() => setStored(next)}
       aria-label={label}
       title={label}
-      className="h-8 w-full flex items-center justify-center rounded-md"
+      className="h-8 w-8 flex items-center justify-center rounded-md shrink-0"
       style={{
         background: 'var(--bg)',
         border: '1px solid var(--border)',

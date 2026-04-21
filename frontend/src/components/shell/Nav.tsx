@@ -182,9 +182,7 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
       </div>
 
       <div className="flex items-center gap-2 pt-2">
-        <div className="flex-1">
-          <ThemeSwitch />
-        </div>
+        <ThemeSwitch />
         <button
           onClick={() => setMode(!grabMode)}
           aria-label={grabMode ? 'Leave grab mode' : 'Enter grab mode'}
