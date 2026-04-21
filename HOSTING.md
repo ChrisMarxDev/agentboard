@@ -2,6 +2,44 @@
 
 Notes on the current public deploy and the open decisions to revisit later.
 
+## Self-host on your own VPS (Debian/Ubuntu)
+
+One-shot installer that provisions Docker, starts AgentBoard behind Caddy,
+issues a Let's Encrypt cert if you pass a domain, and prints the URL + auth
+token. Re-runnable — re-running with the same `--host` updates the code and
+preserves the token and data.
+
+Prerequisites: a VPS with SSH access as `root` (or a user with passwordless
+sudo), Debian 12+ / Ubuntu 22.04+. If you want TLS, point a DNS A record at
+the VPS *before* running the script.
+
+```bash
+# HTTP only, reached via the VPS's IP
+./scripts/deploy-vps.sh --host root@1.2.3.4
+
+# TLS via Caddy + Let's Encrypt
+./scripts/deploy-vps.sh --host root@1.2.3.4 --domain ab.example.com
+
+# Deploy a specific ref (tag, branch, or SHA)
+./scripts/deploy-vps.sh --host root@1.2.3.4 --ref v0.3.0 --domain ab.example.com
+
+# Same but as a task
+task deploy:vps -- --host root@1.2.3.4 --domain ab.example.com
+```
+
+On success the script prints the URL, auth token, and deployed git SHA. Pass
+`--json` if you want machine-readable output for automation. Full flag list
+in `./scripts/deploy-vps.sh --help`.
+
+The first run takes ~3 minutes (apt install + Docker image build). Subsequent
+runs only rebuild if the source changed.
+
+Cheapest realistic target: Hetzner CX22 (~€4/mo, 4 GB RAM) or a CAX11 ARM
+instance (~€3.30/mo). AWS is workable but more expensive once you add the
+IPv4 tax — see `SCALE.md` for the economics breakdown.
+
+
+
 **The repo is deliberately free of any specific deployment's identity.** The Fly app name and hosted URL are never committed — they come from local env vars (`FLY_APP`, `AGENTBOARD_URL`) and GitHub secrets (`FLY_APP_NAME`, `FLY_API_TOKEN`). Every command in this doc reads `$FLY_APP` from your shell.
 
 ## First-time setup

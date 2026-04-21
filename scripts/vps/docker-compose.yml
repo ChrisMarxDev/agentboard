@@ -1,0 +1,55 @@
+# AgentBoard — VPS compose file.
+#
+# Uploaded to the VPS by scripts/deploy-vps.sh. Reads /etc/agentboard/env for
+# AGENTBOARD_AUTH_TOKEN, AGENTBOARD_DOMAIN, AGENTBOARD_DATA_DIR.
+#
+# Ports:
+#   - Caddy binds 80 + 443 on the host.
+#   - agentboard only exposes 3000 inside the private compose network; Caddy
+#     reverse-proxies to it.
+
+services:
+  agentboard:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: agentboard:local
+    restart: unless-stopped
+    environment:
+      AGENTBOARD_AUTH_TOKEN: ${AGENTBOARD_AUTH_TOKEN:?set in /etc/agentboard/env}
+      AGENTBOARD_PATH: /data
+    volumes:
+      - ${AGENTBOARD_DATA_DIR:-/var/lib/agentboard}:/data
+    expose:
+      - "3000"
+    networks:
+      - agentboard
+    healthcheck:
+      test: ["CMD", "/agentboard", "get", "--help"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - agentboard
+    depends_on:
+      - agentboard
+
+networks:
+  agentboard:
+    driver: bridge
+
+volumes:
+  caddy-data:
+  caddy-config:

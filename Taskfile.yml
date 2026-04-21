@@ -143,6 +143,11 @@ tasks:
       - sh: command -v bru
         msg: "bru CLI not installed — run: npm install -g @usebruno/cli"
 
+  deploy:vps:
+    desc: Install or update AgentBoard on a Debian/Ubuntu VPS over SSH (pass flags with -- e.g. task deploy:vps -- --host root@vps --domain ab.example.com)
+    cmds:
+      - ./scripts/deploy-vps.sh {{.CLI_ARGS}}
+
   clean:
     desc: Remove build artifacts
     deps: [landing:clean]
