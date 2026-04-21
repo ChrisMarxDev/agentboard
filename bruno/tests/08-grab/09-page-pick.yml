@@ -1,0 +1,39 @@
+info:
+  name: Whole-page pick returns the full source
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [
+          { "kind": "page", "page": "/test-grab" }
+        ],
+        "format": "markdown"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("one section resolved", function() {
+          expect(res.body.sections).to.have.lengthOf(1);
+        });
+        test("section is kind=page", function() {
+          expect(res.body.sections[0].kind).to.equal("page");
+        });
+        test("body contains all top-level chunks", function() {
+          const mdx = res.body.sections[0].mdx_source || "";
+          expect(mdx).to.include("Hello Card");
+          expect(mdx).to.include("First Section");
+          expect(mdx).to.include("Second Section");
+          expect(mdx).to.include("Second Card");
+        });

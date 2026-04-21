@@ -15,10 +15,24 @@ http:
     data: |-
       # Grab test page
 
+      Intro paragraph.
+
       <Card title="Hello Card">
         plain body text
         <Mermaid source="test.grab.mermaid" />
       </Card>
+
+      ## First Section
+
+      body of first section
+
+      ### Nested Sub
+
+      nested prose
+
+      ## Second Section
+
+      body of second section
 
       <Card title="Second Card">
         sibling content

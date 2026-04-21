@@ -101,9 +101,21 @@ export function GrabTray() {
             borderBottom: '1px solid var(--border)',
           }}
         >
-          {picks.map(p => (
+          {picks.map(p => {
+            const label = p.kind === 'card'
+              ? (p.cardTitle || p.cardId || 'card')
+              : p.kind === 'heading'
+                ? (p.headingText || p.headingSlug || 'heading')
+                : 'Whole page'
+            const kindTag = p.kind === 'card' ? 'Card' : p.kind === 'heading' ? `H${p.headingLevel ?? 2}` : 'Page'
+            const key = p.kind === 'card'
+              ? `card:${p.page}#${p.cardId}`
+              : p.kind === 'heading'
+                ? `heading:${p.page}#${p.headingSlug}`
+                : `page:${p.page}`
+            return (
             <li
-              key={`${p.page}#${p.cardId}`}
+              key={key}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -112,6 +124,21 @@ export function GrabTray() {
                 borderRadius: '0.5rem',
               }}
             >
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.03em',
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  padding: '0.1rem 0.35rem',
+                  borderRadius: '0.25rem',
+                  flexShrink: 0,
+                }}
+              >
+                {kindTag}
+              </span>
               <span
                 style={{
                   flex: 1,
@@ -130,7 +157,7 @@ export function GrabTray() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {p.cardTitle || p.cardId}
+                  {label}
                 </span>
                 <span
                   style={{
@@ -146,8 +173,8 @@ export function GrabTray() {
               </span>
               <button
                 type="button"
-                onClick={() => removePick(p.page, p.cardId)}
-                aria-label={`Remove ${p.cardTitle || p.cardId}`}
+                onClick={() => removePick(p)}
+                aria-label={`Remove ${label}`}
                 title="Remove"
                 style={{
                   display: 'inline-flex',
@@ -173,7 +200,7 @@ export function GrabTray() {
                 <X size={14} strokeWidth={2} />
               </button>
             </li>
-          ))}
+          )})}
         </ul>
       )}
 

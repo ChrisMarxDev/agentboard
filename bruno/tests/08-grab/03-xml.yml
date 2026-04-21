@@ -28,7 +28,7 @@ runtime:
           expect(res.body.text).to.include("</agentboard_context>");
         });
         test("section + component tags present", function() {
-          expect(res.body.text).to.include('<section page="/test-grab"');
+          expect(res.body.text).to.match(/<section [^>]*page="\/test-grab"/);
           expect(res.body.text).to.include('<component type="Mermaid"');
           expect(res.body.text).to.include("graph LR");
         });

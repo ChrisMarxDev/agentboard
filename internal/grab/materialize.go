@@ -1,40 +1,59 @@
-// Package grab collects Card sections across MDX pages into a single
-// agent-ready payload. See spec-grab.md for the full design.
+// Package grab collects Card, heading, or whole-page sections across MDX
+// pages into a single agent-ready payload. See spec-grab.md for the full
+// design.
 //
 // The materializer is deliberately regex-based: AgentBoard authors already
-// follow a narrow <Card title="..."> convention, a full MDX parser would
-// bring in an AST dep for a single feature, and stale data is worse than
-// slightly permissive matching. If a pick can't resolve, the formatter emits
-// a comment and carries on — never blocks the whole copy.
+// follow narrow conventions (<Card title="…">, ATX headings, MDX pages), a
+// full MDX parser would bring in an AST dep for a single feature, and stale
+// data is worse than slightly permissive matching. If a pick can't resolve,
+// the formatter emits a comment and carries on — never blocks the whole copy.
 package grab
 
 import (
 	"encoding/json"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/christophermarx/agentboard/internal/data"
 	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
-// Pick identifies one Card to include. Matches the frontend/MCP input shape.
+// PickKind identifies which slicing strategy a Pick uses.
+type PickKind string
+
+const (
+	KindCard    PickKind = "card"
+	KindHeading PickKind = "heading"
+	KindPage    PickKind = "page"
+)
+
+// Pick identifies one section to include. `Kind` routes to the slicer;
+// legacy payloads without a Kind default to "card" for backward compatibility.
 type Pick struct {
-	Page   string `json:"page"`    // URL path, e.g. "/features/files"
-	CardID string `json:"card_id"` // Slug(Card.title)
+	Kind         PickKind `json:"kind"`
+	Page         string   `json:"page"` // URL path, e.g. "/features/files"
+	CardID       string   `json:"card_id,omitempty"`
+	HeadingSlug  string   `json:"heading_slug,omitempty"`
+	HeadingLevel int      `json:"heading_level,omitempty"`
 }
 
 // Section is one materialized pick.
 type Section struct {
-	Page       string      `json:"page"`
-	PageTitle  string      `json:"page_title"`
-	CardTitle  string      `json:"card_title"`
-	CardID     string      `json:"card_id"`
-	MDXSource  string      `json:"mdx_source"`
-	Components []Component `json:"components"`
-	Missing    string      `json:"missing,omitempty"` // set when the pick couldn't resolve
+	Kind         PickKind    `json:"kind"`
+	Page         string      `json:"page"`
+	PageTitle    string      `json:"page_title"`
+	CardTitle    string      `json:"card_title,omitempty"`
+	CardID       string      `json:"card_id,omitempty"`
+	HeadingText  string      `json:"heading_text,omitempty"`
+	HeadingSlug  string      `json:"heading_slug,omitempty"`
+	HeadingLevel int         `json:"heading_level,omitempty"`
+	MDXSource    string      `json:"mdx_source"`
+	Components   []Component `json:"components"`
+	Missing      string      `json:"missing,omitempty"` // set when the pick couldn't resolve
 }
 
-// Component describes one data-bound component found inside the Card.
+// Component describes one data-bound component found inside the section.
 type Component struct {
 	Type      string      `json:"type"`       // e.g. "Mermaid", "Code"
 	SourceKey string      `json:"source_key"` // data key the component reads
@@ -59,42 +78,144 @@ type Materializer struct {
 
 // Materialize returns the list of resolved sections for the given picks.
 // Sections appear in pick order. Missing picks are included with Missing set.
+// Picks whose byte range is fully contained in another same-page pick's
+// range are dropped — see dedupe rules in materialize §Dedupe.
 func (m *Materializer) Materialize(picks []Pick) []Section {
-	out := make([]Section, 0, len(picks))
-	for _, p := range picks {
-		out = append(out, m.materializeOne(p))
+	// Resolve all picks first so we know their byte ranges.
+	type resolved struct {
+		section Section
+		page    string
+		start   int
+		end     int
+		keep    bool
+	}
+	items := make([]resolved, len(picks))
+	for i, p := range picks {
+		s, start, end := m.materializeOne(p)
+		items[i] = resolved{section: s, page: p.Page, start: start, end: end, keep: true}
+	}
+
+	// Dedupe: sort indices by (page, start ASC, length DESC) so parents come
+	// before children within a page. Walk; mark any item whose [start,end) is
+	// fully contained within an earlier kept item on the same page as dropped.
+	order := make([]int, len(items))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := items[order[i]], items[order[j]]
+		if a.page != b.page {
+			return a.page < b.page
+		}
+		if a.start != b.start {
+			return a.start < b.start
+		}
+		return (a.end - a.start) > (b.end - b.start)
+	})
+	for ii, oi := range order {
+		if !items[oi].keep || items[oi].section.Missing != "" || items[oi].end <= items[oi].start {
+			continue
+		}
+		for jj := 0; jj < ii; jj++ {
+			oj := order[jj]
+			if !items[oj].keep || items[oj].page != items[oi].page {
+				continue
+			}
+			if items[oj].start <= items[oi].start && items[oj].end >= items[oi].end {
+				items[oi].keep = false
+				break
+			}
+		}
+	}
+
+	// Emit in original pick order, skipping dropped.
+	out := make([]Section, 0, len(items))
+	for _, it := range items {
+		if it.keep {
+			out = append(out, it.section)
+		}
 	}
 	return out
 }
 
-func (m *Materializer) materializeOne(p Pick) Section {
-	// URL path "/features/files" → PageManager key "features/files"; "/" → "index".
+// materializeOne resolves a single pick. Returns the section plus the byte
+// range [start, end) the section occupies in the page's source, or (0, 0)
+// when the pick is missing or applies to the whole page with no useful range
+// for dedupe.
+func (m *Materializer) materializeOne(p Pick) (Section, int, int) {
+	// Tolerate legacy payloads without a kind: default to card.
+	kind := p.Kind
+	if kind == "" {
+		kind = KindCard
+	}
+
 	key := strings.TrimPrefix(p.Page, "/")
 	if key == "" {
 		key = "index"
 	}
 	page := m.Pages.GetPage(key)
 	if page == nil {
-		return Section{Page: p.Page, CardID: p.CardID, Missing: "page not found"}
-	}
-
-	title, body, ok := findCardByID(page.Source, p.CardID)
-	if !ok {
 		return Section{
-			Page: p.Page, PageTitle: page.Title, CardID: p.CardID,
-			Missing: "card id not found on page",
-		}
+			Kind: kind, Page: p.Page,
+			CardID: p.CardID, HeadingSlug: p.HeadingSlug,
+			Missing: "page not found",
+		}, 0, 0
 	}
 
-	comps := m.resolveComponents(body)
-	return Section{
-		Page:       p.Page,
-		PageTitle:  page.Title,
-		CardTitle:  title,
-		CardID:     p.CardID,
-		MDXSource:  strings.TrimSpace(body),
-		Components: comps,
+	switch kind {
+	case KindCard:
+		title, body, start, end, ok := findCardByID(page.Source, p.CardID)
+		if !ok {
+			return Section{
+				Kind: kind, Page: p.Page, PageTitle: page.Title, CardID: p.CardID,
+				Missing: "card id not found on page",
+			}, 0, 0
+		}
+		return Section{
+			Kind:       KindCard,
+			Page:       p.Page,
+			PageTitle:  page.Title,
+			CardTitle:  title,
+			CardID:     p.CardID,
+			MDXSource:  strings.TrimSpace(body),
+			Components: m.resolveComponents(body),
+		}, start, end
+
+	case KindHeading:
+		text, body, level, start, end, ok := findHeadingBySlug(page.Source, p.HeadingSlug)
+		if !ok {
+			return Section{
+				Kind: kind, Page: p.Page, PageTitle: page.Title,
+				HeadingSlug: p.HeadingSlug,
+				Missing:     "heading not found on page",
+			}, 0, 0
+		}
+		return Section{
+			Kind:         KindHeading,
+			Page:         p.Page,
+			PageTitle:    page.Title,
+			HeadingText:  text,
+			HeadingSlug:  p.HeadingSlug,
+			HeadingLevel: level,
+			MDXSource:    strings.TrimSpace(body),
+			Components:   m.resolveComponents(body),
+		}, start, end
+
+	case KindPage:
+		body := page.Source
+		return Section{
+			Kind:       KindPage,
+			Page:       p.Page,
+			PageTitle:  page.Title,
+			MDXSource:  strings.TrimSpace(body),
+			Components: m.resolveComponents(body),
+		}, 0, len(body)
 	}
+
+	return Section{
+		Kind: kind, Page: p.Page, PageTitle: page.Title,
+		Missing: "unknown pick kind",
+	}, 0, 0
 }
 
 // cardRegex matches a top-level <Card …>…</Card> block. Non-greedy body so
@@ -103,14 +224,13 @@ func (m *Materializer) materializeOne(p Pick) Section {
 var cardRegex = regexp.MustCompile(`(?s)<Card\s([^>]*?)>(.*?)</Card>`)
 
 // titleAttrRegex pulls the title="..." attr out of Card's attribute list.
-// Intentionally permissive: order-independent, tolerates other attrs, tolerates
-// single or double quotes.
 var titleAttrRegex = regexp.MustCompile(`title=["']([^"']+)["']`)
 
 // findCardByID walks every <Card title="..."> block in source, slugifies the
-// title, and returns the block whose slug matches cardID. Returns the raw title,
-// the inner content, and ok=true when found.
-func findCardByID(source, cardID string) (title, body string, ok bool) {
+// title, and returns the block whose slug matches cardID. Returns the raw
+// title, inner content, and byte range [start, end) of the whole <Card>…</Card>
+// in source.
+func findCardByID(source, cardID string) (title, body string, start, end int, ok bool) {
 	matches := cardRegex.FindAllStringSubmatchIndex(source, -1)
 	for _, m := range matches {
 		attrs := source[m[2]:m[3]]
@@ -121,28 +241,88 @@ func findCardByID(source, cardID string) (title, body string, ok bool) {
 		}
 		t := tm[1]
 		if Slug(t) == cardID {
-			return t, inner, true
+			return t, inner, m[0], m[1], true
 		}
 	}
-	return "", "", false
+	return "", "", 0, 0, false
+}
+
+// headingRegex matches ATX markdown headings at levels 1-3. Anchored to line
+// start via multi-line flag. Excludes headings inside fenced code blocks —
+// see isInsideFence().
+var headingRegex = regexp.MustCompile(`(?m)^(#{1,3})\s+(.+?)\s*$`)
+
+// findHeadingBySlug locates a heading whose slug matches headingSlug, then
+// returns the text, body (heading line through the last line before the next
+// heading of equal-or-higher level), the level, and the byte range.
+func findHeadingBySlug(source, headingSlug string) (text, body string, level, start, end int, ok bool) {
+	matches := headingRegex.FindAllStringSubmatchIndex(source, -1)
+	// Strip out headings that sit inside a fenced code block.
+	filtered := make([][]int, 0, len(matches))
+	for _, m := range matches {
+		if !isInsideFence(source, m[0]) {
+			filtered = append(filtered, m)
+		}
+	}
+
+	for i, m := range filtered {
+		lvl := m[3] - m[2] // length of the '#' group
+		t := strings.TrimSpace(source[m[4]:m[5]])
+		if Slug(t) != headingSlug {
+			continue
+		}
+		sectionStart := m[0]
+		sectionEnd := len(source)
+		for j := i + 1; j < len(filtered); j++ {
+			nlvl := filtered[j][3] - filtered[j][2]
+			if nlvl <= lvl {
+				sectionEnd = filtered[j][0]
+				break
+			}
+		}
+		return t, source[sectionStart:sectionEnd], lvl, sectionStart, sectionEnd, true
+	}
+	return "", "", 0, 0, 0, false
+}
+
+// isInsideFence reports whether byte offset off falls within a ```fenced
+// code block``` in source. Simple toggle-counter: every ``` at column 0
+// (outside strings) flips the state.
+func isInsideFence(source string, off int) bool {
+	inside := false
+	pos := 0
+	for pos < off {
+		nl := strings.IndexByte(source[pos:], '\n')
+		var line string
+		if nl < 0 {
+			line = source[pos:]
+			pos = len(source)
+		} else {
+			line = source[pos : pos+nl]
+			pos += nl + 1
+		}
+		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "```") {
+			inside = !inside
+		}
+	}
+	return inside
 }
 
 // componentRegex matches self-closing and open/close tags of known data-bound
-// built-ins with a source="..." attribute. We deliberately allow-list the
-// component names instead of matching any capitalized tag, so prose that
-// happens to contain JSX-like syntax doesn't get picked up as components.
+// built-ins with a source="..." attribute.
 var componentRegex = regexp.MustCompile(
-	`<(Metric|Counter|Status|Progress|Badge|Chart|TimeSeries|Table|List|Log|Kanban|Mermaid|Markdown|Code|Image|File)\b([^>]*?)/?>`,
+	`<(Metric|Counter|Status|Progress|Badge|Chart|TimeSeries|Table|List|Log|Kanban|Mermaid|Markdown|Code|Image|File|ApiList|Errors)\b([^>]*?)/?>`,
 )
 
 var sourceAttrRegex = regexp.MustCompile(`source=["']([^"']+)["']`)
 var languageAttrRegex = regexp.MustCompile(`language=["']([^"']+)["']`)
 
-// resolveComponents walks the Card body, finds every known component with a
-// source= attribute, and resolves the current value from the data store.
+// resolveComponents walks the section body, finds every known component with
+// a source= attribute, and resolves the current value from the data store.
 func (m *Materializer) resolveComponents(body string) []Component {
 	var out []Component
-	seen := make(map[string]bool) // dedupe by type|source within one card
+	seen := make(map[string]bool)
 	matches := componentRegex.FindAllStringSubmatch(body, -1)
 	for _, match := range matches {
 		typ := match[1]

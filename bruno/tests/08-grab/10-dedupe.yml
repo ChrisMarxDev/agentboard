@@ -1,0 +1,32 @@
+info:
+  name: Page + nested heading picks dedupe to just the page
+  type: http
+  seq: 10
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [
+          { "kind": "page",    "page": "/test-grab" },
+          { "kind": "heading", "page": "/test-grab", "heading_slug": "first-section" },
+          { "kind": "heading", "page": "/test-grab", "heading_slug": "nested-sub" }
+        ],
+        "format": "markdown"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("dedupe drops the nested heading picks", function() {
+          expect(res.body.sections).to.have.lengthOf(1);
+          expect(res.body.sections[0].kind).to.equal("page");
+        });

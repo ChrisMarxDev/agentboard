@@ -28,10 +28,10 @@ func renderMarkdown(sections []Section) string {
 	b.WriteString("## Context from AgentBoard\n\n")
 	for _, s := range sections {
 		if s.Missing != "" {
-			fmt.Fprintf(&b, "<!-- skipped: %s#%s (%s) -->\n\n", s.Page, s.CardID, s.Missing)
+			fmt.Fprintf(&b, "<!-- skipped: %s%s (%s) -->\n\n", s.Page, sectionAnchor(s), s.Missing)
 			continue
 		}
-		fmt.Fprintf(&b, "### %s — %s\n\n", s.Page, s.CardTitle)
+		fmt.Fprintf(&b, "### %s\n\n", sectionHeading(s))
 		if mdx := strings.TrimSpace(s.MDXSource); mdx != "" {
 			b.WriteString(mdx)
 			b.WriteString("\n\n")
@@ -43,6 +43,41 @@ func renderMarkdown(sections []Section) string {
 		b.WriteString("\n")
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// sectionHeading is the human-readable label for one section in markdown
+// output. Includes provenance (page path) and the section identity (card
+// title, heading text, or page title for whole-page picks).
+func sectionHeading(s Section) string {
+	switch s.Kind {
+	case KindHeading:
+		if s.HeadingText != "" {
+			return s.Page + " — " + s.HeadingText
+		}
+		return s.Page
+	case KindPage:
+		if s.PageTitle != "" {
+			return s.Page + " — " + s.PageTitle + " (full page)"
+		}
+		return s.Page + " (full page)"
+	default: // KindCard
+		if s.CardTitle != "" {
+			return s.Page + " — " + s.CardTitle
+		}
+		return s.Page
+	}
+}
+
+// sectionAnchor is the "#<id>" suffix used in skipped-comment references.
+func sectionAnchor(s Section) string {
+	switch s.Kind {
+	case KindHeading:
+		return "#" + s.HeadingSlug
+	case KindPage:
+		return ""
+	default:
+		return "#" + s.CardID
+	}
 }
 
 // markdownFenceFor renders one resolved component as a markdown fragment.
@@ -90,10 +125,16 @@ func renderXML(sections []Section) string {
 	b.WriteString(">\n")
 	for _, s := range sections {
 		if s.Missing != "" {
-			fmt.Fprintf(&b, `  <skipped page=%q card_id=%q reason=%q/>`+"\n", s.Page, s.CardID, s.Missing)
+			fmt.Fprintf(&b, `  <skipped page=%q anchor=%q reason=%q/>`+"\n", s.Page, sectionAnchor(s), s.Missing)
 			continue
 		}
-		fmt.Fprintf(&b, `  <section page=%q title=%q>`+"\n", s.Page, s.CardTitle)
+		title := s.CardTitle
+		if s.Kind == KindHeading {
+			title = s.HeadingText
+		} else if s.Kind == KindPage {
+			title = s.PageTitle
+		}
+		fmt.Fprintf(&b, `  <section kind=%q page=%q title=%q>`+"\n", string(s.Kind), s.Page, title)
 		if mdx := strings.TrimSpace(s.MDXSource); mdx != "" {
 			b.WriteString("    <mdx><![CDATA[")
 			b.WriteString(mdx)

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { beaconError } from '../../lib/errorBeacon'
 import { copyPageSource } from '../../lib/copyPage'
+import { addPick, setMode } from '../../lib/grab'
+import Kbd from './Kbd'
 
 interface PageActionsMenuProps {
   pagePath: string
@@ -15,6 +17,7 @@ interface ActionItem {
   label: string
   tone: Tone
   run: () => void
+  shortcut?: string
 }
 
 export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenuProps) {
@@ -100,6 +103,7 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
       id: 'copy',
       label: 'Copy source',
       tone: 'default',
+      shortcut: 'C',
       run: () => {
         setOpen(false)
         void copyPageSource(pagePath)
@@ -110,6 +114,17 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
       label: 'Export page',
       tone: 'default',
       run: exportPage,
+    })
+    actions.push({
+      id: 'grab-page',
+      label: 'Grab whole page',
+      tone: 'default',
+      run: () => {
+        setOpen(false)
+        const pageUrl = pagePath === 'index' ? '/' : '/' + pagePath
+        addPick({ kind: 'page', page: pageUrl })
+        setMode(true)
+      },
     })
   }
   if (pagePath && pagePath !== 'index') {
@@ -158,7 +173,7 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
               key={a.id}
               role="menuitem"
               onClick={a.run}
-              className="w-full text-left px-3 py-1.5 text-sm"
+              className="w-full text-left px-3 py-1.5 text-sm flex items-center justify-between gap-3"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -172,7 +187,8 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
                 ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent'
               }}
             >
-              {a.label}
+              <span>{a.label}</span>
+              {a.shortcut && <Kbd>{a.shortcut}</Kbd>}
             </button>
           ))}
         </div>

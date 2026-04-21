@@ -1,6 +1,6 @@
 import type { ReactNode, CSSProperties } from 'react'
 import { useGrab } from '../../hooks/useGrab'
-import { isPicked, slug, togglePick } from '../../lib/grab'
+import { isCardPicked, slug, togglePick } from '../../lib/grab'
 
 interface CardProps {
   children: ReactNode
@@ -15,7 +15,7 @@ export function Card({ children, title, span = 1 }: CardProps) {
   const page = typeof window !== 'undefined' ? window.location.pathname : '/'
   const cardId = title ? slug(title) : ''
   const grabbable = mode && Boolean(cardId)
-  const picked = grabbable && isPicked(page, cardId)
+  const picked = grabbable && isCardPicked(page, cardId)
 
   const style: CSSProperties = {
     background: 'var(--bg)',
@@ -38,7 +38,7 @@ export function Card({ children, title, span = 1 }: CardProps) {
     const target = e.target as HTMLElement
     if (target.closest('a, button, input, select, textarea')) return
     e.preventDefault()
-    togglePick({ page, cardId, cardTitle: title })
+    togglePick({ kind: 'card', page, cardId, cardTitle: title })
   }
 
   return (
@@ -53,7 +53,7 @@ export function Card({ children, title, span = 1 }: CardProps) {
       {grabbable && (
         <GrabCheckbox
           picked={!!picked}
-          onToggle={() => togglePick({ page, cardId, cardTitle: title })}
+          onToggle={() => togglePick({ kind: 'card', page, cardId, cardTitle: title })}
         />
       )}
       {title && (

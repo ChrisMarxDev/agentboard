@@ -1,0 +1,47 @@
+info:
+  name: Heading pick slices from heading to next same-or-higher level
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [
+          { "kind": "heading", "page": "/test-grab", "heading_slug": "first-section" }
+        ],
+        "format": "markdown"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("one section resolved", function() {
+          expect(res.body.sections).to.be.an("array");
+          expect(res.body.sections).to.have.lengthOf(1);
+        });
+        test("section is kind=heading", function() {
+          expect(res.body.sections[0].kind).to.equal("heading");
+          expect(res.body.sections[0].heading_text).to.equal("First Section");
+          expect(res.body.sections[0].heading_level).to.equal(2);
+        });
+        test("H2 body includes its H3 child", function() {
+          const mdx = res.body.sections[0].mdx_source || "";
+          expect(mdx).to.include("body of first section");
+          expect(mdx).to.include("Nested Sub");
+        });
+        test("H2 body does NOT include the next H2", function() {
+          const mdx = res.body.sections[0].mdx_source || "";
+          expect(mdx).to.not.include("Second Section");
+        });
+        test("materialized text labels the section with the heading text", function() {
+          expect(res.body.text).to.include("First Section");
+        });
