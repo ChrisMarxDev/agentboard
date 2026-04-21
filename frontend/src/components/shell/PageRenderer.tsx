@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { compile, run } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
 import * as runtime from 'react/jsx-runtime'
 import { useDataContext } from '../../hooks/DataContext'
 import { getComponents } from '../../lib/componentRegistry'
@@ -41,6 +42,7 @@ export default function PageRenderer() {
         const compiled = await compile(source, {
           outputFormat: 'function-body',
           development: false,
+          remarkPlugins: [remarkGfm],
         })
         const { default: MDXContent } = await run(String(compiled), {
           ...runtime,

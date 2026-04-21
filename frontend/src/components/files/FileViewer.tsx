@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ArrowLeft, Download } from 'lucide-react'
 import { compile, run } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
 import * as runtime from 'react/jsx-runtime'
 
 /**
@@ -66,6 +67,7 @@ export default function FileViewer() {
               const compiled = await compile(stripFrontmatter(text), {
                 outputFormat: 'function-body',
                 development: false,
+                remarkPlugins: [remarkGfm],
               })
               const { default: MDXContent } = await run(String(compiled), {
                 ...runtime,

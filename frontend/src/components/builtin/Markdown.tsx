@@ -1,5 +1,6 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { compile, run } from '@mdx-js/mdx'
+import remarkGfm from 'remark-gfm'
 import * as runtime from 'react/jsx-runtime'
 import { useData } from '../../hooks/useData'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
@@ -39,7 +40,7 @@ export function Markdown({ text, children, source }: MarkdownProps) {
     let cancelled = false
     ;(async () => {
       try {
-        const compiled = await compile(textToCompile, { outputFormat: 'function-body', development: false })
+        const compiled = await compile(textToCompile, { outputFormat: 'function-body', development: false, remarkPlugins: [remarkGfm] })
         const { default: MDXContent } = await run(String(compiled), {
           ...runtime,
           baseUrl: import.meta.url,
