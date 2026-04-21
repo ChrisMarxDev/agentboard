@@ -19,6 +19,7 @@ import { Mermaid } from '../components/builtin/Mermaid'
 import { Image } from '../components/builtin/Image'
 import { File as FileComponent } from '../components/builtin/File'
 import { Errors } from '../components/builtin/Errors'
+import { ApiList } from '../components/builtin/ApiList'
 
 type AnyComponent = ComponentType<any>
 
@@ -45,6 +46,7 @@ registry.set('Mermaid', Mermaid)
 registry.set('Image', Image)
 registry.set('File', FileComponent)
 registry.set('Errors', Errors)
+registry.set('ApiList', ApiList)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)

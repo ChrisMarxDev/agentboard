@@ -64,6 +64,41 @@ theme: auto
 history_retention_days: 30
 `
 
+// skillsPageMd is seeded at content/skills.md on first-run init. It's an
+// authored MDX page (not a hardcoded React route) that mounts the generic
+// <ApiList/> built-in against /api/skills — see CORE_GUIDELINES §9.
+const skillsPageMd = `# Skills
+
+Anthropic-format skills hosted on this AgentBoard. Agents discover them via ` + "`GET /api/skills`" + ` (or the ` + "`agentboard_list_skills`" + ` MCP tool) and fetch a zip bundle from ` + "`GET /api/skills/<slug>`" + `.
+
+A skill is any folder under ` + "`files/skills/<slug>/`" + ` containing ` + "`SKILL.md`" + ` with ` + "`name`" + ` and ` + "`description`" + ` in YAML frontmatter. Nothing on disk is marked as special — the location + manifest are the only signal.
+
+<Card title="Registered skills">
+  <ApiList
+    src="/api/skills"
+    titleKey="name"
+    descriptionKey="description"
+    idKey="slug"
+    downloadPrefix="/api/skills/"
+    empty="No skills hosted yet. Write one at files/skills/<slug>/SKILL.md."
+    refreshOn="agentboard:file-updated"
+  />
+</Card>
+
+## How to add one
+
+<Card title="Upload via REST">
+
+    curl -X PUT http://localhost:3000/api/files/skills/my-skill/SKILL.md \
+      --data-binary @SKILL.md
+
+</Card>
+
+<Card title="Or via MCP">
+Use ` + "`agentboard_write_file`" + ` with path ` + "`skills/my-skill/SKILL.md`" + ` and the SKILL.md body as content. The list above refreshes automatically when the file lands.
+</Card>
+`
+
 // seededSkillManifest is the SKILL.md seeded under files/skills/agentboard/
 // on first-run project init. It documents the skill-hosting convention by
 // being an example of it, and teaches any agent that fetches it how to
@@ -191,6 +226,15 @@ func InitProject(projectPath string) (*Project, error) {
 	// Seed an example skill so the skills feature is self-documenting.
 	if err := seedAgentboardSkill(projectPath); err != nil {
 		return nil, fmt.Errorf("seed skill: %w", err)
+	}
+
+	// Seed the authored skills page that renders the /api/skills list.
+	contentDir := filepath.Join(projectPath, "content")
+	if err := os.MkdirAll(contentDir, 0755); err != nil {
+		return nil, fmt.Errorf("create content dir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(contentDir, "skills.md"), []byte(skillsPageMd), 0644); err != nil {
+		return nil, fmt.Errorf("seed content/skills.md: %w", err)
 	}
 
 	return proj, nil

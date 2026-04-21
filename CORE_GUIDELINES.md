@@ -70,6 +70,16 @@ This is Postel's Law, inverted: the "conservative send" is the AI's job, not the
 
 These aren't format enforcement; they're safety. Keep rejecting malformed paths, oversized uploads, and missing credentials. The rule applies to *content format*, not *safety invariants*.
 
+## 9. Generic primitives, steer usage through docs
+
+When a new product concept appears (skills, runbooks, prompts, whatever shows up next), ship the thinnest generic mechanism that could support it — an endpoint, a file convention, a component prop — and push the specialization into skills, `CLAUDE.md`, component `meta.props`, and authored MDX pages. Resist adding typed routes, type-specific React components, or dedicated UI chrome for a single concept: those accumulate linearly and foreclose future variants.
+
+The test: *could this concept be discovered through an existing list endpoint + an authored page with generic components?* If yes, that's the shape. Code is for what can't be expressed as a file + a doc.
+
+A thin backend discovery layer (e.g. walk `files/foo/*`, parse a manifest) is fine — it's a convention, not a specialization. What's not fine is mirroring that convention all the way up into hardcoded React routes, specialized hooks, and sidebar icons. Those should always be authored content.
+
+**Concrete heuristic:** if the PR adds more than ~50 frontend LOC for a new content type, stop and ask whether a generic component + an authored page would do the job instead.
+
 ---
 
 ## How to use this file

@@ -1,5 +1,5 @@
 info:
-  name: Component catalog has all 19 built-ins
+  name: Component catalog has all 21 built-ins
   type: http
   seq: 1
 
@@ -12,9 +12,10 @@ runtime:
     - type: tests
       code: |-
         const EXPECTED = [
-          "Badge", "Card", "Chart", "Code", "Counter", "Deck", "File", "Image",
-          "Kanban", "List", "Log", "Markdown", "Mermaid", "Metric", "Progress",
-          "Stack", "Status", "Table", "TimeSeries",
+          "ApiList", "Badge", "Card", "Chart", "Code", "Counter", "Deck",
+          "Errors", "File", "Image", "Kanban", "List", "Log", "Markdown",
+          "Mermaid", "Metric", "Progress", "Stack", "Status", "Table",
+          "TimeSeries",
         ];
         test("status 200", function() { expect(res.status).to.equal(200); });
         test("returns array", function() { expect(res.body).to.be.an("array"); });
@@ -24,6 +25,6 @@ runtime:
             expect(names, `missing builtin: ${name}`).to.include(name);
           }
         });
-        test("catalog count is at least 19", function() {
-          expect(res.body.length).to.be.at.least(19);
+        test("catalog count is at least 21", function() {
+          expect(res.body.length).to.be.at.least(21);
         });

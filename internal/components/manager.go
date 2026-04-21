@@ -315,6 +315,22 @@ func (m *Manager) registerBuiltins() {
 				},
 			},
 		},
+		{
+			Name: "ApiList", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "ApiList",
+				Description: "Generic list renderer for any REST endpoint that returns a JSON array of objects (e.g. /api/skills, /api/errors, /api/content). Picks a title, description, and id from each row (configurable, with sensible fallbacks). Optionally shows a download link per row. Use this before adding a type-specific page — principle 9.",
+				Props: map[string]PropMeta{
+					"src":            {Type: "string", Description: "Endpoint returning a JSON array of objects (required)."},
+					"titleKey":       {Type: "string", Description: "Field to use as row title (defaults: title, name, slug, id, key)."},
+					"descriptionKey": {Type: "string", Description: "Field to use as row description (defaults: description, summary, detail)."},
+					"idKey":          {Type: "string", Description: "Field used for React keys and URL building (defaults: slug, id, key, name)."},
+					"downloadPrefix": {Type: "string", Description: "If set, each row shows a download button to `{downloadPrefix}{idKey}`."},
+					"empty":          {Type: "string", Description: "Text shown when the endpoint returns an empty array."},
+					"refreshOn":      {Type: "string", Description: "Optional window event name to re-fetch on (e.g. agentboard:file-updated)."},
+				},
+			},
+		},
 	}
 
 	for _, b := range builtins {

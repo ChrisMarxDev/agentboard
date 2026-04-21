@@ -121,6 +121,7 @@ The dashboard should exercise a broad set of components — it's our own visual 
 - **Kanban** for work-in-progress vs shipped features
 - **Markdown** (the component, dynamically-loaded) for summaries that change often
 - **File** for linking downloadable project artifacts (a PDF of the spec, an architecture SVG)
+- **ApiList** for surfacing any `/api/*` endpoint that returns an array of objects (skills, errors, pages…) — prefer this over a bespoke React route when you want a listing page. See `content/skills.md` for the canonical example. Per CORE_GUIDELINES §9.
 
 One rule: each feature page must use at least **three distinct components** plus a Mermaid diagram. If a feature has nothing diagrammable, it's probably not interesting enough to have its own page — roll it into a sibling.
 
