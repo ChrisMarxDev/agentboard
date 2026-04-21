@@ -1,6 +1,6 @@
 # AgentBoard
 
-Single-binary dashboard server for agent-driven workflows. Agents write data via REST; humans read live dashboards in the browser.
+Single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST/MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
 
 > **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the product invariants, the stable API/MCP/component contracts, what's in vs out of Phase 1 scope, and the pre-flight checklist for risky changes. Full design is in `spec.md`.
 >

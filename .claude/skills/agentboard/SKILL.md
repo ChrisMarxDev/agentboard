@@ -143,3 +143,25 @@ When the user asks what's currently on the dashboard:
 1. `GET /api/content` — lists all pages.
 2. `GET /api/data?prefix=dev.` — lists data keys (if the prefix query is supported; otherwise `/api/data` then filter).
 3. Return a short summary, not a dump.
+
+---
+
+## Hosting skills under files/skills/
+
+AgentBoard's skills surface is a read-view on top of generic file storage. A
+skill is any folder under `files/skills/<slug>/` containing a `SKILL.md` with
+`name` + `description` in YAML frontmatter (Anthropic format). The storage is
+ignorant of skill semantics — nothing on disk is "marked" as a skill; the
+folder's location and the manifest are the only signal.
+
+When working in this repo and a new skill needs hosting or updating:
+
+1. Write the manifest via `agentboard_write_file` to `skills/<slug>/SKILL.md`
+   (path is relative to `files/`, so no `files/` prefix in the MCP call).
+2. Upload any supporting files to the same folder.
+3. Verify with `agentboard_list_skills` — the skill should appear with its
+   slug, name, and description.
+4. Test the bundle endpoint: `GET /api/skills/<slug>` returns a zip.
+
+Avoid teaching users about `files/skills/` directly — they should go through
+the agent. The convention is enforced by documentation here, not in code.

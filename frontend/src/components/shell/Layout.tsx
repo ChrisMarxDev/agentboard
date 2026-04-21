@@ -6,6 +6,8 @@ import ShortcutsHelp from './ShortcutsHelp'
 import { useKeyboardShortcuts, type ShortcutMap } from '../../hooks/useKeyboardShortcuts'
 import { usePages } from '../../hooks/usePages'
 import { GrabTray } from './GrabTray'
+import CopyToast from './CopyToast'
+import { copyPageSource, pagePathFromLocation } from '../../lib/copyPage'
 
 const STORAGE_KEY = 'agentboard:nav-collapsed'
 const WIDTH_STORAGE_KEY = 'agentboard:nav-width'
@@ -56,6 +58,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     const map: ShortcutMap = {
       b: () => setCollapsed(c => !c),
       '?': () => setHelpOpen(true),
+      c: () => {
+        void copyPageSource(pagePathFromLocation(location.pathname))
+      },
     }
 
     if (pages.length > 0) {
@@ -116,6 +121,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       {!kiosk && <GrabTray />}
+      <CopyToast />
     </div>
   )
 }

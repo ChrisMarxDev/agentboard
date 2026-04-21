@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { beaconError } from '../../lib/errorBeacon'
+import { copyPageSource } from '../../lib/copyPage'
 
 interface PageActionsMenuProps {
   pagePath: string
@@ -95,6 +96,15 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
 
   const actions: ActionItem[] = []
   if (pagePath) {
+    actions.push({
+      id: 'copy',
+      label: 'Copy source',
+      tone: 'default',
+      run: () => {
+        setOpen(false)
+        void copyPageSource(pagePath)
+      },
+    })
     actions.push({
       id: 'export',
       label: 'Export page',

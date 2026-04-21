@@ -2,6 +2,8 @@
 
 The product principles. Read these before changing anything. When a proposal conflicts with one, the principle wins — or the principle needs an explicit, deliberate exception.
 
+AgentBoard is a content surface for agent teams: agents write, humans read. The content is plural — dashboards, docs, skills, runbooks, files — sharing one tree and one set of primitives. Live dashboards are prominent but not privileged; the same project may hold mostly docs, mostly dashboards, or any mix, and the product should feel coherent for every ratio.
+
 The full design lives in `spec.md`. This file is the load-bearing summary.
 
 ---
@@ -34,7 +36,7 @@ If a "more correct" design is harder for an agent to call, the agent-friendly ve
 
 ## 5. Humans are the primary reader, and they're not technical
 
-The rendered dashboard is a polished, readable document. Not a developer console.
+The rendered output — dashboard, doc, skill reference, or runbook — is a polished, readable surface. Not a developer console.
 
 No SQL panels, no log viewers as primary UX, no "advanced" toggles, no jargon in the default view. If a non-developer can't glance at the page and understand it, the design failed.
 

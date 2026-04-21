@@ -181,6 +181,25 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
+			Name:        "agentboard_list_skills",
+			Description: "List skills hosted by this project. A skill is any folder under files/skills/<slug>/ containing a SKILL.md with `name` and `description` in YAML frontmatter (Anthropic skill format). Returns slug, name, description, path, and updated_at per skill. Use this to discover what skills are available before fetching one with agentboard_get_skill.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "agentboard_get_skill",
+			Description: "Fetch the complete contents of one skill, inlined. Returns slug, name, description, path, and every file in the skill folder (SKILL.md first). Text files come back as `encoding: \"text\"`; anything else as `encoding: \"base64\"`. Use agentboard_list_skills first to discover valid slugs.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"slug": map[string]string{"type": "string", "description": "Folder name under files/skills/ (no path separators)."},
+				},
+				"required": []string{"slug"},
+			},
+		},
+		{
 			Name:        "agentboard_list_errors",
 			Description: "List recent render-time errors reported by frontend components (Mermaid parse failures, Image 404s, Markdown syntax errors, etc.). Returns entries sorted newest-first with component, source key, page, error text, count, first_seen, last_seen. Use this after writing a page or data key to confirm nothing is broken.",
 			InputSchema: map[string]interface{}{
@@ -308,6 +327,10 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolListFiles()
 	case "agentboard_delete_file":
 		return s.toolDeleteFile(args)
+	case "agentboard_list_skills":
+		return s.toolListSkills()
+	case "agentboard_get_skill":
+		return s.toolGetSkill(args)
 	case "agentboard_list_errors":
 		return s.toolListErrors()
 	case "agentboard_clear_errors":
@@ -384,6 +407,35 @@ func (s *Server) toolDeleteFile(args map[string]json.RawMessage) (interface{}, *
 		return nil, &RPCError{Code: code, Message: err.Error()}
 	}
 	return mcpContent(fmt.Sprintf("File %s deleted", name)), nil
+}
+
+func (s *Server) toolListSkills() (interface{}, *RPCError) {
+	list, err := s.Files.ListSkills()
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: err.Error()}
+	}
+	if len(list) == 0 {
+		return mcpContent("No skills found. Hosts skills by writing SKILL.md (YAML frontmatter with `name` and `description`) into files/skills/<slug>/."), nil
+	}
+	pretty, _ := json.MarshalIndent(list, "", "  ")
+	return mcpContent(string(pretty)), nil
+}
+
+func (s *Server) toolGetSkill(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	slug := getString(args, "slug")
+	if slug == "" {
+		return nil, &RPCError{Code: -32602, Message: "slug required"}
+	}
+	bundle, err := s.Files.GetSkill(slug)
+	if err != nil {
+		code := -32000
+		if errors.Is(err, files.ErrInvalidName) || errors.Is(err, files.ErrSkillNotFound) {
+			code = -32602
+		}
+		return nil, &RPCError{Code: code, Message: err.Error()}
+	}
+	pretty, _ := json.MarshalIndent(bundle, "", "  ")
+	return mcpContent(string(pretty)), nil
 }
 
 func (s *Server) toolListErrors() (interface{}, *RPCError) {

@@ -1,0 +1,24 @@
+info:
+  name: Tear down the seeded skill files
+  type: http
+  seq: 5
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/files/skills/bruno-demo/SKILL.md"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        // Delete the supporting file first so the folder empties cleanly.
+        const axios = require('axios');
+        await axios.delete(
+          `${bru.getEnvVar("baseUrl")}/api/files/skills/bruno-demo/examples.md`,
+          { validateStatus: () => true },
+        );
+    - type: tests
+      code: |-
+        test("cleanup DELETE returned 200 or 404", function() {
+          expect([200, 404]).to.include(res.status);
+        });

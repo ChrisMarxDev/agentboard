@@ -1,0 +1,23 @@
+info:
+  name: GET /api/skills/:slug returns a zip of the folder
+  type: http
+  seq: 3
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/skills/bruno-demo"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("content type is application/zip", function() {
+          const ct = res.headers["content-type"] || res.headers["Content-Type"] || "";
+          expect(ct).to.match(/application\/zip/);
+        });
+        test("content-disposition points at a zipped filename", function() {
+          const cd = res.headers["content-disposition"] || res.headers["Content-Disposition"] || "";
+          expect(cd).to.match(/attachment/);
+          expect(cd).to.match(/bruno-demo\.zip/);
+        });

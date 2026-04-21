@@ -1,0 +1,40 @@
+info:
+  name: Seed a test skill under files/skills/bruno-demo/
+  type: http
+  seq: 1
+
+# Upload the SKILL.md via the files API; the skills endpoints read from disk.
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/files/skills/bruno-demo/SKILL.md"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      ---
+      name: bruno-demo
+      description: Skill seeded by the bruno test suite to exercise /api/skills.
+      ---
+
+      # Bruno demo skill
+
+      Body content goes here.
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        // Also seed a supporting file in the same skill folder.
+        const axios = require('axios');
+        await axios.put(
+          `${bru.getEnvVar("baseUrl")}/api/files/skills/bruno-demo/examples.md`,
+          "# examples\n\nsample usage\n",
+          { headers: { "Content-Type": "text/markdown" } },
+        );
+    - type: tests
+      code: |-
+        test("seed PUT returned 200", function() {
+          expect(res.status).to.equal(200);
+        });
