@@ -223,9 +223,9 @@ func TestGetSkill_InlinesTextAndBinary(t *testing.T) {
 func TestWriteSkillZip_ContainsAllFiles(t *testing.T) {
 	m, root := newTestManager(t)
 	writeSkillFiles(t, root, "packable", map[string]string{
-		"SKILL.md":     "---\nname: packable\ndescription: zipped\n---\n\nBody\n",
-		"examples.md":  "# examples\n",
-		"nested/tool":  "sub-file",
+		"SKILL.md":    "---\nname: packable\ndescription: zipped\n---\n\nBody\n",
+		"examples.md": "# examples\n",
+		"nested/tool": "sub-file",
 	})
 
 	var buf bytes.Buffer

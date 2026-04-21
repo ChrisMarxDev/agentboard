@@ -17,9 +17,9 @@ type grabRequest struct {
 
 // grabResponse is what the endpoint returns.
 type grabResponse struct {
-	Format   string          `json:"format"`
-	Text     string          `json:"text"`
-	Sections []grab.Section  `json:"sections"`
+	Format   string         `json:"format"`
+	Text     string         `json:"text"`
+	Sections []grab.Section `json:"sections"`
 }
 
 func (s *Server) handleGrab(w http.ResponseWriter, r *http.Request) {

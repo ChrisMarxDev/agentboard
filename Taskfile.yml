@@ -82,7 +82,7 @@ tasks:
   test:go:
     desc: Run Go unit tests
     cmds:
-      - go test ./...
+      - go test ./cmd/... ./internal/...
 
   test:frontend:
     desc: Run frontend vitest suite
@@ -95,6 +95,41 @@ tasks:
     deps: [build]
     cmds:
       - ./scripts/integration-test.sh
+
+  lint:
+    desc: Run all linters (Go + frontend)
+    deps: [lint:go, lint:frontend]
+
+  lint:go:
+    desc: Run gofmt check + go vet
+    cmds:
+      - |
+        unformatted=$(gofmt -l cmd internal frontend_embed.go)
+        if [ -n "$unformatted" ]; then
+          echo "gofmt violations:"
+          echo "$unformatted"
+          exit 1
+        fi
+      - go vet ./cmd/... ./internal/...
+
+  lint:frontend:
+    desc: Run ESLint on the frontend
+    dir: frontend
+    deps: [install:frontend]
+    cmds:
+      - npm run lint
+
+  fmt:
+    desc: Apply gofmt to all Go files
+    cmds:
+      - gofmt -w cmd internal frontend_embed.go
+
+  typecheck:frontend:
+    desc: TypeScript typecheck for the frontend
+    dir: frontend
+    deps: [install:frontend]
+    cmds:
+      - npm run typecheck
 
   test:bruno:
     desc: Run the Bruno contract test suite (bruno/tests) against a running server on $PORT

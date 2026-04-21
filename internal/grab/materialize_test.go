@@ -7,15 +7,15 @@ import (
 
 func TestSlug(t *testing.T) {
 	cases := map[string]string{
-		"Simple":                 "simple",
-		"Two Words":              "two-words",
-		"  leading/trailing  ":   "leading-trailing",
-		"Numbers 123":            "numbers-123",
-		"Punct! Punct? Punct.":   "punct-punct-punct",
-		"München":                "münchen",
-		"Parse error on line 2":  "parse-error-on-line-2",
-		"":                       "",
-		"---dashes---":           "dashes",
+		"Simple":                "simple",
+		"Two Words":             "two-words",
+		"  leading/trailing  ":  "leading-trailing",
+		"Numbers 123":           "numbers-123",
+		"Punct! Punct? Punct.":  "punct-punct-punct",
+		"München":               "münchen",
+		"Parse error on line 2": "parse-error-on-line-2",
+		"":                      "",
+		"---dashes---":          "dashes",
 	}
 	for input, want := range cases {
 		got := Slug(input)

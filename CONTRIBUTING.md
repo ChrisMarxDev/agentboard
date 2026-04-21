@@ -31,15 +31,20 @@ task build      # frontend build → embedded into the Go binary → ./agentboar
 
 Run `task` (or `task -l`) to see every available task.
 
-## Tests
+## Tests and checks
 
 Run the full suite before opening a PR:
 
 ```bash
+task lint                # gofmt + go vet + ESLint
 task test                # Go unit tests + frontend vitest
 task test:integration    # end-to-end: starts server, hits every REST + MCP endpoint
 task test:bruno          # Bruno contract tests (requires `bru` CLI)
 ```
+
+CI (`.github/workflows/ci.yml`) runs gofmt, `go vet`, staticcheck, `go test -race`,
+the frontend typecheck/lint/test/build, the landing build, and the integration
+script on every push and PR. Run `task fmt` to auto-format Go files.
 
 **Expectations:**
 
@@ -55,13 +60,15 @@ Don't mock the database in handler tests — the SQLite layer is fast, and mocks
 **Go:**
 
 - `go fmt` before committing (gopls / your editor should do this automatically).
+  CI runs `gofmt -l` and fails if anything is unformatted.
+- `go vet` and `staticcheck` run in CI — fix warnings rather than suppressing them.
 - Keep packages focused: `internal/data` owns storage, `internal/server` owns HTTP, `internal/mcp` owns MCP. Cross-package leakage is a red flag.
 - Error returns, not panics. Surface errors up to the handler; the handler decides the HTTP status.
 - No CGO. AgentBoard uses pure-Go SQLite (`modernc.org/sqlite`) on purpose — adding a CGO dependency breaks the static-binary promise.
 
 **Frontend:**
 
-- TypeScript in strict mode.
+- TypeScript in strict mode. `npm run typecheck` + `npm run lint` must pass.
 - Components live in `frontend/src/components/` — `builtin/` for the nine built-ins, `shell/` for layout/nav, etc.
 - Data access goes through the `useData` hook (`frontend/src/hooks/useData.ts`) — never `fetch` directly inside a component.
 - Styling is Tailwind. No CSS-in-JS, no module-level styles except `src/index.css`.

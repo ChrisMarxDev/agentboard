@@ -6,17 +6,41 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/christophermarx/agentboard/internal/project"
 )
 
+// titleCase uppercases the first rune of each space-separated word.
+// Replaces strings.Title (deprecated in Go 1.18) for the narrow filename-slug
+// case: ASCII words separated by spaces, already lowercased upstream.
+func titleCase(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	atStart := true
+	for _, r := range s {
+		if unicode.IsSpace(r) {
+			b.WriteRune(r)
+			atStart = true
+			continue
+		}
+		if atStart {
+			b.WriteRune(unicode.ToUpper(r))
+			atStart = false
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // PageInfo represents a page in the project.
 type PageInfo struct {
-	Path      string `json:"path"`
-	File      string `json:"file"`
-	Title     string `json:"title"`
-	Source    string  `json:"source"`
-	Order     int    `json:"order"`
+	Path   string `json:"path"`
+	File   string `json:"file"`
+	Title  string `json:"title"`
+	Source string `json:"source"`
+	Order  int    `json:"order"`
 }
 
 // PageManager manages MDX pages for a project.
@@ -81,7 +105,7 @@ func (pm *PageManager) ScanPages() {
 
 		title, source := parseFrontmatter(string(content))
 		if title == "" {
-			title = strings.Title(strings.ReplaceAll(filepath.Base(pagePath), "-", " "))
+			title = titleCase(strings.ReplaceAll(filepath.Base(pagePath), "-", " "))
 		}
 
 		pm.pages[pagePath] = &PageInfo{

@@ -38,9 +38,9 @@ var ErrComponentNotFound = errors.New("component not found")
 
 // ComponentMeta describes a component's metadata.
 type ComponentMeta struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description,omitempty"`
-	Props       map[string]PropMeta    `json:"props,omitempty"`
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	Props       map[string]PropMeta `json:"props,omitempty"`
 }
 
 // PropMeta describes a component prop.

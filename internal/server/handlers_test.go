@@ -221,7 +221,10 @@ func TestInvalidJSON(t *testing.T) {
 
 	req, _ := http.NewRequest("PUT", ts.URL+"/api/data/bad", strings.NewReader(`not json`))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 400 {
@@ -458,7 +461,10 @@ func TestMCPToolsList(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	body := `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`
-	resp, _ := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("mcp post failed: %v", err)
+	}
 	defer resp.Body.Close()
 
 	var rpc map[string]interface{}
@@ -482,7 +488,10 @@ func TestMCPToolCall(t *testing.T) {
 
 	// Call agentboard_get via MCP
 	body := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agentboard_get","arguments":{"key":"test.mcp"}}}`
-	resp, _ := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+	resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("mcp post failed: %v", err)
+	}
 	defer resp.Body.Close()
 
 	var rpc map[string]interface{}

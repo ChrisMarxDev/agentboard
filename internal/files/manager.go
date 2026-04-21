@@ -36,10 +36,10 @@ const MaxNameLen = 256
 
 // Errors returned by the Manager. Handlers translate these to HTTP codes.
 var (
-	ErrInvalidName   = errors.New("invalid file name")
-	ErrTooLarge      = errors.New("file too large")
-	ErrNotFound      = errors.New("file not found")
-	ErrIsDirectory   = errors.New("path is a directory, not a file")
+	ErrInvalidName = errors.New("invalid file name")
+	ErrTooLarge    = errors.New("file too large")
+	ErrNotFound    = errors.New("file not found")
+	ErrIsDirectory = errors.New("path is a directory, not a file")
 )
 
 // Info describes a single file on disk.
@@ -56,9 +56,9 @@ type Info struct {
 // all file writes and reads. All validation, MIME detection, ETag computation,
 // and SSE broadcasting go through this type.
 type Manager struct {
-	project    *project.Project
-	maxSizeMB  int
-	mu         sync.RWMutex
+	project   *project.Project
+	maxSizeMB int
+	mu        sync.RWMutex
 }
 
 // NewManager creates a Manager rooted at the project's files/ directory. The

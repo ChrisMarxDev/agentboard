@@ -20,7 +20,6 @@ import { Image } from '../components/builtin/Image'
 import { File as FileComponent } from '../components/builtin/File'
 import { Errors } from '../components/builtin/Errors'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyComponent = ComponentType<any>
 
 const registry = new Map<string, AnyComponent>()

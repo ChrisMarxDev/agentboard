@@ -29,11 +29,11 @@ const DupWindow = 1 * time.Second
 // Entry is one recorded error. Two beacons that agree on
 // (Component, Source, Page, first line of Error) are merged into one Entry.
 type Entry struct {
-	Key       string    `json:"key"`        // dedupe fingerprint, stable across fires
-	Component string    `json:"component"`  // e.g. "Mermaid", "Markdown", "Image"
+	Key       string    `json:"key"`              // dedupe fingerprint, stable across fires
+	Component string    `json:"component"`        // e.g. "Mermaid", "Markdown", "Image"
 	Source    string    `json:"source,omitempty"` // data key OR direct URL OR "inline"
 	Page      string    `json:"page,omitempty"`   // page path the component was rendered on
-	Error     string    `json:"error"`      // full error text
+	Error     string    `json:"error"`            // full error text
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `json:"last_seen"`
 	Count     int       `json:"count"`

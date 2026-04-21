@@ -36,9 +36,9 @@ type Section struct {
 
 // Component describes one data-bound component found inside the Card.
 type Component struct {
-	Type      string      `json:"type"`              // e.g. "Mermaid", "Code"
-	SourceKey string      `json:"source_key"`        // data key the component reads
-	Value     interface{} `json:"value"`             // resolved current value
+	Type      string      `json:"type"`       // e.g. "Mermaid", "Code"
+	SourceKey string      `json:"source_key"` // data key the component reads
+	Value     interface{} `json:"value"`      // resolved current value
 	Language  string      `json:"language,omitempty"`
 }
 
