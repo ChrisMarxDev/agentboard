@@ -7,7 +7,7 @@ interface DeckProps {
   columns?: number
 }
 
-export function Deck({ children, min = 280, gap = 16, columns }: DeckProps) {
+export function Deck({ children, min = 280, gap = 12, columns }: DeckProps) {
   const style: CSSProperties = {
     display: 'grid',
     gap: `${gap}px`,

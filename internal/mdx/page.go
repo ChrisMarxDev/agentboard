@@ -83,9 +83,15 @@ func (pm *PageManager) ScanPages() {
 		}
 	}
 
-	// Scan content/ directory
+	// Scan content/ directory — collect first, then assign orders by
+	// hierarchical path sort so `/foo` precedes `/foo/bar` (the parent
+	// index page comes before its subtree, not after).
 	contentDir := pm.project.ContentDir()
-	order := 1
+	type scanned struct {
+		pagePath string
+		info     *PageInfo
+	}
+	var collected []scanned
 	filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
@@ -108,16 +114,42 @@ func (pm *PageManager) ScanPages() {
 			title = titleCase(strings.ReplaceAll(filepath.Base(pagePath), "-", " "))
 		}
 
-		pm.pages[pagePath] = &PageInfo{
-			Path:   urlPath,
-			File:   filepath.Join("content", relPath),
-			Title:  title,
-			Source: source,
-			Order:  order,
-		}
-		order++
+		collected = append(collected, scanned{
+			pagePath: pagePath,
+			info: &PageInfo{
+				Path:   urlPath,
+				File:   filepath.Join("content", relPath),
+				Title:  title,
+				Source: source,
+			},
+		})
 		return nil
 	})
+
+	sort.Slice(collected, func(i, j int) bool {
+		return lessHierarchical(collected[i].info.Path, collected[j].info.Path)
+	})
+	for i, s := range collected {
+		s.info.Order = i + 1
+		pm.pages[s.pagePath] = s.info
+	}
+}
+
+// lessHierarchical orders URL paths so a parent index page comes before
+// any of its descendants (e.g. /features before /features/auth,
+// /features/components before /features/components/badge). Segments are
+// compared lexicographically; when one path is a prefix of the other,
+// the shorter path wins.
+func lessHierarchical(a, b string) bool {
+	as := strings.Split(strings.TrimPrefix(a, "/"), "/")
+	bs := strings.Split(strings.TrimPrefix(b, "/"), "/")
+	n := min(len(as), len(bs))
+	for i := range n {
+		if as[i] != bs[i] {
+			return as[i] < bs[i]
+		}
+	}
+	return len(as) < len(bs)
 }
 
 // ListPages returns all pages sorted by order.
