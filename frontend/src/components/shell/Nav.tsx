@@ -4,12 +4,16 @@ import { Magnet } from 'lucide-react'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
 import NavTree from './NavTree'
+import FileNav from './FileNav'
 import { ancestorFolderPaths, buildPageTree, collectFolderPaths } from '../../lib/pageTree'
+import { ancestorFolderPathsForFile, buildFileTree } from '../../lib/fileTree'
 import type { PageEntry } from '../../hooks/usePages'
 import { useGrab } from '../../hooks/useGrab'
 import { setMode } from '../../lib/grab'
+import { useFiles } from '../../hooks/useFiles'
 
 const EXPANDED_STORAGE_KEY = 'agentboard:nav-expanded'
+const FILE_EXPANDED_STORAGE_KEY = 'agentboard:files-nav-expanded'
 
 export const NAV_MIN_WIDTH = 200
 export const NAV_MAX_WIDTH = 600
@@ -36,14 +40,30 @@ interface NavProps {
   onOpenHelp?: () => void
 }
 
+function loadSet(key: string): Set<string> {
+  if (typeof window === 'undefined') return new Set()
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return new Set(parsed.filter(x => typeof x === 'string'))
+  } catch {
+    // ignore corrupt storage
+  }
+  return new Set()
+}
+
 export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: NavProps) {
   const location = useLocation()
   const { mode: grabMode, picks } = useGrab()
+  const { files } = useFiles()
 
   const tree = useMemo(() => buildPageTree(pages), [pages])
   const folderPathsSet = useMemo(() => new Set(collectFolderPaths(tree)), [tree])
+  const fileTree = useMemo(() => buildFileTree(files), [files])
 
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded())
+  const [fileExpanded, setFileExpanded] = useState<Set<string>>(() => loadSet(FILE_EXPANDED_STORAGE_KEY))
 
   useEffect(() => {
     const toOpen = [...ancestorFolderPaths(location.pathname)]
@@ -70,6 +90,42 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
       // storage may be unavailable (private mode); silently ignore
     }
   }, [expanded])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(FILE_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(fileExpanded)))
+    } catch {
+      // ignore
+    }
+  }, [fileExpanded])
+
+  // Auto-expand file-tree ancestors when the user navigates to /files/<path>.
+  useEffect(() => {
+    if (!location.pathname.startsWith('/files/')) return
+    const filePath = location.pathname.slice('/files/'.length)
+    const ancestors = ancestorFolderPathsForFile(filePath)
+    if (ancestors.length === 0) return
+    setFileExpanded(prev => {
+      let changed = false
+      const next = new Set(prev)
+      for (const a of ancestors) {
+        if (!next.has(a)) {
+          next.add(a)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [location.pathname])
+
+  const onFileToggle = (folderPath: string) => {
+    setFileExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(folderPath)) next.delete(folderPath)
+      else next.add(folderPath)
+      return next
+    })
+  }
 
   const onToggle = (folderPath: string) => {
     setExpanded(prev => {
@@ -173,6 +229,24 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
           onExpand={onExpand}
           activePath={location.pathname}
         />
+
+        {fileTree.length > 0 && (
+          <>
+            <div
+              className="flex items-center px-3 pt-4 pb-2 text-[10px] uppercase tracking-wide"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              <span>Files</span>
+            </div>
+            <FileNav
+              nodes={fileTree}
+              depth={0}
+              expanded={fileExpanded}
+              onToggle={onFileToggle}
+              activePath={location.pathname}
+            />
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-2 pt-2">
