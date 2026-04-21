@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Magnet } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { BookOpen, Magnet } from 'lucide-react'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
 import NavTree from './NavTree'
@@ -174,6 +174,20 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
           activePath={location.pathname}
         />
       </div>
+
+      <Link
+        to="/skills"
+        className="flex items-center gap-2 px-3 py-2 mt-2 rounded-md text-sm"
+        style={{
+          background: location.pathname.startsWith('/skills') ? 'var(--accent-light)' : 'transparent',
+          color: location.pathname.startsWith('/skills') ? 'var(--accent)' : 'var(--text-secondary)',
+          border: '1px solid transparent',
+          textDecoration: 'none',
+        }}
+      >
+        <BookOpen size={14} />
+        <span>Skills</span>
+      </Link>
 
       <div className="flex items-center gap-2 pt-2">
         <div className="flex-1">
