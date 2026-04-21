@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/data"
 	interrors "github.com/christophermarx/agentboard/internal/errors"
@@ -22,6 +23,7 @@ import (
 type Server struct {
 	Project              *project.Project
 	Store                data.DataStore
+	Auth                 *auth.Store
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
 	Components           *components.Manager
@@ -38,13 +40,13 @@ type Server struct {
 type ServerConfig struct {
 	Project              *project.Project
 	Store                data.DataStore
+	Auth                 *auth.Store // identity-backed auth (agents + admins); required
 	SkillFile            string
 	FrontendFS           http.FileSystem // embedded frontend
 	DevMode              bool
 	DevProxy             string // Vite dev server URL for dev mode
 	AllowComponentUpload bool
 	MaxFileSizeMB        int
-	AuthToken            string // when non-empty, every route (except /api/health) requires a matching token
 }
 
 // New creates a new AgentBoard server.
@@ -104,7 +106,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
-	r.Use(authMiddleware(cfg.AuthToken))
+	// Token-auth gates data-plane endpoints; admin-plane (/api/admin/*) is
+	// handled separately by SessionMiddleware scoped into that subtree below.
+	r.Use(auth.TokenMiddleware(cfg.Auth, auth.MiddlewareConfig{}))
+	// AuthorizeMiddleware enforces per-identity rules once the token has
+	// resolved to an identity.
+	r.Use(auth.AuthorizeMiddleware())
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {

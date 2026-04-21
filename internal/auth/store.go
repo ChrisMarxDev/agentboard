@@ -566,7 +566,7 @@ type rowScanner interface {
 func (s *Store) queryIdentity(query string, args ...any) (*Identity, error) {
 	row := s.db.QueryRow(query, args...)
 	ident, err := scanIdentity(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {

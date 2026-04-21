@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/data"
 	"github.com/christophermarx/agentboard/internal/project"
 )
@@ -36,9 +37,18 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	authStore, err := auth.NewStore(store.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force the middleware's "first-run cache" to re-check so tests that
+	// create identities see them immediately.
+	auth.InvalidateFirstRunCache()
+
 	srv := New(ServerConfig{
 		Project:   proj,
 		Store:     store,
+		Auth:      authStore,
 		SkillFile: "# Test skill",
 	})
 
@@ -567,11 +577,29 @@ func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
 	}
 	t.Cleanup(func() { store.Close() })
 
+	authStore, err := auth.NewStore(store.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Empty token = preserve the "no auth configured" (loopback) posture —
+	// leave the identities table empty so the middleware stays in open mode.
+	if token != "" {
+		if _, err := authStore.CreateIdentity(auth.CreateIdentityParams{
+			Name:       "test-agent",
+			Kind:       auth.KindAgent,
+			TokenHash:  auth.HashToken(token),
+			AccessMode: auth.ModeAllowAll,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	auth.InvalidateFirstRunCache()
+
 	srv := New(ServerConfig{
 		Project:   proj,
 		Store:     store,
+		Auth:      authStore,
 		SkillFile: "# Test skill",
-		AuthToken: token,
 	})
 
 	ts := httptest.NewServer(srv.Router)

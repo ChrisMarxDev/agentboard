@@ -116,6 +116,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db}, nil
 }
 
+// DB returns the underlying connection pool so companion stores (e.g.
+// internal/auth) can share the same SQLite file without opening a second
+// handle. Callers MUST NOT close the returned *sql.DB; lifecycle belongs
+// to SQLiteStore.
+func (s *SQLiteStore) DB() *sql.DB {
+	return s.db
+}
+
 func (s *SQLiteStore) now() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }

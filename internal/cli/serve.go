@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agentboard "github.com/christophermarx/agentboard"
+	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/data"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -86,6 +87,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer store.Close()
 
+	// Open auth store on the same SQLite connection pool.
+	authStore, err := auth.NewStore(store.DB())
+	if err != nil {
+		return fmt.Errorf("open auth store: %w", err)
+	}
+
 	// Seed sample data if this is a fresh database
 	keys, _ := store.ListKeys()
 	if len(keys) == 0 {
@@ -116,32 +123,36 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Flag overrides config (off by default in both).
 	uploadEnabled := proj.Config.AllowComponentUpload || allowComponentUpload
 
-	// Flag wins over env var; both can be empty (auth disabled).
-	token := authToken
-	if token == "" {
-		token = os.Getenv("AGENTBOARD_AUTH_TOKEN")
+	// Legacy env var auto-migrates to an identity; see AUTH.md migration.
+	legacyToken := authToken
+	if legacyToken == "" {
+		legacyToken = os.Getenv("AGENTBOARD_AUTH_TOKEN")
+	}
+	if err := authStore.MigrateLegacyToken(legacyToken, log.Default()); err != nil {
+		return fmt.Errorf("auth legacy migration: %w", err)
 	}
 
 	// Create server
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
 		Store:                store,
+		Auth:                 authStore,
 		SkillFile:            embedpkg.SkillFile(),
 		FrontendFS:           frontendHTTPFS,
 		DevMode:              devMode,
 		DevProxy:             "http://localhost:5173",
 		AllowComponentUpload: uploadEnabled,
 		MaxFileSizeMB:        proj.Config.MaxFileSizeMB,
-		AuthToken:            token,
 	})
 
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")
 	}
-	if token == "" {
-		log.Printf("WARNING: no auth token configured. Server is open to anyone who can reach it — only safe for loopback. Set AGENTBOARD_AUTH_TOKEN to gate access.")
+	hasAdmin, _ := authStore.HasAdmin()
+	if !hasAdmin && legacyToken == "" {
+		log.Printf("WARNING: no admin identity exists and no legacy token set. Server is open — only safe on loopback. Visit /setup or run `agentboard admin bootstrap-code` to claim admin.")
 	} else {
-		log.Printf("Auth token enabled. All routes (except /api/health) require a matching Bearer/Basic/token-query credential.")
+		log.Printf("Auth: identity-backed. Agent endpoints require a Bearer/Basic/?token= credential matching a live identity.")
 	}
 
 	// Start page watcher
