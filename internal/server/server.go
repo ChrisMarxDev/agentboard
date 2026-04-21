@@ -144,6 +144,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// File endpoints (/api/files/*  supports nested paths like exports/q1.csv)
 		r.Get("/files", s.handleListFiles)
 		r.Get("/files/*", s.handleGetFile)
+		r.Head("/files/*", s.handleGetFile)
 		r.Put("/files/*", s.handleWriteFile)
 		r.Delete("/files/*", s.handleDeleteFile)
 

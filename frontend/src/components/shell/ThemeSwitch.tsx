@@ -1,66 +1,71 @@
 import { useEffect, useState } from 'react'
+import { Sun, Moon } from 'lucide-react'
 
-type Theme = 'auto' | 'light' | 'dark'
+type StoredTheme = 'light' | 'dark' | null
 
 const STORAGE_KEY = 'agentboard:theme'
 
-function applyTheme(theme: Theme) {
+function readStored(): StoredTheme {
+  if (typeof window === 'undefined') return null
+  const v = window.localStorage.getItem(STORAGE_KEY)
+  return v === 'light' || v === 'dark' ? v : null
+}
+
+function systemTheme(): 'light' | 'dark' {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'light'
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function applyTheme(stored: StoredTheme) {
   const html = document.documentElement
-  if (theme === 'auto') {
+  if (stored === null) {
     html.removeAttribute('data-theme')
   } else {
-    html.setAttribute('data-theme', theme)
+    html.setAttribute('data-theme', stored)
   }
 }
 
-export function readStoredTheme(): Theme {
-  if (typeof window === 'undefined') return 'auto'
-  const v = window.localStorage.getItem(STORAGE_KEY)
-  return v === 'light' || v === 'dark' || v === 'auto' ? v : 'auto'
-}
-
 export function ThemeSwitch() {
-  const [theme, setTheme] = useState<Theme>(() => readStoredTheme())
+  const [stored, setStored] = useState<StoredTheme>(() => readStored())
+  const [sysTheme, setSysTheme] = useState<'light' | 'dark'>(() => systemTheme())
 
   useEffect(() => {
-    applyTheme(theme)
-    window.localStorage.setItem(STORAGE_KEY, theme)
-  }, [theme])
+    applyTheme(stored)
+    if (stored === null) {
+      window.localStorage.removeItem(STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(STORAGE_KEY, stored)
+    }
+  }, [stored])
 
-  const options: { value: Theme; label: string; glyph: string }[] = [
-    { value: 'light', label: 'Light', glyph: '☀' },
-    { value: 'auto', label: 'Auto',  glyph: '◐' },
-    { value: 'dark',  label: 'Dark',  glyph: '☾' },
-  ]
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)')
+    if (!mq) return
+    const update = () => setSysTheme(mq.matches ? 'dark' : 'light')
+    mq.addEventListener('change', update)
+    return () => mq.removeEventListener('change', update)
+  }, [])
+
+  const resolved = stored ?? sysTheme
+  const next: 'light' | 'dark' = resolved === 'dark' ? 'light' : 'dark'
+  const Icon = resolved === 'dark' ? Moon : Sun
+  const label = `Switch to ${next} mode`
 
   return (
-    <div
-      className="flex items-center rounded-md overflow-hidden"
-      style={{ border: '1px solid var(--border)', background: 'var(--bg)' }}
-      role="group"
-      aria-label="Theme"
+    <button
+      type="button"
+      onClick={() => setStored(next)}
+      aria-label={label}
+      title={label}
+      className="h-8 w-full flex items-center justify-center rounded-md"
+      style={{
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
+      }}
     >
-      {options.map(opt => {
-        const active = theme === opt.value
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => setTheme(opt.value)}
-            aria-pressed={active}
-            title={opt.label}
-            className="flex-1 flex items-center justify-center text-sm py-1.5 transition-colors"
-            style={{
-              background: active ? 'var(--accent-light)' : 'transparent',
-              color: active ? 'var(--accent)' : 'var(--text-secondary)',
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            {opt.glyph}
-          </button>
-        )
-      })}
-    </div>
+      <Icon size={16} />
+    </button>
   )
 }

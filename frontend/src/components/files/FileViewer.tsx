@@ -17,7 +17,12 @@ import * as runtime from 'react/jsx-runtime'
  */
 export default function FileViewer() {
   const { pathname } = useLocation()
-  const filePath = decodeURI(pathname.slice('/files/'.length))
+  // After CORE_GUIDELINES §9 consolidation, non-markdown files live at
+  // `/<path>` (no `/files/` prefix) and the PageRenderer delegates here on a
+  // page 404 + file HEAD success. A legacy `/files/<path>` prefix is still
+  // tolerated so old bookmarks keep working.
+  const raw = pathname.startsWith('/files/') ? pathname.slice('/files/'.length) : pathname.slice(1)
+  const filePath = decodeURI(raw)
   const apiUrl = `/api/files/${filePath}`
 
   const [meta, setMeta] = useState<{ status: number; contentType: string; size: number } | null>(null)

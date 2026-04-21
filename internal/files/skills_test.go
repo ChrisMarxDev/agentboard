@@ -22,10 +22,11 @@ func newTestManager(t *testing.T) (*Manager, string) {
 	return NewManager(proj, 0), dir
 }
 
-// writeSkillFiles creates files/skills/<slug>/<path> with the given contents.
+// writeSkillFiles creates content/skills/<slug>/<path> with the given contents.
+// Pages and assets share one tree since the CORE_GUIDELINES §9 consolidation.
 func writeSkillFiles(t *testing.T, root, slug string, files map[string]string) {
 	t.Helper()
-	base := filepath.Join(root, "files", "skills", slug)
+	base := filepath.Join(root, "content", "skills", slug)
 	if err := os.MkdirAll(base, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestGetSkill_InlinesTextAndBinary(t *testing.T) {
 		"README.txt": "notes",
 	})
 	// Add a file with a null byte so it's treated as binary.
-	binPath := filepath.Join(root, "files", "skills", "multi", "logo.bin")
+	binPath := filepath.Join(root, "content", "skills", "multi", "logo.bin")
 	if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0x03}, 0644); err != nil {
 		t.Fatal(err)
 	}

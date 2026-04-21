@@ -12,10 +12,10 @@ import (
 )
 
 // writeProjectSkill drops a SKILL.md (and optional extras) under the test
-// project's files/skills/<slug>/ folder.
+// project's content/skills/<slug>/ folder (unified tree, CORE_GUIDELINES §9).
 func writeProjectSkill(t *testing.T, projPath, slug string, files map[string]string) {
 	t.Helper()
-	dir := filepath.Join(projPath, "files", "skills", slug)
+	dir := filepath.Join(projPath, "content", "skills", slug)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestSkillsList_ReturnsValidSkills(t *testing.T) {
 		"SKILL.md": "---\nname: greeter\ndescription: Greet people\n---\n",
 	})
 	// Folder without a manifest should be ignored.
-	os.MkdirAll(filepath.Join(srv.Project.Path, "files", "skills", "ignored"), 0755)
+	os.MkdirAll(filepath.Join(srv.Project.Path, "content", "skills", "ignored"), 0755)
 
 	resp, err := http.Get(ts.URL + "/api/skills")
 	if err != nil {

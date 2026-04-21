@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { FileEntry } from '../lib/fileTree'
+
+export interface FileEntry {
+  name: string
+  size: number
+  content_type: string
+  modified_at: string
+}
 
 /**
  * Fetch the full manifest of uploaded files from `/api/files`. Auto-refreshes

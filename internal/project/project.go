@@ -85,10 +85,82 @@ func (p *Project) ComponentsDir() string {
 	return filepath.Join(p.Path, "components")
 }
 
-// FilesDir returns the files/ directory path — where user-uploaded images,
-// PDFs, exports, etc. live. Served via /api/files/*.
+// FilesDir returns the directory where uploaded assets live. Historically this
+// was <project>/files/ — it now points at ContentDir() so pages and assets share
+// one tree (see CORE_GUIDELINES §9). MigrateLegacyFilesDir handles the one-time
+// move for projects that predate the consolidation.
 func (p *Project) FilesDir() string {
+	return p.ContentDir()
+}
+
+// LegacyFilesDir returns the pre-consolidation files/ directory path. Used only
+// by the migration path; new code should use ContentDir().
+func (p *Project) LegacyFilesDir() string {
 	return filepath.Join(p.Path, "files")
+}
+
+// MigrateLegacyFilesDir merges <project>/files/* into <project>/content/* and
+// removes the old files/ directory. Safe to call on every startup: returns
+// (false, nil) when there's nothing to do. If a path collision occurs (same
+// relative path exists in both), the content/ version wins and the files/
+// version is logged and left in place with a `.bak` suffix.
+func (p *Project) MigrateLegacyFilesDir() (bool, error) {
+	legacy := p.LegacyFilesDir()
+	if _, err := os.Stat(legacy); os.IsNotExist(err) {
+		return false, nil
+	}
+
+	contentDir := p.ContentDir()
+	if err := os.MkdirAll(contentDir, 0755); err != nil {
+		return false, err
+	}
+
+	moved := false
+	err := filepath.Walk(legacy, func(src string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || info.IsDir() {
+			return walkErr
+		}
+		rel, err := filepath.Rel(legacy, src)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(contentDir, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			return err
+		}
+		if _, err := os.Stat(dst); err == nil {
+			bak := src + ".bak"
+			log.Printf("agentboard: files/%s collides with content/%s — leaving legacy copy at %s", rel, rel, bak)
+			return os.Rename(src, bak)
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+		moved = true
+		return nil
+	})
+	if err != nil {
+		return moved, err
+	}
+
+	// Remove now-empty legacy tree, skipping any .bak files that survived.
+	_ = filepath.Walk(legacy, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil || path == legacy {
+			return nil
+		}
+		if info.IsDir() {
+			_ = os.Remove(path) // only removes if empty
+		}
+		return nil
+	})
+	if entries, err := os.ReadDir(legacy); err == nil && len(entries) == 0 {
+		_ = os.Remove(legacy)
+	}
+
+	if moved {
+		log.Printf("agentboard: migrated %s/* → %s/*", legacy, contentDir)
+	}
+	return moved, nil
 }
 
 // IndexFile returns the path to index.md.
@@ -101,10 +173,15 @@ func (p *Project) BuildDir() string {
 	return filepath.Join(p.DataDir(), "build")
 }
 
-// EnsureDirs creates all required directories for the project.
-// Runs the pages/ → content/ migration first so callers never see the old layout.
+// EnsureDirs creates all required directories for the project. Runs legacy
+// migrations first so callers never see the old layout:
+//   - pages/  → content/    (pre-knowledge-spec rename)
+//   - files/* → content/*   (pages + assets consolidated per CORE_GUIDELINES §9)
 func (p *Project) EnsureDirs() error {
 	if _, err := p.MigrateLegacyPagesDir(); err != nil {
+		return err
+	}
+	if _, err := p.MigrateLegacyFilesDir(); err != nil {
 		return err
 	}
 	dirs := []string{
@@ -112,7 +189,6 @@ func (p *Project) EnsureDirs() error {
 		p.BuildDir(),
 		p.ContentDir(),
 		p.ComponentsDir(),
-		p.FilesDir(),
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {

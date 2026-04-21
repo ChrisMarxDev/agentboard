@@ -83,7 +83,7 @@ func (m *Manager) MaxSizeBytes() int64 {
 
 // FilesDir returns the filesystem path that backs /api/files/*.
 func (m *Manager) FilesDir() string {
-	return filepath.Join(m.project.Path, "files")
+	return m.project.FilesDir()
 }
 
 // ValidateName enforces the naming rules documented in spec-files.md §5:
@@ -289,6 +289,11 @@ func (m *Manager) List() ([]Info, error) {
 		}
 		// Skip temp upload files.
 		if strings.HasPrefix(d.Name(), ".upload-") && strings.HasSuffix(d.Name(), ".tmp") {
+			return nil
+		}
+		// Files and pages share one tree (CORE_GUIDELINES §9). The files view
+		// returns only assets — markdown pages are served via /api/content.
+		if strings.HasSuffix(d.Name(), ".md") || strings.HasSuffix(d.Name(), ".mdx") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
