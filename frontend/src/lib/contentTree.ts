@@ -202,6 +202,53 @@ export function collectContentFolderPaths(nodes: ContentTreeNode[]): string[] {
 }
 
 /**
+ * Filter a content tree by a case-insensitive query string. Matches against
+ * each node's name, title, and path. A folder is kept if it matches directly
+ * OR if any descendant matches — subtrees are pruned to the minimum that still
+ * shows each match in its hierarchy context. Returns both the filtered tree
+ * and the set of folder paths that should be auto-expanded so every match is
+ * visible without manual clicking.
+ */
+export function filterContentTree(
+  nodes: ContentTreeNode[],
+  query: string
+): { nodes: ContentTreeNode[]; expandedPaths: Set<string> } {
+  const q = query.trim().toLowerCase()
+  if (!q) return { nodes, expandedPaths: new Set() }
+
+  const expanded = new Set<string>()
+
+  const nodeMatches = (n: ContentTreeNode): boolean => {
+    const haystacks =
+      n.kind === 'folder'
+        ? [n.name, n.title, n.path]
+        : n.kind === 'page'
+          ? [n.name, n.title, n.path]
+          : [n.name, n.path]
+    return haystacks.some(h => h.toLowerCase().includes(q))
+  }
+
+  const walk = (ns: ContentTreeNode[]): ContentTreeNode[] => {
+    const out: ContentTreeNode[] = []
+    for (const n of ns) {
+      if (n.kind !== 'folder') {
+        if (nodeMatches(n)) out.push(n)
+        continue
+      }
+      const self = nodeMatches(n)
+      const filteredChildren = walk(n.children)
+      if (self || filteredChildren.length > 0) {
+        expanded.add(n.path)
+        out.push({ ...n, children: filteredChildren })
+      }
+    }
+    return out
+  }
+
+  return { nodes: walk(nodes), expandedPaths: expanded }
+}
+
+/**
  * Find a folder node in the tree by its path (disk-relative, no leading slash).
  * Returns null if no folder matches.
  */

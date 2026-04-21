@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Magnet } from 'lucide-react'
+import { Magnet, Search, X } from 'lucide-react'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
 import ContentNav from './ContentNav'
@@ -8,6 +8,7 @@ import {
   ancestorFolderPathsForHref,
   buildContentTree,
   collectContentFolderPaths,
+  filterContentTree,
 } from '../../lib/contentTree'
 import type { PageEntry } from '../../hooks/usePages'
 import { useGrab } from '../../hooks/useGrab'
@@ -46,8 +47,16 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
   const { mode: grabMode, picks } = useGrab()
   const { files } = useFiles()
 
-  const tree = useMemo(() => buildContentTree(pages, files), [pages, files])
-  const folderPathsSet = useMemo(() => new Set(collectContentFolderPaths(tree)), [tree])
+  const fullTree = useMemo(() => buildContentTree(pages, files), [pages, files])
+  const folderPathsSet = useMemo(() => new Set(collectContentFolderPaths(fullTree)), [fullTree])
+
+  const [query, setQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+
+  const { tree, searchExpanded } = useMemo(() => {
+    const { nodes, expandedPaths } = filterContentTree(fullTree, query)
+    return { tree: nodes, searchExpanded: expandedPaths }
+  }, [fullTree, query])
 
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded())
 
@@ -97,6 +106,21 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
 
   const navRef = useRef<HTMLElement | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+
+  // `/` focuses the search input (but not when the user is already typing in
+  // an input elsewhere). Escape inside the search clears the query.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== '/') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      e.preventDefault()
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     if (!isDragging || !onResize) return
@@ -160,10 +184,66 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
       </div>
 
       <div
+        className="flex items-center mb-2"
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--border)',
+          borderRadius: '0.5rem',
+          padding: '0 0.5rem',
+        }}
+      >
+        <Search size={13} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+        <input
+          ref={searchInputRef}
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Escape') {
+              setQuery('')
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          placeholder="Search"
+          aria-label="Search content"
+          className="flex-1 min-w-0 h-7 text-sm"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            color: 'var(--text)',
+            padding: '0 0.4rem',
+          }}
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+            title="Clear"
+            className="flex items-center justify-center"
+            style={{
+              width: 18,
+              height: 18,
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            <X size={12} />
+          </button>
+        ) : (
+          <Kbd>/</Kbd>
+        )}
+      </div>
+
+      <div
         className="flex items-center justify-between px-3 pb-2 text-[10px] uppercase tracking-wide"
         style={{ color: 'var(--text-secondary)' }}
       >
-        <span>Content</span>
+        <span>{query ? `Matches for "${query}"` : 'Content'}</span>
         <div className="flex items-center gap-1">
           <Kbd>J</Kbd>
           <Kbd>K</Kbd>
@@ -171,10 +251,15 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
       </div>
 
       <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
+        {query && tree.length === 0 && (
+          <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            No matches.
+          </div>
+        )}
         <ContentNav
           nodes={tree}
           depth={0}
-          expanded={expanded}
+          expanded={query ? searchExpanded : expanded}
           onToggle={onToggle}
           onExpand={onExpand}
           activePath={location.pathname}
