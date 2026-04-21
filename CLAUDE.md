@@ -22,6 +22,8 @@ The repo runs its **own** AgentBoard instance at `http://localhost:3000` using t
 
 When you ship a feature, add/refresh its page and bump the relevant `dev.*` data keys. The workflow — conventions, data-key namespace, feature-page template — is documented in the **`agentboard`** skill under `.claude/skills/agentboard/SKILL.md` (Claude Code auto-loads it in this repo). Trigger it with phrases like "update the dev dashboard", "add a feature page", "record this metric", or "is the dev instance running".
 
+**Keep the skill itself in sync with the product.** The long-term goal of this repo is to *use AgentBoard to build AgentBoard*, permanently — every ship is a dogfood cycle. When you change behavior that affects how agents interact with AgentBoard (new built-in component, new MCP tool, new REST route, new data-key convention, renamed endpoint, changed trigger phrase), update `.claude/skills/agentboard/SKILL.md` in the same commit. A stale skill means the next agent (you, tomorrow) builds against outdated assumptions and re-learns facts the project already knows.
+
 ## Task runner
 
 **All run commands go through [Taskfile.dev](https://taskfile.dev/).** Use `task` instead of invoking `go`, `npm`, or `make` directly. Run `task` (or `task -l`) to see every available task.

@@ -5,6 +5,8 @@ description: Dogfood AgentBoard on itself. Use this skill when working inside th
 
 # AgentBoard: Dogfood Skill
 
+> **Meta-invariant: this skill is part of the product.** The long-term goal of this repo is to *use AgentBoard to build AgentBoard*, permanently. Every ship is a dogfood cycle. Whenever you change behavior that an agent uses to talk to AgentBoard — a new built-in component, a new MCP tool, a new REST route, a new `dev.*` convention, a renamed endpoint, a changed trigger phrase — **update this file in the same commit**. A stale skill means the next agent re-learns facts the project already knows, or worse, writes against drifted conventions. If the product moves and the skill doesn't, the project is lying to its own builders. Treat this file like source code: tests don't cover it, but every drift is a bug.
+
 The AgentBoard repo runs its own instance at `http://localhost:3000` using the named project **`agentboard-dev`** (NOT `default`). The dashboard hosts:
 
 - `/` — overview: status, component count, test metrics, recent shipped features
@@ -165,3 +167,18 @@ When working in this repo and a new skill needs hosting or updating:
 
 Avoid teaching users about `files/skills/` directly — they should go through
 the agent. The convention is enforced by documentation here, not in code.
+
+---
+
+## Skill-update triggers (re-read when you ship)
+
+Before marking a feature shipped, ask: does this change affect how an agent would talk to AgentBoard? If **yes**, edit this file in the same commit. Concretely:
+
+- **Added or removed a built-in component** → update the "Component choices" list and any data-key conventions for its typical `source`.
+- **Added or removed an MCP tool** → update any tool reference (including the "How to invoke" section) plus the `dev.mcp.tools` expected count in "Data-key conventions".
+- **Added or changed a REST route** → update curl examples and the endpoint references (e.g. the `PUT /api/content/...` line in "When the user ships a feature").
+- **Renamed or moved a `dev.*` key** → update the table in "Data-key conventions". Old keys left in the skill are worse than no keys; they send the next agent to a dead path.
+- **Changed a trigger phrase or a setup step** (e.g. new `--flag` on the binary, new port, new project name) → fix the YAML `description` up top AND any embedded command lines.
+- **New convention the skill doesn't mention** (a new page pattern, a new dogfood metric, a new file-layout rule) → add it. If a convention isn't in the skill, it doesn't exist for the next agent.
+
+Rule of thumb: if a reader of this file would write code that now fails or silently diverges from the codebase, the skill is stale and must be fixed before you commit.
