@@ -90,11 +90,14 @@ func (m *Manager) registerBuiltins() {
 			Name: "Metric", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Metric",
-				Description: "A single large number with optional trend.",
+				Description: "A single large number with optional trend. Prefer inline props for hand-authored pages; `source` stays available for values written by agents into the KV store.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key to read from", Required: true},
-					"label":  {Type: "string", Description: "Override label from data"},
-					"format": {Type: "string", Description: "number | currency | percent | duration"},
+					"value":      {Type: "number", Description: "Inline value. Wins over `source` when present."},
+					"label":      {Type: "string", Description: "Label rendered below the number."},
+					"trend":      {Type: "number", Description: "Percent change — positive green up arrow, negative red down arrow."},
+					"comparison": {Type: "string", Description: "Small text shown next to the trend (e.g. 'last week')."},
+					"format":     {Type: "string", Description: "number | currency | percent | duration"},
+					"source":     {Type: "string", Description: "Optional KV key. Use for agent-driven numbers; hand-authored pages should use `value`."},
 				},
 			},
 		},
@@ -102,9 +105,12 @@ func (m *Manager) registerBuiltins() {
 			Name: "Status", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Status",
-				Description: "A single state indicator with a label.",
+				Description: "A state indicator with colored pill. Prefer inline props; `source` is available for agent-driven status.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key. Expects { state, label, detail? }", Required: true},
+					"state":  {Type: "string", Description: "running | passing | failing | waiting | stale"},
+					"label":  {Type: "string", Description: "Primary text in the pill."},
+					"detail": {Type: "string", Description: "Optional trailing context text."},
+					"source": {Type: "string", Description: "Optional KV key. Expects { state, label, detail? }."},
 				},
 			},
 		},
@@ -112,10 +118,12 @@ func (m *Manager) registerBuiltins() {
 			Name: "Progress", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Progress",
-				Description: "A progress bar.",
+				Description: "A progress bar. Prefer inline props; `source` is available for agent-driven values.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key. Expects { value, max, label? }", Required: true},
-					"label":  {Type: "string", Description: "Override label"},
+					"value":  {Type: "number", Description: "Current value (inline)."},
+					"max":    {Type: "number", Description: "Upper bound (inline). Default 100."},
+					"label":  {Type: "string", Description: "Label above the bar."},
+					"source": {Type: "string", Description: "Optional KV key. Expects { value, max, label? }."},
 				},
 			},
 		},
@@ -227,9 +235,10 @@ func (m *Manager) registerBuiltins() {
 			Name: "Markdown", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Markdown",
-				Description: "Renders a data key's string value as live markdown. Updates via SSE when the value changes.",
+				Description: "Renders markdown text. Prefer passing text via children or `text`; `source` reads a KV string and re-renders on SSE updates.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key. Expects a string, or { text } object.", Required: true},
+					"text":   {Type: "string", Description: "Raw markdown string (compiled to MDX)."},
+					"source": {Type: "string", Description: "Optional KV key. Expects a string, or { text } object."},
 				},
 			},
 		},
@@ -237,10 +246,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Badge", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Badge",
-				Description: "A small inline pill. Useful for versions, environment labels, or inline status.",
+				Description: "A small inline pill for versions, environment labels, or inline status.",
 				Props: map[string]PropMeta{
-					"source":  {Type: "string", Description: "Data key. Expects a string, or { text, variant? } object.", Required: true},
+					"text":    {Type: "string", Description: "Label text (inline)."},
 					"variant": {Type: "string", Description: "default | accent | success | warning | error"},
+					"source":  {Type: "string", Description: "Optional KV key. Expects a string, or { text, variant? } object."},
 				},
 			},
 		},
@@ -250,9 +260,10 @@ func (m *Manager) registerBuiltins() {
 				Name:        "Counter",
 				Description: "Like Metric but flashes green on increase / red on decrease when the value updates.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key. Expects a number or { value } object.", Required: true},
-					"label":  {Type: "string", Description: "Optional label rendered below the number"},
+					"value":  {Type: "number", Description: "Inline value. Wins over `source` when present."},
+					"label":  {Type: "string", Description: "Optional label rendered below the number."},
 					"format": {Type: "string", Description: "number | currency | percent"},
+					"source": {Type: "string", Description: "Optional KV key. Expects a number or { value } object."},
 				},
 			},
 		},
@@ -260,10 +271,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Code", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Code",
-				Description: "A syntax-highlighted code block. If the data is a non-string value, it renders as formatted JSON.",
+				Description: "A syntax-highlighted code block.",
 				Props: map[string]PropMeta{
-					"source":   {Type: "string", Description: "Data key. Expects a string, or { code, language? } object.", Required: true},
+					"value":    {Type: "string", Description: "Inline code text."},
 					"language": {Type: "string", Description: "Prism language id (e.g. js, ts, json, bash, sql). Default: text."},
+					"source":   {Type: "string", Description: "Optional KV key. Expects a string, or { code, language? } object."},
 				},
 			},
 		},
@@ -271,10 +283,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Mermaid", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Mermaid",
-				Description: "Renders a Mermaid diagram (flowchart, sequence, gantt, class, state, ER, etc.) from a data key. The library loads lazily on first render.",
+				Description: "Renders a Mermaid diagram. The library loads lazily on first render.",
 				Props: map[string]PropMeta{
-					"source": {Type: "string", Description: "Data key. Expects a Mermaid source string, or { code } object.", Required: true},
+					"value":  {Type: "string", Description: "Inline Mermaid source (preferred when hand-authoring)."},
 					"theme":  {Type: "string", Description: "default | dark | forest | neutral | base (follows system color scheme by default)"},
+					"source": {Type: "string", Description: "Optional KV key. Expects a Mermaid source string, or { code } object."},
 				},
 			},
 		},

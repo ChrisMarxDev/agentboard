@@ -1,9 +1,15 @@
 import { useData } from '../../hooks/useData'
 
 interface MetricProps {
-  source: string
+  // Inline: simplest and preferred for scalar values authored by hand.
+  value?: number | string
   label?: string
+  trend?: number
+  comparison?: string | number
   format?: 'number' | 'currency' | 'percent' | 'duration'
+  // Database-backed: pull from KV under this key. Value changes via
+  // `agentboard_set`/`/api/data/<key>` rebroadcast to subscribers.
+  source?: string
 }
 
 function formatValue(value: unknown, format?: string): string {
@@ -27,30 +33,33 @@ function formatValue(value: unknown, format?: string): string {
   }
 }
 
-export function Metric({ source, label, format }: MetricProps) {
-  const { data, loading } = useData(source)
+export function Metric(props: MetricProps) {
+  const { data, loading } = useData(props.source ?? '')
 
-  if (loading) {
+  if (props.source && loading) {
     return <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
   }
 
-  let value: unknown = data
-  let displayLabel = label
-  let trend: unknown = undefined
-  let comparison: unknown = undefined
+  let value: unknown = props.value
+  let displayLabel = props.label
+  let trend: unknown = props.trend
+  let comparison: unknown = props.comparison
 
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const obj = data as Record<string, unknown>
-    value = obj.value ?? data
-    displayLabel = label ?? (obj.label as string | undefined)
-    trend = obj.trend
-    comparison = obj.comparison
+  if (value === undefined && props.source) {
+    value = data
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const obj = data as Record<string, unknown>
+      value = obj.value ?? data
+      if (displayLabel === undefined) displayLabel = obj.label as string | undefined
+      if (trend === undefined) trend = obj.trend
+      if (comparison === undefined) comparison = obj.comparison
+    }
   }
 
   return (
     <div>
       <div className="text-3xl font-bold" style={{ color: 'var(--text)' }}>
-        {formatValue(value, format)}
+        {formatValue(value, props.format)}
       </div>
       {displayLabel && (
         <div className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>

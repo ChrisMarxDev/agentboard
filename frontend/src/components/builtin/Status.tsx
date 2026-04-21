@@ -1,7 +1,10 @@
 import { useData } from '../../hooks/useData'
 
 interface StatusProps {
-  source: string
+  state?: string
+  label?: string
+  detail?: string
+  source?: string
 }
 
 const stateStyles: Record<string, { bg: string; dot: string; text: string }> = {
@@ -12,20 +15,31 @@ const stateStyles: Record<string, { bg: string; dot: string; text: string }> = {
   stale:    { bg: 'var(--bg-secondary)', dot: 'var(--text-secondary)', text: 'var(--text-secondary)' },
 }
 
-export function Status({ source }: StatusProps) {
-  const { data, loading } = useData(source)
+export function Status(props: StatusProps) {
+  const { data, loading } = useData(props.source ?? '')
 
-  if (loading) {
-    return (
-      <div className="inline-flex items-center gap-2 px-3 py-2 rounded-full text-sm"
-        style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-        Loading...
-      </div>
-    )
+  let state = props.state
+  let label = props.label
+  let detail = props.detail
+
+  if (state === undefined && props.source) {
+    if (loading) {
+      return (
+        <div className="inline-flex items-center gap-2 px-3 py-2 rounded-full text-sm"
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+          Loading...
+        </div>
+      )
+    }
+    if (!data || typeof data !== 'object') return null
+    const obj = data as { state?: string; label?: string; detail?: string }
+    state = obj.state
+    label = label ?? obj.label
+    detail = detail ?? obj.detail
   }
 
-  if (!data || typeof data !== 'object') return null
-  const { state, label, detail } = data as { state?: string; label?: string; detail?: string }
+  if (!state && !label) return null
+
   const styles = stateStyles[state ?? 'stale'] ?? stateStyles.stale
 
   return (

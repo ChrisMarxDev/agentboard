@@ -1,11 +1,13 @@
 import { useData } from '../../hooks/useData'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 type BadgeVariant = 'default' | 'accent' | 'success' | 'warning' | 'error'
 
 interface BadgeProps {
-  source: string
+  text?: string
   variant?: BadgeVariant
+  children?: ReactNode
+  source?: string
 }
 
 const variantStyles: Record<BadgeVariant, { bg: string; fg: string }> = {
@@ -16,25 +18,33 @@ const variantStyles: Record<BadgeVariant, { bg: string; fg: string }> = {
   error:   { bg: 'rgba(239,68,68,0.15)',  fg: 'var(--error)' },
 }
 
-export function Badge({ source, variant }: BadgeProps) {
-  const { data, loading } = useData(source)
-  if (loading) return null
-  if (data == null) return null
+export function Badge({ text, variant, children, source }: BadgeProps) {
+  const { data, loading } = useData(source ?? '')
 
-  let text: string
+  let body: ReactNode
   let v: BadgeVariant = variant ?? 'default'
 
-  if (typeof data === 'object' && !Array.isArray(data)) {
-    const obj = data as Record<string, unknown>
-    text = String(obj.text ?? obj.label ?? '')
-    if (!variant && typeof obj.variant === 'string' && obj.variant in variantStyles) {
-      v = obj.variant as BadgeVariant
+  if (text !== undefined) {
+    body = text
+  } else if (children !== undefined && children !== null && children !== '') {
+    body = children
+  } else if (source) {
+    if (loading) return null
+    if (data == null) return null
+    if (typeof data === 'object' && !Array.isArray(data)) {
+      const obj = data as Record<string, unknown>
+      body = String(obj.text ?? obj.label ?? '')
+      if (!variant && typeof obj.variant === 'string' && obj.variant in variantStyles) {
+        v = obj.variant as BadgeVariant
+      }
+    } else {
+      body = String(data)
     }
   } else {
-    text = String(data)
+    return null
   }
 
-  if (!text) return null
+  if (body === '' || body === undefined) return null
 
   const styles = variantStyles[v]
   const style: CSSProperties = {
@@ -49,5 +59,5 @@ export function Badge({ source, variant }: BadgeProps) {
     verticalAlign: 'middle',
   }
 
-  return <span style={style}>{text}</span>
+  return <span style={style}>{body}</span>
 }

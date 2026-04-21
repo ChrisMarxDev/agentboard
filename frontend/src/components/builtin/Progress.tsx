@@ -1,28 +1,32 @@
 import { useData } from '../../hooks/useData'
 
 interface ProgressProps {
-  source: string
+  value?: number
+  max?: number
   label?: string
+  source?: string
 }
 
-export function Progress({ source, label }: ProgressProps) {
-  const { data, loading } = useData(source)
+export function Progress(props: ProgressProps) {
+  const { data, loading } = useData(props.source ?? '')
 
-  if (loading) {
+  if (props.source && loading) {
     return <div className="h-6 rounded" style={{ background: 'var(--bg-secondary)' }} />
   }
 
-  let value = 0
-  let max = 100
-  let displayLabel = label
+  let value = props.value ?? 0
+  let max = props.max ?? 100
+  let displayLabel = props.label
 
-  if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const obj = data as Record<string, unknown>
-    value = Number(obj.value ?? 0)
-    max = Number(obj.max ?? 100)
-    displayLabel = label ?? (obj.label as string | undefined)
-  } else if (typeof data === 'number') {
-    value = data
+  if (props.value === undefined && props.source) {
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const obj = data as Record<string, unknown>
+      value = Number(obj.value ?? 0)
+      max = Number(obj.max ?? 100)
+      if (displayLabel === undefined) displayLabel = obj.label as string | undefined
+    } else if (typeof data === 'number') {
+      value = data
+    }
   }
 
   const percent = max > 0 ? Math.min(100, (value / max) * 100) : 0

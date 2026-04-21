@@ -4,25 +4,31 @@ import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
 interface MermaidProps {
-  source: string
+  value?: string
   theme?: 'default' | 'dark' | 'forest' | 'neutral' | 'base'
+  source?: string
 }
 
 // Stable per-instance id used by mermaid's render target.
 let idCounter = 0
 const nextId = () => `agentboard-mermaid-${++idCounter}`
 
-export function Mermaid({ source, theme }: MermaidProps) {
-  const { data, loading } = useData(source)
+export function Mermaid({ value, theme, source }: MermaidProps) {
+  const { data, loading } = useData(source ?? '')
   const resolved = useResolvedTheme()
   const [svg, setSvg] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
   const idRef = useRef<string>(nextId())
 
-  const code = typeof data === 'string' ? data :
-    (data && typeof data === 'object' && 'code' in (data as object))
-      ? String((data as Record<string, unknown>).code ?? '')
-      : ''
+  let code = ''
+  if (value !== undefined) {
+    code = value
+  } else if (source) {
+    code = typeof data === 'string' ? data :
+      (data && typeof data === 'object' && 'code' in (data as object))
+        ? String((data as Record<string, unknown>).code ?? '')
+        : ''
+  }
 
   // Follow the sidebar theme switch; an explicit `theme` prop still wins.
   const mermaidTheme = theme ?? (resolved === 'dark' ? 'dark' : 'default')
@@ -53,7 +59,7 @@ export function Mermaid({ source, theme }: MermaidProps) {
           const msg = e instanceof Error ? e.message : 'Failed to render diagram'
           setErr(msg)
           setSvg('')
-          beaconError({ component: 'Mermaid', source, error: msg })
+          beaconError({ component: 'Mermaid', source: source ?? '(inline)', error: msg })
         }
       }
     })()
@@ -63,10 +69,10 @@ export function Mermaid({ source, theme }: MermaidProps) {
   // When source changes (via SSE after the user fixes the data key), allow
   // the next failure — if any — to beacon again.
   useEffect(() => {
-    resetBeacon('Mermaid', source)
+    resetBeacon('Mermaid', source ?? '(inline)')
   }, [code, source])
 
-  if (loading) return null
+  if (source && loading) return null
   if (err) {
     return (
       <div

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useData } from '../../hooks/useData'
 
 interface CounterProps {
-  source: string
+  value?: number | string
   label?: string
   format?: 'number' | 'currency' | 'percent'
+  source?: string
 }
 
 function formatValue(value: unknown, format?: string): string {
@@ -21,31 +22,35 @@ function formatValue(value: unknown, format?: string): string {
   }
 }
 
-export function Counter({ source, label, format }: CounterProps) {
-  const { data, loading } = useData(source)
+export function Counter({ value: inline, label, format, source }: CounterProps) {
+  const { data, loading } = useData(source ?? '')
   const [flash, setFlash] = useState<'up' | 'down' | null>(null)
   const previous = useRef<number | null>(null)
 
-  const value = typeof data === 'number' ? data :
-    (data && typeof data === 'object' && !Array.isArray(data))
-      ? Number((data as Record<string, unknown>).value ?? 0)
-      : Number(data)
+  let raw: unknown = inline
+  if (raw === undefined && source) {
+    raw = data
+  }
+  const value = typeof raw === 'number' ? raw :
+    (raw && typeof raw === 'object' && !Array.isArray(raw))
+      ? Number((raw as Record<string, unknown>).value ?? 0)
+      : Number(raw)
 
   useEffect(() => {
-    if (loading || isNaN(value)) return
+    if ((source && loading) || isNaN(value)) return
     if (previous.current !== null && previous.current !== value) {
       setFlash(value > previous.current ? 'up' : 'down')
       const t = setTimeout(() => setFlash(null), 700)
       return () => clearTimeout(t)
     }
     previous.current = value
-  }, [value, loading])
+  }, [value, loading, source])
 
   useEffect(() => {
-    if (!loading && !isNaN(value)) previous.current = value
-  }, [value, loading])
+    if ((!source || !loading) && !isNaN(value)) previous.current = value
+  }, [value, loading, source])
 
-  if (loading) return <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
+  if (source && loading) return <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
 
   const color = flash === 'up' ? 'var(--success)' : flash === 'down' ? 'var(--error)' : 'var(--text)'
 

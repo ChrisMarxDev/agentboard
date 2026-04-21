@@ -3,27 +3,32 @@ import { useData } from '../../hooks/useData'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
 
 interface CodeProps {
-  source: string
+  value?: string
   language?: string
+  source?: string
 }
 
-export function Code({ source, language }: CodeProps) {
-  const { data, loading } = useData(source)
+export function Code({ value, language, source }: CodeProps) {
+  const { data, loading } = useData(source ?? '')
   const resolved = useResolvedTheme()
-  if (loading) return null
 
-  let code: string
+  let code: string = ''
   let lang = language ?? 'text'
 
-  if (typeof data === 'string') {
-    code = data
-  } else if (data && typeof data === 'object' && !Array.isArray(data)) {
-    const obj = data as Record<string, unknown>
-    code = String(obj.code ?? obj.source ?? '')
-    if (!language && typeof obj.language === 'string') lang = obj.language
-  } else {
-    code = JSON.stringify(data, null, 2)
-    if (!language) lang = 'json'
+  if (value !== undefined) {
+    code = value
+  } else if (source) {
+    if (loading) return null
+    if (typeof data === 'string') {
+      code = data
+    } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+      const obj = data as Record<string, unknown>
+      code = String(obj.code ?? obj.source ?? '')
+      if (!language && typeof obj.language === 'string') lang = obj.language
+    } else if (data !== undefined && data !== null) {
+      code = JSON.stringify(data, null, 2)
+      if (!language) lang = 'json'
+    }
   }
 
   if (!code) return null
