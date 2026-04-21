@@ -1,0 +1,45 @@
+info:
+  name: Missing cards are marked, rest of picks still resolve
+  type: http
+  seq: 5
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [
+          { "page": "/test-grab", "card_id": "hello-card" },
+          { "page": "/test-grab", "card_id": "does-not-exist" },
+          { "page": "/nope",      "card_id": "any" }
+        ]
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("returns three sections in pick order", function() {
+          expect(res.body.sections).to.have.lengthOf(3);
+        });
+        test("first section resolved", function() {
+          expect(res.body.sections[0].missing).to.be.undefined;
+          expect(res.body.sections[0].card_title).to.equal("Hello Card");
+        });
+        test("second marked with missing=card id not found", function() {
+          expect(res.body.sections[1].missing).to.include("card id");
+        });
+        test("third marked with missing=page not found", function() {
+          expect(res.body.sections[2].missing).to.include("page");
+        });
+        test("markdown text contains a skipped comment for each miss", function() {
+          const t = res.body.text;
+          expect((t.match(/<!-- skipped:/g) || []).length).to.equal(2);
+          expect(t).to.include("Hello Card"); // good section still rendered
+        });

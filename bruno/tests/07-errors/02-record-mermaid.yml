@@ -1,0 +1,33 @@
+info:
+  name: POST /api/errors records a Mermaid parse failure
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/errors"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "component": "Mermaid",
+        "source": "dev.features.files.flow",
+        "page": "/features/files",
+        "error": "Parse error on line 2:\n...t<br/>flat PageEntry[]] --> B[buildPageT\n-----------------------^\nExpecting 'SQE'..."
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("response echoes the entry", function() {
+          expect(res.body.component).to.equal("Mermaid");
+          expect(res.body.source).to.equal("dev.features.files.flow");
+          expect(res.body.page).to.equal("/features/files");
+          expect(res.body.count).to.equal(1);
+          expect(res.body.key).to.be.a("string");
+        });

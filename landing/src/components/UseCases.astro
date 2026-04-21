@@ -1,0 +1,92 @@
+---
+const cases = [
+  {
+    eyebrow: "Your life",
+    accent: "text-blue-400",
+    phrases: [
+      "track my morning runs",
+      "log what I'm reading this year",
+      "show my weekly habit streak",
+      "keep a journal my agent writes to",
+    ],
+  },
+  {
+    eyebrow: "Your work",
+    accent: "text-violet-400",
+    phrases: [
+      "show me today's support tickets",
+      "deploys by environment this week",
+      "pipeline health per service",
+      "incidents my on-call agent triaged",
+    ],
+  },
+  {
+    eyebrow: "Your agents",
+    accent: "text-emerald-400",
+    phrases: [
+      "what did my research agent find today",
+      "log every decision my coding agent made",
+      "summarize overnight runs",
+      "show tool-call costs for the week",
+    ],
+  },
+  {
+    eyebrow: "Your home",
+    accent: "text-amber-400",
+    phrases: [
+      "energy use by hour",
+      "indoor air quality today",
+      "smart-plug activity log",
+      "garden sensor readings",
+    ],
+  },
+];
+---
+
+<section id="use-cases" class="relative border-t border-white/5 py-24 sm:py-32">
+  <div class="mx-auto max-w-6xl px-6">
+    <div class="max-w-2xl">
+      <p class="text-sm font-medium text-zinc-500">What you'd ask for</p>
+      <h2
+        class="mt-2 text-3xl font-semibold tracking-tight text-white sm:text-4xl"
+      >
+        Whatever you care enough to track.
+      </h2>
+      <p class="mt-4 text-lg text-zinc-400">
+        If you can describe it to Claude, it can become a dashboard. Here are
+        a few phrasings that work.
+      </p>
+    </div>
+
+    <div class="mt-16 grid gap-6 md:grid-cols-2">
+      {
+        cases.map((c) => (
+          <div class="group relative overflow-hidden rounded-xl border border-white/10 bg-white/[0.02] p-8 transition hover:border-white/20">
+            <div class="flex items-center gap-3">
+              <span class={`font-mono text-xs uppercase tracking-wider ${c.accent}`}>
+                ◆
+              </span>
+              <span class="text-sm font-medium text-white">{c.eyebrow}</span>
+              <span class="h-px flex-1 bg-white/5" />
+            </div>
+            <ul class="mt-6 space-y-3">
+              {c.phrases.map((p) => (
+                <li class="flex items-start gap-3 text-sm">
+                  <span class="mt-1 font-mono text-[11px] text-zinc-600">
+                    &gt;
+                  </span>
+                  <span class="font-mono text-zinc-300">{p}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </div>
+
+    <p class="mt-10 text-center text-sm text-zinc-500">
+      Nothing goes to a server somewhere. Every dashboard lives on your
+      laptop.
+    </p>
+  </div>
+</section>

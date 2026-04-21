@@ -8,7 +8,9 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/data"
+	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
+	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -24,6 +26,8 @@ type Server struct {
 	Pages                *mdx.PageManager
 	Components           *components.Manager
 	Files                *files.Manager
+	Errors               *interrors.Buffer
+	Grab                 *grab.Materializer
 	MCP                  *mcp.Server
 	Router               chi.Router
 	SkillFile            string
@@ -63,12 +67,16 @@ func New(cfg ServerConfig) *Server {
 	pageManager := mdx.NewPageManager(cfg.Project)
 	compManager := components.NewManager(cfg.Project)
 	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
+	errorBuffer := interrors.NewBuffer()
+	grabber := &grab.Materializer{Pages: pageManager, Store: cfg.Store}
 
 	mcpServer := &mcp.Server{
 		Store:                cfg.Store,
 		Pages:                pageManager,
 		Components:           compManager,
 		Files:                fileManager,
+		Errors:               errorBuffer,
+		Grab:                 grabber,
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
 
@@ -79,6 +87,8 @@ func New(cfg ServerConfig) *Server {
 		Pages:                pageManager,
 		Components:           compManager,
 		Files:                fileManager,
+		Errors:               errorBuffer,
+		Grab:                 grabber,
 		MCP:                  mcpServer,
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
@@ -119,6 +129,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 
 		// Content endpoints (MDX dashboards + knowledge docs)
 		r.Get("/content", s.handleListPages)
+		r.Post("/content/move", s.handleMovePage)
 		r.Get("/content/*", s.handleGetPage)
 		r.Put("/content/*", s.handleWritePage)
 		r.Delete("/content/*", s.handleDeletePage)
@@ -135,6 +146,14 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		r.Get("/files/*", s.handleGetFile)
 		r.Put("/files/*", s.handleWriteFile)
 		r.Delete("/files/*", s.handleDeleteFile)
+
+		// Render-error beacons from frontend components (Mermaid, Markdown, Image, …)
+		r.Get("/errors", s.handleListErrors)
+		r.Post("/errors", s.handleRecordError)
+		r.Delete("/errors", s.handleClearErrors)
+
+		// Grab — materialize a list of picks into agent-ready text
+		r.Post("/grab", s.handleGrab)
 
 		// SSE
 		r.Get("/events", s.Broadcaster.ServeHTTP)

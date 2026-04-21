@@ -9,6 +9,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/files"
+	"github.com/christophermarx/agentboard/internal/grab"
 )
 
 func (s *Server) toolDefinitions() []ToolDef {
@@ -179,6 +180,47 @@ func (s *Server) toolDefinitions() []ToolDef {
 				"required": []string{"name"},
 			},
 		},
+		{
+			Name:        "agentboard_list_errors",
+			Description: "List recent render-time errors reported by frontend components (Mermaid parse failures, Image 404s, Markdown syntax errors, etc.). Returns entries sorted newest-first with component, source key, page, error text, count, first_seen, last_seen. Use this after writing a page or data key to confirm nothing is broken.",
+			InputSchema: map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			},
+		},
+		{
+			Name:        "agentboard_clear_errors",
+			Description: "Clear errors from the buffer. Pass `key` to clear a single entry (e.g. after fixing one diagram); omit for a full clear.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"key": map[string]string{"type": "string", "description": "Optional: dedupe key from agentboard_list_errors. Omit to clear all."},
+				},
+			},
+		},
+		{
+			Name:        "agentboard_grab",
+			Description: "Materialize a set of Card picks across pages into a single agent-ready payload. Each pick is {page, card_id} where card_id is the kebab-slug of the Card's title. Returns the formatted text (markdown | xml | json) plus the resolved sections. Use this to pull cross-page context from the dashboard when responding to the user.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"picks": map[string]interface{}{
+						"type":        "array",
+						"description": "List of {page, card_id} picks in the order you want them rendered",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"page":    map[string]string{"type": "string", "description": "Page URL path, e.g. /features/auth"},
+								"card_id": map[string]string{"type": "string", "description": "Kebab-case slug of the Card's title"},
+							},
+							"required": []string{"page", "card_id"},
+						},
+					},
+					"format": map[string]string{"type": "string", "description": "markdown (default) | xml | json"},
+				},
+				"required": []string{"picks"},
+			},
+		},
 	}
 
 	// Component upload tools are only advertised when the server was started
@@ -266,6 +308,12 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolListFiles()
 	case "agentboard_delete_file":
 		return s.toolDeleteFile(args)
+	case "agentboard_list_errors":
+		return s.toolListErrors()
+	case "agentboard_clear_errors":
+		return s.toolClearErrors(args)
+	case "agentboard_grab":
+		return s.toolGrab(args)
 	default:
 		return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -336,6 +384,55 @@ func (s *Server) toolDeleteFile(args map[string]json.RawMessage) (interface{}, *
 		return nil, &RPCError{Code: code, Message: err.Error()}
 	}
 	return mcpContent(fmt.Sprintf("File %s deleted", name)), nil
+}
+
+func (s *Server) toolListErrors() (interface{}, *RPCError) {
+	if s.Errors == nil {
+		return nil, &RPCError{Code: -32000, Message: "errors buffer not configured"}
+	}
+	entries := s.Errors.List()
+	if len(entries) == 0 {
+		return mcpContent("No render errors recorded."), nil
+	}
+	pretty, _ := json.MarshalIndent(entries, "", "  ")
+	return mcpContent(string(pretty)), nil
+}
+
+func (s *Server) toolGrab(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	if s.Grab == nil {
+		return nil, &RPCError{Code: -32000, Message: "grab materializer not configured"}
+	}
+	var picks []grab.Pick
+	if raw, ok := args["picks"]; ok {
+		if err := json.Unmarshal(raw, &picks); err != nil {
+			return nil, &RPCError{Code: -32602, Message: "picks must be an array of {page, card_id}"}
+		}
+	}
+	if len(picks) == 0 {
+		return nil, &RPCError{Code: -32602, Message: "at least one pick is required"}
+	}
+	format := grab.Format(getString(args, "format"))
+	if format != grab.FormatXML && format != grab.FormatJSON {
+		format = grab.FormatMarkdown
+	}
+	sections := s.Grab.Materialize(picks)
+	text := grab.Render(sections, format)
+	return mcpContent(text), nil
+}
+
+func (s *Server) toolClearErrors(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	if s.Errors == nil {
+		return nil, &RPCError{Code: -32000, Message: "errors buffer not configured"}
+	}
+	key := getString(args, "key")
+	if key != "" {
+		if ok := s.Errors.ClearByKey(key); !ok {
+			return nil, &RPCError{Code: -32602, Message: fmt.Sprintf("no error with key %s", key)}
+		}
+		return mcpContent(fmt.Sprintf("Cleared error %s.", key)), nil
+	}
+	n := s.Errors.Clear()
+	return mcpContent(fmt.Sprintf("Cleared %d errors.", n)), nil
 }
 
 func (s *Server) toolDeleteComponent(args map[string]json.RawMessage) (interface{}, *RPCError) {

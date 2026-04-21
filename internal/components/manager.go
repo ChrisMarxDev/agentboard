@@ -305,6 +305,16 @@ func (m *Manager) registerBuiltins() {
 				},
 			},
 		},
+		{
+			Name: "Errors", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Errors",
+				Description: "Renders the live render-error buffer from /api/errors. Shows Mermaid parse failures, Image 404s, Markdown errors — all with dedupe counts and per-entry Clear buttons. No source prop — fetches the endpoint directly.",
+				Props: map[string]PropMeta{
+					"limit": {Type: "number", Description: "Max entries to show (default 10)"},
+				},
+			},
+		},
 	}
 
 	for _, b := range builtins {

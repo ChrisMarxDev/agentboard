@@ -100,7 +100,7 @@ tasks:
     desc: Run the Bruno contract test suite (bruno/tests) against a running server on $PORT
     cmds:
       - |
-        for d in 00-setup 01-data 02-content 03-components 04-mcp 05-meta 06-files 99-teardown; do
+        for d in 00-setup 01-data 02-content 03-components 04-mcp 05-meta 06-files 07-errors 08-grab 99-teardown; do
           echo "--- tests/$d ---"
           (cd bruno && bru run "tests/$d" --env Local --env-var baseUrl=http://localhost:{{.PORT}}) || exit 1
         done

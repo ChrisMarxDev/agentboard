@@ -1,11 +1,22 @@
 ---
 import Base from "../layouts/Base.astro";
+import Nav from "../components/Nav.astro";
+import Hero from "../components/Hero.astro";
+import Features from "../components/Features.astro";
+import UseCases from "../components/UseCases.astro";
+import HowItWorks from "../components/HowItWorks.astro";
+import FAQ from "../components/FAQ.astro";
+import Footer from "../components/Footer.astro";
 ---
 
-<Base title="AgentBoard — Dashboards for agent-driven workflows">
-  <main class="min-h-screen flex items-center justify-center">
-    <p class="text-sm text-gray-500">
-      AgentBoard landing page — scaffold. Design coming soon.
-    </p>
+<Base>
+  <Nav />
+  <main>
+    <Hero />
+    <Features />
+    <UseCases />
+    <HowItWorks />
+    <FAQ />
   </main>
+  <Footer />
 </Base>

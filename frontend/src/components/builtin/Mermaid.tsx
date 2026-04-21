@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useData } from '../../hooks/useData'
 import { useResolvedTheme } from '../../hooks/useResolvedTheme'
+import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
 interface MermaidProps {
   source: string
@@ -49,13 +50,21 @@ export function Mermaid({ source, theme }: MermaidProps) {
         }
       } catch (e) {
         if (!cancelled) {
-          setErr(e instanceof Error ? e.message : 'Failed to render diagram')
+          const msg = e instanceof Error ? e.message : 'Failed to render diagram'
+          setErr(msg)
           setSvg('')
+          beaconError({ component: 'Mermaid', source, error: msg })
         }
       }
     })()
     return () => { cancelled = true }
-  }, [code, mermaidTheme])
+  }, [code, mermaidTheme, source])
+
+  // When source changes (via SSE after the user fixes the data key), allow
+  // the next failure — if any — to beacon again.
+  useEffect(() => {
+    resetBeacon('Mermaid', source)
+  }, [code, source])
 
   if (loading) return null
   if (err) {

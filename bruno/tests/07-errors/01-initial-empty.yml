@@ -1,0 +1,23 @@
+info:
+  name: GET /api/errors starts empty (after DELETE)
+  type: http
+  seq: 1
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/errors"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("delete returned 200", function() {
+          expect(res.status).to.equal(200);
+        });
+        test("GET /api/errors returns empty array", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/errors`);
+          expect(r.status).to.equal(200);
+          expect(r.data).to.be.an("array");
+          expect(r.data.length).to.equal(0);
+        });

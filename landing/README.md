@@ -9,12 +9,19 @@ Built with **Astro + Tailwind 4** + optional React islands. Static-first for bes
 From the repo root (preferred, via Taskfile):
 
 ```bash
-task install:landing    # npm install
-task dev:landing        # Astro dev server on http://localhost:4321
-task build:landing      # Build to landing/dist
+task landing:install    # npm install
+task landing:dev        # Astro dev server on http://localhost:4321
+task landing:build      # Build to landing/dist
+task landing:preview    # Build, then serve the production output
+task landing:clean      # Wipe dist/ and .astro/
+task landing            # List every landing task
 ```
 
-Or directly in this directory:
+Or run tasks from inside this directory (`cd landing && task`) — the same
+tasks live in `landing/Taskfile.yml` and are included into the root Taskfile
+under the `landing:` namespace.
+
+Plain npm also works:
 
 ```bash
 npm install

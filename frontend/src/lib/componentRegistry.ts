@@ -18,6 +18,7 @@ import { Code } from '../components/builtin/Code'
 import { Mermaid } from '../components/builtin/Mermaid'
 import { Image } from '../components/builtin/Image'
 import { File as FileComponent } from '../components/builtin/File'
+import { Errors } from '../components/builtin/Errors'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyComponent = ComponentType<any>
@@ -44,6 +45,7 @@ registry.set('Code', Code)
 registry.set('Mermaid', Mermaid)
 registry.set('Image', Image)
 registry.set('File', FileComponent)
+registry.set('Errors', Errors)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)

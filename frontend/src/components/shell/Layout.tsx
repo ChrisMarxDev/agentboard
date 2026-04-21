@@ -1,12 +1,27 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import Nav from './Nav'
+import Nav, { NAV_DEFAULT_WIDTH, NAV_MAX_WIDTH, NAV_MIN_WIDTH } from './Nav'
 import Kbd from './Kbd'
 import ShortcutsHelp from './ShortcutsHelp'
 import { useKeyboardShortcuts, type ShortcutMap } from '../../hooks/useKeyboardShortcuts'
 import { usePages } from '../../hooks/usePages'
+import { GrabTray } from './GrabTray'
 
 const STORAGE_KEY = 'agentboard:nav-collapsed'
+const WIDTH_STORAGE_KEY = 'agentboard:nav-width'
+
+function clampWidth(w: number): number {
+  if (!Number.isFinite(w)) return NAV_DEFAULT_WIDTH
+  return Math.max(NAV_MIN_WIDTH, Math.min(NAV_MAX_WIDTH, w))
+}
+
+function loadWidth(): number {
+  if (typeof window === 'undefined') return NAV_DEFAULT_WIDTH
+  const raw = window.localStorage.getItem(WIDTH_STORAGE_KEY)
+  if (!raw) return NAV_DEFAULT_WIDTH
+  const n = Number(raw)
+  return clampWidth(n)
+}
 
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
@@ -18,10 +33,15 @@ export default function Layout({ children }: { children: ReactNode }) {
     return window.localStorage.getItem(STORAGE_KEY) === '1'
   })
   const [helpOpen, setHelpOpen] = useState(false)
+  const [navWidth, setNavWidth] = useState<number>(() => loadWidth())
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0')
   }, [collapsed])
+
+  useEffect(() => {
+    window.localStorage.setItem(WIDTH_STORAGE_KEY, String(navWidth))
+  }, [navWidth])
 
   const pages = usePages()
 
@@ -68,6 +88,8 @@ export default function Layout({ children }: { children: ReactNode }) {
       {showNav && (
         <Nav
           pages={pages}
+          width={navWidth}
+          onResize={w => setNavWidth(clampWidth(w))}
           onCollapse={() => setCollapsed(true)}
           onOpenHelp={() => setHelpOpen(true)}
         />
@@ -93,6 +115,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         {children}
       </main>
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {!kiosk && <GrabTray />}
     </div>
   )
 }

@@ -1,0 +1,21 @@
+info:
+  name: Clean up the test page + data key
+  type: http
+  seq: 7
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/content/test-grab"
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        await axios.delete(
+          `${bru.getEnvVar("baseUrl")}/api/data/test.grab.mermaid`,
+          { validateStatus: () => true },
+        );
+    - type: tests
+      code: |-
+        test("page deleted", function() { expect(res.status).to.equal(200); });

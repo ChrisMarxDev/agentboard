@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useData } from '../../hooks/useData'
 import { resolveFileUrl, type FileRef } from '../../lib/fileUrl'
+import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
 interface ImageProps {
   source?: string
@@ -69,6 +70,14 @@ export function Image({ source, src, alt, width, height, fit = 'contain' }: Imag
         height: finalHeight ? undefined : 'auto',
         objectFit: fit,
         display: 'block',
+      }}
+      onLoad={() => { resetBeacon('Image', source ?? finalSrc) }}
+      onError={() => {
+        beaconError({
+          component: 'Image',
+          source: source ?? finalSrc,
+          error: `Failed to load image at ${finalSrc}`,
+        })
       }}
     />
   )

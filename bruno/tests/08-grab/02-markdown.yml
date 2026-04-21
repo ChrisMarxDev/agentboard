@@ -1,0 +1,50 @@
+info:
+  name: POST /api/grab — markdown format
+  type: http
+  seq: 2
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [
+          { "page": "/test-grab", "card_id": "hello-card" },
+          { "page": "/test-grab", "card_id": "second-card" }
+        ],
+        "format": "markdown"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("format echoes markdown", function() { expect(res.body.format).to.equal("markdown"); });
+        test("two sections resolved", function() {
+          expect(res.body.sections).to.have.lengthOf(2);
+          expect(res.body.sections[0].card_title).to.equal("Hello Card");
+          expect(res.body.sections[1].card_title).to.equal("Second Card");
+          expect(res.body.sections[0].missing).to.be.undefined;
+        });
+        test("text has header + body + mermaid fence", function() {
+          const t = res.body.text;
+          expect(t).to.include("## Context from AgentBoard");
+          expect(t).to.include("### /test-grab — Hello Card");
+          expect(t).to.include("plain body text");
+          expect(t).to.include("```mermaid");
+          expect(t).to.include("graph LR");
+        });
+        test("mermaid component was resolved from data key", function() {
+          const comps = res.body.sections[0].components;
+          expect(comps).to.be.an("array");
+          const m = comps.find(c => c.type === "Mermaid");
+          expect(m).to.exist;
+          expect(m.source_key).to.equal("test.grab.mermaid");
+          expect(m.value).to.include("graph LR");
+        });

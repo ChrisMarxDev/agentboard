@@ -1,0 +1,32 @@
+info:
+  name: POST /api/grab — json format
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "picks": [{ "page": "/test-grab", "card_id": "second-card" }],
+        "format": "json"
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("format echoes json", function() { expect(res.body.format).to.equal("json"); });
+        test("body.text parses as JSON with sections array", function() {
+          const parsed = JSON.parse(res.body.text);
+          expect(parsed).to.have.property("sections").that.is.an("array");
+          expect(parsed.sections).to.have.lengthOf(1);
+          expect(parsed.sections[0].card_title).to.equal("Second Card");
+          expect(parsed).to.have.property("generated_at");
+        });

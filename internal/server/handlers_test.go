@@ -271,6 +271,129 @@ func TestPagesEndpoints(t *testing.T) {
 	}
 }
 
+func TestPageMove(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	seed := func(path, body string) {
+		req, _ := http.NewRequest("PUT", ts.URL+"/api/content/"+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "text/markdown")
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatalf("seed %s: status %d", path, resp.StatusCode)
+		}
+	}
+
+	move := func(from, to string) (*http.Response, map[string]any) {
+		payload, _ := json.Marshal(map[string]string{"from": from, "to": to})
+		req, _ := http.NewRequest("POST", ts.URL+"/api/content/move", strings.NewReader(string(payload)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, _ := http.DefaultClient.Do(req)
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		resp.Body.Close()
+		return resp, body
+	}
+
+	pathExists := func(pagePath string) bool {
+		resp, err := http.Get(ts.URL + "/api/content/" + pagePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode == 200
+	}
+
+	// Happy path — rename a flat page.
+	seed("draft", "# Draft\n\nbody")
+	resp, body := move("draft", "final")
+	if resp.StatusCode != 200 {
+		t.Fatalf("rename: status %d, body %v", resp.StatusCode, body)
+	}
+	if body["to"] != "final" || body["from"] != "draft" {
+		t.Errorf("response body = %v, want from=draft to=final", body)
+	}
+	if pathExists("draft") {
+		t.Error("old path still reachable after move")
+	}
+	if !pathExists("final") {
+		t.Error("new path not reachable after move")
+	}
+
+	// Move into a nested folder that doesn't exist yet — MkdirAll should create it.
+	seed("spec", "# Spec\n\nwip")
+	resp, _ = move("spec", "archive/specs/2026-q1")
+	if resp.StatusCode != 200 {
+		t.Fatalf("move into new folder: status %d", resp.StatusCode)
+	}
+	if !pathExists("archive/specs/2026-q1") {
+		t.Error("nested destination not reachable")
+	}
+
+	// Source doesn't exist → 404.
+	resp, _ = move("does-not-exist", "somewhere")
+	if resp.StatusCode != 404 {
+		t.Errorf("missing source: status %d, want 404", resp.StatusCode)
+	}
+
+	// Destination already exists → 409.
+	seed("a", "# a")
+	seed("b", "# b")
+	resp, _ = move("a", "b")
+	if resp.StatusCode != 409 {
+		t.Errorf("destination exists: status %d, want 409", resp.StatusCode)
+	}
+
+	// Moving from or to "index" is forbidden.
+	resp, _ = move("index", "home")
+	if resp.StatusCode != 400 {
+		t.Errorf("index as from: status %d, want 400", resp.StatusCode)
+	}
+	seed("src", "# src")
+	resp, _ = move("src", "index")
+	if resp.StatusCode != 400 {
+		t.Errorf("index as to: status %d, want 400", resp.StatusCode)
+	}
+
+	// Path traversal is rejected.
+	resp, _ = move("a", "../../etc/passwd")
+	if resp.StatusCode != 400 {
+		t.Errorf("traversal: status %d, want 400", resp.StatusCode)
+	}
+
+	// Empty paths → 400.
+	resp, _ = move("", "somewhere")
+	if resp.StatusCode != 400 {
+		t.Errorf("empty from: status %d, want 400", resp.StatusCode)
+	}
+
+	// Same source and destination → 400.
+	seed("same", "# same")
+	resp, _ = move("same", "same")
+	if resp.StatusCode != 400 {
+		t.Errorf("from==to: status %d, want 400", resp.StatusCode)
+	}
+
+	// Malformed JSON body → 400.
+	req, _ := http.NewRequest("POST", ts.URL+"/api/content/move", strings.NewReader("not-json"))
+	req.Header.Set("Content-Type", "application/json")
+	resp, _ = http.DefaultClient.Do(req)
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("malformed body: status %d, want 400", resp.StatusCode)
+	}
+
+	// Accepts "/features/foo" and "foo.md" forms (client-side friendliness).
+	seed("original", "# original")
+	resp, _ = move("/original", "renamed.md")
+	if resp.StatusCode != 200 {
+		t.Errorf("normalized paths: status %d, want 200", resp.StatusCode)
+	}
+	if !pathExists("renamed") {
+		t.Error("normalized destination not reachable")
+	}
+}
+
 func TestComponentsEndpoint(t *testing.T) {
 	_, ts := newTestServer(t)
 
@@ -343,8 +466,11 @@ func TestMCPToolsList(t *testing.T) {
 
 	result := rpc["result"].(map[string]interface{})
 	tools := result["tools"].([]interface{})
-	if len(tools) != 13 {
-		t.Errorf("expected 13 MCP tools, got %d", len(tools))
+	// 13 data/page/component core + 3 file tools + 2 error tools + 1 grab tool = 19.
+	// (Component-upload write/delete are gated on --allow-component-upload and
+	//  aren't advertised in the default test config.)
+	if len(tools) != 19 {
+		t.Errorf("expected 19 MCP tools, got %d", len(tools))
 	}
 }
 

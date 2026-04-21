@@ -26,6 +26,14 @@ landing/.astro/
 
 # Machine-local Claude Code config and installed skills
 /.claude/
+# …but ship the project-specific agentboard dogfood skill so the invariant
+# (port 3000, agentboard-dev project, feature-page template) travels with the repo.
+!/.claude/
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/agentboard/
+!/.claude/skills/agentboard/**
+/.claude/settings*.json
 
 # test_claude playground — runtime artifacts (scaffolding is tracked)
 test_claude/bin/

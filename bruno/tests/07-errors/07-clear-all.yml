@@ -1,0 +1,20 @@
+info:
+  name: DELETE (no key) clears everything
+  type: http
+  seq: 7
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/errors"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("removed >= 1", function() { expect(res.body.removed).to.be.at.least(1); });
+        test("GET is empty", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/errors`);
+          expect(r.data.length).to.equal(0);
+        });

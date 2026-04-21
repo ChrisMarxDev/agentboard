@@ -1,0 +1,43 @@
+info:
+  name: Seed a page + data key the grab tests target
+  type: http
+  seq: 1
+
+# Create a small page with two <Card>s so later tests can pick sections.
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/content/test-grab"
+  headers:
+    - name: Content-Type
+      value: text/markdown
+  body:
+    type: text
+    data: |-
+      # Grab test page
+
+      <Card title="Hello Card">
+        plain body text
+        <Mermaid source="test.grab.mermaid" />
+      </Card>
+
+      <Card title="Second Card">
+        sibling content
+      </Card>
+
+runtime:
+  scripts:
+    - type: before-request
+      code: |-
+        const axios = require('axios');
+        // Seed a mermaid source for the first card to resolve.
+        await axios.put(
+          `${bru.getEnvVar("baseUrl")}/api/data/test.grab.mermaid`,
+          JSON.stringify("graph LR\n  A --> B"),
+          { headers: { "Content-Type": "application/json" } },
+        );
+    - type: tests
+      code: |-
+        test("page written", function() {
+          expect(res.status).to.equal(200);
+          expect(res.body.compiled).to.equal(true);
+        });

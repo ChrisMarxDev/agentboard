@@ -6,6 +6,22 @@ Single-binary dashboard server for agent-driven workflows. Agents write data via
 >
 > **Before widening the trust boundary** (binding to non-loopback, adding hosted mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
 
+## UI conventions
+
+**Icons: always lucide-react, never emoji.** Every icon in the app shell, built-in components, and any new UI ships as a `lucide-react` component (`import { Magnet, Copy, X } from 'lucide-react'`). No emoji glyphs in JSX — they hint at platform-specific fonts, break color theming, and don't respect `currentColor`. Exceptions: user-authored MDX content and data values (status labels, kanban card titles, etc.) may contain emoji — that's content, not chrome.
+
+## We dogfood ourselves
+
+The repo runs its **own** AgentBoard instance at `http://localhost:3000` using the named project **`agentboard-dev`** (not `default`). The dashboard holds a home page with live metrics, an engineering-principles page, an architecture page with Mermaid diagrams, a seams-to-watch page, and one feature page per shipped capability.
+
+**Keep port 3000 up** whenever you're working in the repo:
+
+```bash
+./agentboard --project agentboard-dev --port 3000 --no-open &
+```
+
+When you ship a feature, add/refresh its page and bump the relevant `dev.*` data keys. The workflow — conventions, data-key namespace, feature-page template — is documented in the **`agentboard`** skill under `.claude/skills/agentboard/SKILL.md` (Claude Code auto-loads it in this repo). Trigger it with phrases like "update the dev dashboard", "add a feature page", "record this metric", or "is the dev instance running".
+
 ## Task runner
 
 **All run commands go through [Taskfile.dev](https://taskfile.dev/).** Use `task` instead of invoking `go`, `npm`, or `make` directly. Run `task` (or `task -l`) to see every available task.

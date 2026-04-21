@@ -1,0 +1,21 @@
+info:
+  name: DELETE ?key=<k> removes just that entry
+  type: http
+  seq: 6
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/errors?key={{errorKey}}"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("delete returned 200", function() { expect(res.status).to.equal(200); });
+        test("removed 1", function() { expect(res.body.removed).to.equal(1); });
+        test("only the Markdown entry remains", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/errors`);
+          expect(r.data.length).to.equal(1);
+          expect(r.data[0].component).to.equal("Markdown");
+        });

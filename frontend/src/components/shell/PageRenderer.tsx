@@ -4,6 +4,7 @@ import { compile, run } from '@mdx-js/mdx'
 import * as runtime from 'react/jsx-runtime'
 import { useDataContext } from '../../hooks/DataContext'
 import { getComponents } from '../../lib/componentRegistry'
+import PageActionsMenu from './PageActionsMenu'
 
 export default function PageRenderer() {
   const location = useLocation()
@@ -11,15 +12,15 @@ export default function PageRenderer() {
   const [content, setContent] = useState<React.ComponentType | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [pageTitle, setPageTitle] = useState<string | undefined>(undefined)
+
+  const pagePath = location.pathname === '/' ? 'index' : location.pathname.slice(1)
 
   const loadPage = useCallback(async () => {
     setLoading(true)
     setError(null)
 
     try {
-      // Determine page path
-      let pagePath = location.pathname === '/' ? 'index' : location.pathname.slice(1)
-
       // Fetch raw MDX source
       const resp = await fetch(`/api/content/${pagePath}`, {
         headers: { 'Accept': 'text/markdown' },
@@ -35,6 +36,9 @@ export default function PageRenderer() {
       }
 
       const source = await resp.text()
+
+      const firstHeading = source.match(/^#\s+(.+)$/m)
+      setPageTitle(firstHeading ? firstHeading[1].trim() : undefined)
 
       // Compile MDX client-side
       const compiled = await compile(source, {
@@ -55,7 +59,7 @@ export default function PageRenderer() {
     } finally {
       setLoading(false)
     }
-  }, [location.pathname])
+  }, [pagePath])
 
   useEffect(() => {
     loadPage()
@@ -90,8 +94,11 @@ export default function PageRenderer() {
   const components = getComponents()
 
   return (
-    <div className="prose prose-sm max-w-none dark:prose-invert mdx-content">
-      <Content components={components} data={dataContext.data} />
+    <div className="relative">
+      <PageActionsMenu pagePath={pagePath} pageTitle={pageTitle} />
+      <div className="prose prose-sm max-w-none dark:prose-invert mdx-content">
+        <Content components={components} data={dataContext.data} />
+      </div>
     </div>
   )
 }

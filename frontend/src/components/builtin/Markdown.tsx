@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react'
 import { compile, run } from '@mdx-js/mdx'
 import * as runtime from 'react/jsx-runtime'
 import { useData } from '../../hooks/useData'
+import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
 interface MarkdownProps {
   source: string
@@ -36,11 +37,17 @@ export function Markdown({ source }: MarkdownProps) {
           setErr(null)
         }
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to render markdown')
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : 'Failed to render markdown'
+          setErr(msg)
+          beaconError({ component: 'Markdown', source, error: msg })
+        }
       }
     })()
     return () => { cancelled = true }
-  }, [text])
+  }, [text, source])
+
+  useEffect(() => { resetBeacon('Markdown', source) }, [text, source])
 
   if (loading) return null
   if (err) return <div style={{ color: 'var(--error)', fontSize: '0.875rem' }}>Markdown error: {err}</div>

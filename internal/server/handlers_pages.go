@@ -1,8 +1,11 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -79,5 +82,73 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.Broadcaster.Broadcast(SSEEvent{
+		Type: "page-updated",
+		Data: []byte(`{"path":"` + pagePath + `","deleted":true}`),
+	})
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{"ok": true})
+}
+
+// handleMovePage renames/moves a page file. Body: {"from": "...", "to": "..."}.
+// Returns 404 if the source doesn't exist, 409 if the destination does, 400
+// for invalid paths (empty, index, or containing "..").
+func (s *Server) handleMovePage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "expected JSON body {from, to}")
+		return
+	}
+
+	from := normalizePagePath(body.From)
+	to := normalizePagePath(body.To)
+
+	if from == "" || to == "" {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "both from and to are required")
+		return
+	}
+	if from == "index" || to == "index" {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "cannot move to or from the index page")
+		return
+	}
+	if strings.Contains(from, "..") || strings.Contains(to, "..") {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "path must not contain '..'")
+		return
+	}
+	if from == to {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "from and to must differ")
+		return
+	}
+
+	if err := s.Pages.MovePage(from, to); err != nil {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			respondError(w, http.StatusNotFound, "NOT_FOUND", "source page does not exist: "+from)
+		case errors.Is(err, os.ErrExist):
+			respondError(w, http.StatusConflict, "CONFLICT", "destination already exists: "+to)
+		default:
+			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		}
+		return
+	}
+
+	s.Broadcaster.Broadcast(SSEEvent{
+		Type: "page-updated",
+		Data: []byte(`{"from":"` + from + `","to":"` + to + `","moved":true}`),
+	})
+
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "from": from, "to": to})
+}
+
+// normalizePagePath trims a leading slash, trailing ".md", and surrounding
+// whitespace so inputs like "/features/old", "features/old.md", or " features/old "
+// all resolve to the canonical "features/old".
+func normalizePagePath(p string) string {
+	p = strings.TrimSpace(p)
+	p = strings.TrimPrefix(p, "/")
+	p = strings.TrimSuffix(p, ".md")
+	return p
 }

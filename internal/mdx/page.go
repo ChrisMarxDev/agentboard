@@ -156,6 +156,34 @@ func (pm *PageManager) DeletePage(pagePath string) error {
 	return nil
 }
 
+// MovePage renames/moves a page file. Returns os.ErrNotExist if the source
+// doesn't exist, and os.ErrExist if the destination already does — so callers
+// can map those to 404 / 409 without inspecting the file system themselves.
+func (pm *PageManager) MovePage(from, to string) error {
+	from = strings.TrimSuffix(from, ".md")
+	to = strings.TrimSuffix(to, ".md")
+
+	srcPath := filepath.Join(pm.project.ContentDir(), from+".md")
+	dstPath := filepath.Join(pm.project.ContentDir(), to+".md")
+
+	if _, err := os.Stat(srcPath); err != nil {
+		return err
+	}
+	if _, err := os.Stat(dstPath); err == nil {
+		return os.ErrExist
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0755); err != nil {
+		return err
+	}
+	if err := os.Rename(srcPath, dstPath); err != nil {
+		return err
+	}
+
+	pm.ScanPages()
+	return nil
+}
+
 // parseFrontmatter extracts title from YAML frontmatter and returns the remaining content.
 func parseFrontmatter(content string) (title string, source string) {
 	if !strings.HasPrefix(content, "---\n") {

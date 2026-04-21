@@ -1,0 +1,84 @@
+---
+const year = new Date().getFullYear();
+
+const columns = [
+  {
+    title: "Product",
+    links: [
+      { href: "#features", label: "Features" },
+      { href: "#how-it-works", label: "How it works" },
+      { href: "https://github.com/anthropics", label: "Changelog" },
+    ],
+  },
+  {
+    title: "Docs",
+    links: [
+      { href: "https://github.com/anthropics", label: "Getting started" },
+      { href: "https://github.com/anthropics", label: "REST API" },
+      { href: "https://github.com/anthropics", label: "MCP tools" },
+    ],
+  },
+  {
+    title: "Community",
+    links: [
+      { href: "https://github.com/anthropics", label: "GitHub" },
+      { href: "https://github.com/anthropics", label: "Issues" },
+      { href: "https://github.com/anthropics", label: "Discussions" },
+    ],
+  },
+];
+---
+
+<footer class="border-t border-white/5 bg-[#0a0a0a]">
+  <div class="mx-auto max-w-6xl px-6 py-16">
+    <div class="grid gap-10 md:grid-cols-[1.5fr_3fr]">
+      <div>
+        <a href="/" class="flex items-center gap-2.5 font-semibold">
+          <span
+            class="grid h-7 w-7 grid-cols-2 grid-rows-2 gap-[2px] rounded-[5px] bg-white/5 p-[3px]"
+            aria-hidden="true"
+          >
+            <span class="rounded-[1px] bg-blue-400"></span>
+            <span class="rounded-[1px] bg-violet-400"></span>
+            <span class="rounded-[1px] bg-emerald-400"></span>
+            <span class="rounded-[1px] bg-amber-400"></span>
+          </span>
+          <span class="text-white">AgentBoard</span>
+        </a>
+        <p class="mt-4 max-w-xs text-sm text-zinc-500">
+          Dashboards your agents can write to. Single binary. SQLite-backed.
+          Open source.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-8 sm:grid-cols-3">
+        {
+          columns.map((col) => (
+            <div>
+              <p class="text-sm font-medium text-white">{col.title}</p>
+              <ul class="mt-4 space-y-3">
+                {col.links.map((l) => (
+                  <li>
+                    <a
+                      href={l.href}
+                      class="text-sm text-zinc-400 transition-colors hover:text-white"
+                    >
+                      {l.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <div
+      class="mt-16 flex flex-wrap items-center justify-between gap-4 border-t border-white/5 pt-8 text-xs text-zinc-500"
+    >
+      <p>© {year} AgentBoard. Released under the MIT license.</p>
+      <p class="font-mono">v0.1.0</p>
+    </div>
+  </div>
+</footer>

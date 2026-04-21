@@ -1,0 +1,33 @@
+info:
+  name: POST with empty error string is a no-op (doesn't record)
+  type: http
+  seq: 8
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/errors"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "component": "Image",
+        "source": "demo.files.hero",
+        "error": ""
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        const axios = require('axios');
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("recorded:false", function() {
+          expect(res.body.recorded).to.equal(false);
+        });
+        test("buffer still empty", async function() {
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/errors`);
+          expect(r.data.length).to.equal(0);
+        });

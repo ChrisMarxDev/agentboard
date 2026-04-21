@@ -8,7 +8,9 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/data"
+	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
+	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
@@ -18,6 +20,8 @@ type Server struct {
 	Pages                *mdx.PageManager
 	Components           *components.Manager
 	Files                *files.Manager
+	Errors               *interrors.Buffer
+	Grab                 *grab.Materializer
 	AllowComponentUpload bool
 }
 

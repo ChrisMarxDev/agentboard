@@ -1,0 +1,29 @@
+info:
+  name: Re-firing the same error inside the dup window does NOT bump count
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/errors"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "component": "Mermaid",
+        "source": "dev.features.files.flow",
+        "page": "/features/files",
+        "error": "Parse error on line 2:\n...t<br/>flat PageEntry[]] --> B[buildPageT\n-----------------------^\nExpecting 'SQE'..."
+      }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("count still 1 (same error within DupWindow)", function() {
+          expect(res.body.count).to.equal(1);
+        });

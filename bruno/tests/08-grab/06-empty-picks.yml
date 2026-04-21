@@ -1,0 +1,26 @@
+info:
+  name: Empty picks → empty response, no error
+  type: http
+  seq: 6
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/grab"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      { "picks": [] }
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("text is empty", function() { expect(res.body.text).to.equal(""); });
+        test("sections is an empty array", function() {
+          expect(res.body.sections).to.be.an("array");
+          expect(res.body.sections).to.have.lengthOf(0);
+        });
