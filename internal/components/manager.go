@@ -213,10 +213,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Card", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Card",
-				Description: "A boxed container with optional title. Use inside a Deck to build dashboard layouts.",
+				Description: "A boxed container with optional title. Use inside a Deck to build dashboard layouts. Pass `href` to make the entire card a navigation target — inner links/buttons keep working.",
 				Props: map[string]PropMeta{
 					"title": {Type: "string", Description: "Optional uppercase label rendered above the content"},
 					"span":  {Type: "number", Description: "Number of grid columns this card spans", Default: 1},
+					"href":  {Type: "string", Description: "Optional navigation target. Relative paths navigate in-app; http(s) URLs open in a new tab. Inner interactive elements still work."},
 				},
 			},
 		},
