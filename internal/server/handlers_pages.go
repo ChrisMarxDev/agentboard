@@ -8,8 +8,23 @@ import (
 	"os"
 	"strings"
 
+	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/mdx"
 )
+
+// resolveActor picks a human-readable identity for a write. Prefers the
+// authenticated user's username when auth middleware populated it; falls back
+// to the X-Agent-Source header for MCP/script callers that don't carry a
+// user; last resort is "anonymous".
+func resolveActor(r *http.Request) string {
+	if u := auth.UserFromContext(r.Context()); u != nil {
+		return u.Username
+	}
+	if s := r.Header.Get("X-Agent-Source"); s != "" {
+		return s
+	}
+	return "anonymous"
+}
 
 // respondPageStale emits a 412 with the current page info so the caller can
 // re-base and retry. page may be nil when the path doesn't exist.
@@ -49,6 +64,17 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", `"`+page.Etag+`"`)
 	}
 
+	// Best-effort last-edited-by. Emit as headers so `Accept: text/markdown`
+	// callers still get the info without parsing JSON.
+	var meta *mdx.PageMeta
+	if s.PageMeta != nil {
+		meta, _ = s.PageMeta.Get(pagePath)
+		if meta != nil {
+			w.Header().Set("X-Last-Actor", meta.LastActor)
+			w.Header().Set("X-Last-At", meta.LastAt)
+		}
+	}
+
 	// Check Accept header to determine response format
 	accept := r.Header.Get("Accept")
 	if strings.Contains(accept, "text/markdown") {
@@ -58,8 +84,20 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default: return page metadata + source
-	respondJSON(w, http.StatusOK, page)
+	// Default: return page metadata + source + last-edited meta.
+	payload := map[string]any{
+		"path":   page.Path,
+		"file":   page.File,
+		"title":  page.Title,
+		"source": page.Source,
+		"etag":   page.Etag,
+		"order":  page.Order,
+	}
+	if meta != nil {
+		payload["last_actor"] = meta.LastActor
+		payload["last_at"] = meta.LastAt
+	}
+	respondJSON(w, http.StatusOK, payload)
 }
 
 func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +124,15 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record last-edited-by before broadcasting so readers hitting the SSE
+	// refetch see the new meta right away. Best-effort; a meta failure
+	// doesn't roll back the write.
+	normalizedPath := strings.TrimSuffix(pagePath, ".md")
+	actor := resolveActor(r)
+	if s.PageMeta != nil {
+		_ = s.PageMeta.Record(normalizedPath, actor)
+	}
+
 	// Broadcast page update via SSE
 	s.Broadcaster.Broadcast(SSEEvent{
 		Type: "page-updated",
@@ -93,12 +140,13 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Echo the new etag so clients don't need a follow-up GET.
-	page := s.Pages.GetPage(strings.TrimSuffix(pagePath, ".md"))
+	page := s.Pages.GetPage(normalizedPath)
 	resp := map[string]any{"ok": true, "compiled": true}
 	if page != nil {
 		resp["etag"] = page.Etag
 		w.Header().Set("ETag", `"`+page.Etag+`"`)
 	}
+	resp["last_actor"] = actor
 	respondJSON(w, http.StatusOK, resp)
 }
 
@@ -119,6 +167,12 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", delErr.Error())
 		return
+	}
+
+	// Drop the meta row too — a recreated page should start with a fresh
+	// attribution rather than inherit the deleter.
+	if s.PageMeta != nil {
+		_ = s.PageMeta.Delete(strings.TrimSuffix(pagePath, ".md"))
 	}
 
 	s.Broadcaster.Broadcast(SSEEvent{

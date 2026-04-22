@@ -1,6 +1,7 @@
 package server
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -26,6 +27,7 @@ type Server struct {
 	Auth                 *auth.Store
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
+	PageMeta             *mdx.MetaStore
 	Components           *components.Manager
 	Files                *files.Manager
 	Errors               *interrors.Buffer
@@ -67,6 +69,16 @@ func New(cfg ServerConfig) *Server {
 	}()
 
 	pageManager := mdx.NewPageManager(cfg.Project)
+	// Best-effort: if the store exposes a *sql.DB (SQLiteStore does), build
+	// a MetaStore over it so we can surface "last edited by" on pages. When
+	// the assert fails, PageMeta stays nil and handlers fall back to "no
+	// meta available" — never fatal.
+	var metaStore *mdx.MetaStore
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if ms, err := mdx.NewMetaStore(dber.DB()); err == nil {
+			metaStore = ms
+		}
+	}
 	compManager := components.NewManager(cfg.Project)
 	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
 	errorBuffer := interrors.NewBuffer()
@@ -88,6 +100,7 @@ func New(cfg ServerConfig) *Server {
 		Auth:                 cfg.Auth,
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
+		PageMeta:             metaStore,
 		Components:           compManager,
 		Files:                fileManager,
 		Errors:               errorBuffer,
@@ -107,15 +120,57 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
-	// Token-auth gates data-plane endpoints; admin-plane (/api/admin/*) is
-	// handled separately by SessionMiddleware scoped into that subtree below.
-	r.Use(auth.TokenMiddleware(cfg.Auth, auth.MiddlewareConfig{}))
-	// AuthorizeMiddleware enforces per-identity rules once the token has
-	// resolved to an identity.
-	r.Use(auth.AuthorizeMiddleware())
+
+	// Token-auth is scoped to the API / MCP / skill endpoints only. The
+	// SPA assets (`/`, `/login`, static JS/CSS) must render without a
+	// token so the browser can reach /login and sign the user in. The
+	// SPA has its own client-side gate (SessionGate + apiFetch's 401
+	// redirect).
+	gated := func(r chi.Router) {
+		r.Use(auth.TokenMiddleware(cfg.Auth, auth.MiddlewareConfig{
+			OpenPaths: []string{"/api/setup", "/api/setup/status"},
+		}))
+		r.Use(auth.AuthorizeMiddleware())
+	}
 
 	// API routes
-	r.Route("/api", func(r chi.Router) {
+	r.Group(func(r chi.Router) {
+		gated(r)
+		r.Route("/api", apiRoutes(s))
+		r.Get("/skill", s.handleSkill)
+		r.Post("/mcp", s.MCP.ServeHTTP)
+		r.Get("/mcp", s.MCP.ServeHTTP)
+	})
+
+	// Frontend — serve embedded SPA or proxy to dev server.
+	if cfg.DevMode && cfg.DevProxy != "" {
+		r.HandleFunc("/*", devProxyHandler(cfg.DevProxy))
+	} else if cfg.FrontendFS != nil {
+		fileServer := http.FileServer(cfg.FrontendFS)
+		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+			// Try to serve the file; if not found, serve index.html (SPA fallback)
+			path := r.URL.Path
+			f, err := cfg.FrontendFS.Open(path[1:]) // strip leading /
+			if err != nil {
+				// SPA fallback
+				r.URL.Path = "/"
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+		})
+	} else {
+		r.HandleFunc("/*", s.handleFrontend)
+	}
+
+	return r
+}
+
+// apiRoutes builds the /api subtree. Extracted so the middleware scoping
+// in buildRouter stays readable; the contents are the same set of handlers.
+func apiRoutes(s *Server) func(r chi.Router) {
+	return func(r chi.Router) {
 		// Admin routes — AdminRequired is scoped inside registerAdminRoutes
 		// so it only guards /api/admin/*. AuthorizeMiddleware is a no-op for
 		// admin users (they ignore per-user rules).
@@ -125,6 +180,10 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// @mention autocomplete and assignee-field resolution.
 		r.Get("/users", s.handleListUsersPublic)
 		r.Post("/users/resolve", s.handleResolveUsernames)
+
+		// Setup endpoints — open until the board is claimed, then 409 forever.
+		r.Get("/setup/status", s.handleSetupStatus)
+		r.Post("/setup", s.handleSetup)
 
 		// Data endpoints
 		r.Get("/data", s.handleGetAllData)
@@ -184,38 +243,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// Meta
 		r.Get("/health", s.handleHealth)
 		r.Get("/config", s.handleConfig)
-	})
-
-	// Skill file
-	r.Get("/skill", s.handleSkill)
-
-	// MCP endpoint
-	r.Post("/mcp", s.MCP.ServeHTTP)
-	r.Get("/mcp", s.MCP.ServeHTTP)
-
-	// Frontend — serve embedded SPA or proxy to dev server
-	if cfg.DevMode && cfg.DevProxy != "" {
-		r.HandleFunc("/*", devProxyHandler(cfg.DevProxy))
-	} else if cfg.FrontendFS != nil {
-		fileServer := http.FileServer(cfg.FrontendFS)
-		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-			// Try to serve the file; if not found, serve index.html (SPA fallback)
-			path := r.URL.Path
-			f, err := cfg.FrontendFS.Open(path[1:]) // strip leading /
-			if err != nil {
-				// SPA fallback
-				r.URL.Path = "/"
-				fileServer.ServeHTTP(w, r)
-				return
-			}
-			f.Close()
-			fileServer.ServeHTTP(w, r)
-		})
-	} else {
-		r.HandleFunc("/*", s.handleFrontend)
 	}
-
-	return r
 }
 
 // ListenAndServe starts the HTTP server.

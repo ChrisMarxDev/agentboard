@@ -11,6 +11,7 @@ import FileViewer from '../files/FileViewer'
 import FolderView from './FolderView'
 import { GrabbableHeading } from './GrabbableHeading'
 import { MissingBrick } from './MissingBrick'
+import { LastEditedFooter } from './LastEditedFooter'
 
 // Cache MissingBrick stand-ins per-name at the module level so React sees a
 // stable component reference across renders. Without this, each render
@@ -58,7 +59,7 @@ import { useFiles } from '../../hooks/useFiles'
 import { buildContentTree, findFolder, type ContentFolder } from '../../lib/contentTree'
 
 type Resolved =
-  | { kind: 'page'; Content: React.ComponentType; title?: string; source: string }
+  | { kind: 'page'; Content: React.ComponentType; title?: string; source: string; lastActor?: string; lastAt?: string }
   | { kind: 'file' }
   | { kind: 'folder'; folder: ContentFolder }
   | { kind: 'missing' }
@@ -91,6 +92,8 @@ export default function PageRenderer() {
         const source = await pageResp.text()
         const firstHeading = source.match(/^#\s+(.+)$/m)
         const title = firstHeading ? firstHeading[1].trim() : undefined
+        const lastActor = pageResp.headers.get('X-Last-Actor') ?? undefined
+        const lastAt = pageResp.headers.get('X-Last-At') ?? undefined
 
         const compiled = await compile(source, {
           outputFormat: 'function-body',
@@ -101,7 +104,14 @@ export default function PageRenderer() {
           ...runtime,
           baseUrl: import.meta.url,
         })
-        setResolved({ kind: 'page', Content: MDXContent as React.ComponentType, title, source })
+        setResolved({
+          kind: 'page',
+          Content: MDXContent as React.ComponentType,
+          title,
+          source,
+          lastActor,
+          lastAt,
+        })
         setLoading(false)
         return
       }
@@ -198,6 +208,7 @@ export default function PageRenderer() {
       <div className="prose prose-sm max-w-none dark:prose-invert mdx-content">
         <Content components={components} data={dataContext.data} />
       </div>
+      <LastEditedFooter actor={resolved.lastActor} at={resolved.lastAt} />
     </div>
   )
 }
