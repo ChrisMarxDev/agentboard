@@ -1,6 +1,9 @@
 package mdx
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +13,23 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/project"
 )
+
+// ErrStale is returned by WritePageIfMatch / DeletePageIfMatch when the
+// caller's expected etag doesn't match the current page source. Handlers
+// translate it to HTTP 412 with the current page in the body.
+var ErrStale = errors.New("mdx: stale write — If-Match did not match current etag")
+
+// ErrNotFoundForMatch signals that an If-Match was set but the page doesn't
+// exist. 412 with `current: null`.
+var ErrNotFoundForMatch = errors.New("mdx: page not found for If-Match check")
+
+// pageEtag derives a content-addressed etag from the raw source. First 16
+// hex chars of sha256 — short enough for headers, long enough to rule out
+// accidental collisions within a project.
+func pageEtag(source string) string {
+	sum := sha256.Sum256([]byte(source))
+	return hex.EncodeToString(sum[:])[:16]
+}
 
 // titleCase uppercases the first rune of each space-separated word.
 // Replaces strings.Title (deprecated in Go 1.18) for the narrow filename-slug
@@ -40,7 +60,11 @@ type PageInfo struct {
 	File   string `json:"file"`
 	Title  string `json:"title"`
 	Source string `json:"source"`
-	Order  int    `json:"order"`
+	// Etag is a content-addressed version identifier — sha256(source) prefix.
+	// Handlers echo it as the HTTP ETag header; callers send it back in
+	// If-Match for optimistic concurrency.
+	Etag  string `json:"etag"`
+	Order int    `json:"order"`
 }
 
 // PageManager manages MDX pages for a project.
@@ -79,6 +103,7 @@ func (pm *PageManager) ScanPages() {
 			File:   "index.md",
 			Title:  title,
 			Source: source,
+			Etag:   pageEtag(source),
 			Order:  0,
 		}
 	}
@@ -121,6 +146,7 @@ func (pm *PageManager) ScanPages() {
 				File:   filepath.Join("content", relPath),
 				Title:  title,
 				Source: source,
+				Etag:   pageEtag(source),
 			},
 		})
 		return nil
@@ -174,14 +200,35 @@ func (pm *PageManager) GetPage(pagePath string) *PageInfo {
 	return pm.pages[pagePath]
 }
 
-// WritePage creates or updates a page.
+// WritePage creates or updates a page (last-write-wins).
 func (pm *PageManager) WritePage(pagePath string, source string) error {
+	return pm.WritePageIfMatch(pagePath, source, "")
+}
+
+// WritePageIfMatch is WritePage with an optimistic-concurrency precondition.
+// When expectedEtag is non-empty, returns ErrStale if the current page etag
+// doesn't match, or ErrNotFoundForMatch if the page doesn't exist yet.
+func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedEtag string) error {
 	var filePath string
+	normalized := pagePath
 	if pagePath == "index" || pagePath == "index.md" {
 		filePath = pm.project.IndexFile()
+		normalized = "index"
 	} else {
-		pagePath = strings.TrimSuffix(pagePath, ".md")
-		filePath = filepath.Join(pm.project.ContentDir(), pagePath+".md")
+		normalized = strings.TrimSuffix(pagePath, ".md")
+		filePath = filepath.Join(pm.project.ContentDir(), normalized+".md")
+	}
+
+	if expectedEtag != "" {
+		pm.mu.RLock()
+		current := pm.pages[normalized]
+		pm.mu.RUnlock()
+		if current == nil {
+			return ErrNotFoundForMatch
+		}
+		if current.Etag != expectedEtag {
+			return ErrStale
+		}
 	}
 
 	// Ensure parent directory exists
@@ -194,15 +241,32 @@ func (pm *PageManager) WritePage(pagePath string, source string) error {
 		return err
 	}
 
-	// Re-scan to pick up changes
+	// Re-scan to pick up changes (including the new etag)
 	pm.ScanPages()
 	return nil
 }
 
-// DeletePage removes a page file and re-scans.
+// DeletePage removes a page file (last-write-wins).
 func (pm *PageManager) DeletePage(pagePath string) error {
-	pagePath = strings.TrimSuffix(pagePath, ".md")
-	filePath := filepath.Join(pm.project.ContentDir(), pagePath+".md")
+	return pm.DeletePageIfMatch(pagePath, "")
+}
+
+// DeletePageIfMatch is DeletePage with an optimistic-concurrency precondition.
+func (pm *PageManager) DeletePageIfMatch(pagePath, expectedEtag string) error {
+	normalized := strings.TrimSuffix(pagePath, ".md")
+	filePath := filepath.Join(pm.project.ContentDir(), normalized+".md")
+
+	if expectedEtag != "" {
+		pm.mu.RLock()
+		current := pm.pages[normalized]
+		pm.mu.RUnlock()
+		if current == nil {
+			return ErrNotFoundForMatch
+		}
+		if current.Etag != expectedEtag {
+			return ErrStale
+		}
+	}
 
 	if err := os.Remove(filePath); err != nil {
 		return err

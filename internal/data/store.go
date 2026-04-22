@@ -4,12 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrStale is returned by the *IfMatch variants when the caller's expected
+// updated_at doesn't match the current row. Handlers translate to 412.
+var ErrStale = errors.New("data: stale write — If-Match did not match current updated_at")
+
+// ErrNotFoundForMatch is returned when If-Match is set but the key doesn't
+// exist. Lets handlers emit a precise 412 with "current_version": null.
+var ErrNotFoundForMatch = errors.New("data: key not found for If-Match check")
 
 // DataEvent is emitted on every write for SSE broadcasting.
 type DataEvent struct {
@@ -25,6 +34,16 @@ type Schema struct {
 }
 
 // DataStore is the interface for all data operations.
+//
+// Each mutating operation has an *IfMatch counterpart that enforces an
+// optimistic-concurrency check against the current row's `updated_at`.
+// Pass the expected `updated_at` value (from a prior GetMeta) and the write
+// fails with ErrStale if the row has moved on. ErrNotFoundForMatch signals
+// that a caller passed an If-Match but the key doesn't exist. Handlers
+// translate both to HTTP 412 with the current meta in the body.
+//
+// The non-IfMatch methods keep last-write-wins semantics for callers that
+// don't need coordination (solo scripts, simple MCP writes).
 type DataStore interface {
 	Set(key string, value json.RawMessage, source string) error
 	Merge(key string, patch json.RawMessage, source string) error
@@ -33,6 +52,14 @@ type DataStore interface {
 	Append(key string, item json.RawMessage, source string) error
 	Delete(key string, source string) error
 	DeleteById(key, id string, source string) error
+
+	SetIfMatch(key string, value json.RawMessage, source, expectedUpdatedAt string) error
+	MergeIfMatch(key string, patch json.RawMessage, source, expectedUpdatedAt string) error
+	AppendIfMatch(key string, item json.RawMessage, source, expectedUpdatedAt string) error
+	DeleteIfMatch(key, source, expectedUpdatedAt string) error
+	UpsertByIdIfMatch(key, id string, item json.RawMessage, source, expectedUpdatedAt string) error
+	MergeByIdIfMatch(key, id string, patch json.RawMessage, source, expectedUpdatedAt string) error
+	DeleteByIdIfMatch(key, id, source, expectedUpdatedAt string) error
 
 	Get(key string) (json.RawMessage, error)
 	GetById(key, id string) (json.RawMessage, error)
@@ -125,7 +152,9 @@ func (s *SQLiteStore) DB() *sql.DB {
 }
 
 func (s *SQLiteStore) now() string {
-	return time.Now().UTC().Format(time.RFC3339)
+	// Nanosecond precision — second-level collisions break optimistic
+	// concurrency when two writes land in the same second.
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 // archivePrevious records the current value in history before overwriting.
