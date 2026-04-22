@@ -15,6 +15,7 @@ import type { PageEntry } from '../../hooks/usePages'
 import { useGrab } from '../../hooks/useGrab'
 import { setMode } from '../../lib/grab'
 import { useFiles } from '../../hooks/useFiles'
+import { useContentSearch } from '../../hooks/useContentSearch'
 
 const EXPANDED_STORAGE_KEY = 'agentboard:nav-expanded'
 
@@ -58,6 +59,11 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
     const { nodes, expandedPaths } = filterContentTree(fullTree, query)
     return { tree: nodes, searchExpanded: expandedPaths }
   }, [fullTree, query])
+
+  // When title/path filtering returns no matches, escalate to server-side
+  // full-text search over page content. Debounced to keep keystrokes cheap.
+  const titleMatchEmpty = query.trim() !== '' && tree.length === 0
+  const { hits: contentHits, ready: contentSearchReady } = useContentSearch(query, titleMatchEmpty)
 
   const [expanded, setExpanded] = useState<Set<string>>(() => loadExpanded())
 
@@ -252,9 +258,43 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
       </div>
 
       <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
-        {query && tree.length === 0 && (
+        {titleMatchEmpty && !contentSearchReady && (
+          <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Searching page content…
+          </div>
+        )}
+        {titleMatchEmpty && contentSearchReady && contentHits.length === 0 && (
           <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
             No matches.
+          </div>
+        )}
+        {titleMatchEmpty && contentHits.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <div
+              className="px-3 pb-1 text-[10px] uppercase tracking-wide"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              Found in page content
+            </div>
+            {contentHits.map(h => (
+              <Link
+                key={h.path}
+                to={h.path}
+                className="flex flex-col px-3 py-2 rounded-md text-sm gap-0.5"
+                style={{ color: 'var(--text)' }}
+              >
+                <span className="truncate font-medium">{h.title || h.path}</span>
+                <span
+                  className="text-xs truncate"
+                  style={{ color: 'var(--text-secondary)' }}
+                  // snippet is server-rendered with <mark>...</mark> wrappers
+                  // around the match; interpret as HTML so the highlight
+                  // shows. The snippet content comes from our own DB so XSS
+                  // exposure is bounded by who can write pages.
+                  dangerouslySetInnerHTML={{ __html: h.snippet }}
+                />
+              </Link>
+            ))}
           </div>
         )}
         <ContentNav

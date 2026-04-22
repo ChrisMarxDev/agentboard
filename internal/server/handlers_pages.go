@@ -184,6 +184,14 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 		_ = s.PageMeta.Record(normalizedPath, actor)
 	}
 
+	// Keep the FTS index in lockstep with the write. Best-effort; if the
+	// index drifts, a server restart rebuilds from disk.
+	if s.Search != nil {
+		if p := s.Pages.GetPage(normalizedPath); p != nil {
+			_ = s.Search.IndexPage(p.Path, p.Title, p.Source)
+		}
+	}
+
 	// Broadcast page update via SSE
 	s.Broadcaster.Broadcast(SSEEvent{
 		Type: "page-updated",
@@ -222,8 +230,13 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 
 	// Drop the meta row too — a recreated page should start with a fresh
 	// attribution rather than inherit the deleter.
+	normalizedPath := strings.TrimSuffix(pagePath, ".md")
 	if s.PageMeta != nil {
-		_ = s.PageMeta.Delete(strings.TrimSuffix(pagePath, ".md"))
+		_ = s.PageMeta.Delete(normalizedPath)
+	}
+	if s.Search != nil {
+		// FTS path is stored with a leading slash (matches PageInfo.Path).
+		_ = s.Search.DeletePage("/" + normalizedPath)
 	}
 
 	s.Broadcaster.Broadcast(SSEEvent{

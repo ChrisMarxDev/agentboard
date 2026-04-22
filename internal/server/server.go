@@ -28,6 +28,7 @@ type Server struct {
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
 	PageMeta             *mdx.MetaStore
+	Search               *mdx.SearchStore
 	Components           *components.Manager
 	Files                *files.Manager
 	Errors               *interrors.Buffer
@@ -79,6 +80,26 @@ func New(cfg ServerConfig) *Server {
 			metaStore = ms
 		}
 	}
+
+	// Full-text search index (SQLite FTS5). Bootstrapped from the page
+	// manager's initial scan; kept in sync by the page handlers. Same
+	// best-effort posture as MetaStore — if the DB can't be addressed or
+	// FTS isn't available, search silently becomes a no-op rather than
+	// failing the boot.
+	var searchStore *mdx.SearchStore
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if ss, err := mdx.NewSearchStore(dber.DB()); err == nil {
+			searchStore = ss
+			// Prime the index from whatever's on disk. Zero-cost on a
+			// fresh project; O(N) on an existing one.
+			if err := searchStore.Rebuild(pageManager.ListPages()); err != nil {
+				log.Printf("agentboard: search index rebuild failed (continuing without search): %v", err)
+			}
+		} else {
+			log.Printf("agentboard: FTS5 search unavailable (continuing without search): %v", err)
+		}
+	}
+
 	compManager := components.NewManager(cfg.Project)
 	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
 	errorBuffer := interrors.NewBuffer()
@@ -101,6 +122,7 @@ func New(cfg ServerConfig) *Server {
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
 		PageMeta:             metaStore,
+		Search:               searchStore,
 		Components:           compManager,
 		Files:                fileManager,
 		Errors:               errorBuffer,
@@ -236,6 +258,9 @@ func apiRoutes(s *Server) func(r chi.Router) {
 
 		// Lightweight combined tree — pages + files, no source bodies
 		r.Get("/tree", s.handleTree)
+
+		// Full-text search over page content (FTS5)
+		r.Get("/search", s.handleSearch)
 
 		// Grab — materialize a list of picks into agent-ready text
 		r.Post("/grab", s.handleGrab)
