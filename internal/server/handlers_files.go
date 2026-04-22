@@ -31,6 +31,19 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+
+	// ?prefix=skills/ — subtree filter against the stored file name.
+	if prefix := r.URL.Query().Get("prefix"); prefix != "" {
+		norm := strings.TrimPrefix(prefix, "/")
+		filtered := list[:0] // reuse backing array; list becomes the filtered slice
+		for _, f := range list {
+			if strings.HasPrefix(f.Name, norm) {
+				filtered = append(filtered, f)
+			}
+		}
+		list = filtered
+	}
+
 	respondJSON(w, http.StatusOK, list)
 }
 

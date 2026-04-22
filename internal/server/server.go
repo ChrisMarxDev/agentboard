@@ -234,6 +234,9 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Post("/errors", s.handleRecordError)
 		r.Delete("/errors", s.handleClearErrors)
 
+		// Lightweight combined tree — pages + files, no source bodies
+		r.Get("/tree", s.handleTree)
+
 		// Grab — materialize a list of picks into agent-ready text
 		r.Post("/grab", s.handleGrab)
 

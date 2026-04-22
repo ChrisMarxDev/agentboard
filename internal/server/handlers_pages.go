@@ -44,6 +44,57 @@ func respondPageStale(w http.ResponseWriter, page *mdx.PageInfo, path string) {
 
 func (s *Server) handleListPages(w http.ResponseWriter, r *http.Request) {
 	pages := s.Pages.ListPages()
+
+	// ?prefix=features/components — subtree filter. Kept matched against
+	// the URL path (what callers see) rather than the disk path so a client
+	// that already knows `/features/components` doesn't need to strip the
+	// leading slash.
+	if prefix := r.URL.Query().Get("prefix"); prefix != "" {
+		norm := "/" + strings.TrimPrefix(prefix, "/")
+		filtered := make([]mdx.PageInfo, 0, len(pages))
+		for _, p := range pages {
+			if strings.HasPrefix(p.Path, norm) {
+				filtered = append(filtered, p)
+			}
+		}
+		pages = filtered
+	}
+
+	// ?fields=path,title drops source bodies when the caller only needs a
+	// lightweight manifest. Saves bandwidth on large projects (see
+	// DOGFOOD_NOTES — 109 KB dropped to a few KB).
+	if fields := r.URL.Query().Get("fields"); fields != "" {
+		allowed := map[string]bool{}
+		for _, f := range strings.Split(fields, ",") {
+			allowed[strings.TrimSpace(f)] = true
+		}
+		out := make([]map[string]any, 0, len(pages))
+		for _, p := range pages {
+			row := map[string]any{}
+			if allowed["path"] {
+				row["path"] = p.Path
+			}
+			if allowed["file"] {
+				row["file"] = p.File
+			}
+			if allowed["title"] {
+				row["title"] = p.Title
+			}
+			if allowed["source"] {
+				row["source"] = p.Source
+			}
+			if allowed["etag"] {
+				row["etag"] = p.Etag
+			}
+			if allowed["order"] {
+				row["order"] = p.Order
+			}
+			out = append(out, row)
+		}
+		respondJSON(w, http.StatusOK, out)
+		return
+	}
+
 	respondJSON(w, http.StatusOK, pages)
 }
 
