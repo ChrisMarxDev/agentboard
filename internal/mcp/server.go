@@ -18,6 +18,7 @@ import (
 type Server struct {
 	Store                data.DataStore
 	Pages                *mdx.PageManager
+	Search               *mdx.SearchStore
 	Components           *components.Manager
 	Files                *files.Manager
 	Errors               *interrors.Buffer

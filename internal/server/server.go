@@ -108,6 +108,7 @@ func New(cfg ServerConfig) *Server {
 	mcpServer := &mcp.Server{
 		Store:                cfg.Store,
 		Pages:                pageManager,
+		Search:               searchStore,
 		Components:           compManager,
 		Files:                fileManager,
 		Errors:               errorBuffer,

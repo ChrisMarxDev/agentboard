@@ -218,6 +218,18 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
+			Name:        "agentboard_search",
+			Description: "Full-text search over every page in the project. Returns ranked hits with path, title, and a short snippet highlighting the match. Prefer this over list_pages + read_page when you know what you're looking for but not where it lives.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"q":     map[string]string{"type": "string", "description": "Query. Whitespace-separated terms are ANDed. Quote for exact phrases."},
+					"limit": map[string]any{"type": "number", "description": "Max hits (default 20, cap 100)"},
+				},
+				"required": []string{"q"},
+			},
+		},
+		{
 			Name:        "agentboard_grab",
 			Description: "Materialize a set of Card picks across pages into a single agent-ready payload. Each pick is {page, card_id} where card_id is the kebab-slug of the Card's title. Returns the formatted text (markdown | xml | json) plus the resolved sections. Use this to pull cross-page context from the dashboard when responding to the user.",
 			InputSchema: map[string]interface{}{
@@ -337,6 +349,8 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolClearErrors(args)
 	case "agentboard_grab":
 		return s.toolGrab(args)
+	case "agentboard_search":
+		return s.toolSearch(args)
 	default:
 		return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -448,6 +462,31 @@ func (s *Server) toolListErrors() (interface{}, *RPCError) {
 	}
 	pretty, _ := json.MarshalIndent(entries, "", "  ")
 	return mcpContent(string(pretty)), nil
+}
+
+func (s *Server) toolSearch(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	if s.Search == nil {
+		// Search unavailable (FTS5 not built into the sqlite driver, or the
+		// store doesn't expose a *sql.DB). Return an empty result rather
+		// than erroring — callers can treat this as "nothing found."
+		return map[string]any{"hits": []any{}}, nil
+	}
+	q := getString(args, "q")
+	if q == "" {
+		return nil, &RPCError{Code: -32602, Message: "q is required"}
+	}
+	limit := 20
+	if raw, ok := args["limit"]; ok {
+		var n int
+		if err := json.Unmarshal(raw, &n); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	hits, err := s.Search.Query(q, limit)
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: err.Error()}
+	}
+	return map[string]any{"hits": hits}, nil
 }
 
 func (s *Server) toolGrab(args map[string]json.RawMessage) (interface{}, *RPCError) {

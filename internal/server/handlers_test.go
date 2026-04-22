@@ -15,6 +15,23 @@ import (
 	"github.com/christophermarx/agentboard/internal/project"
 )
 
+// testAuthTransport auto-attaches a Bearer token to any request that
+// doesn't already carry an Authorization header. Installed globally by
+// newTestServer so the pile of existing http.Get / http.DefaultClient.Do
+// calls don't all need to learn about tokens.
+type testAuthTransport struct {
+	token string
+	inner http.RoundTripper
+}
+
+func (t *testAuthTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Header.Get("Authorization") == "" {
+		r = r.Clone(r.Context())
+		r.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	return t.inner.RoundTrip(r)
+}
+
 func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
 
@@ -41,9 +58,32 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force the middleware's "first-run cache" to re-check so tests that
-	// create identities see them immediately.
-	auth.InvalidateFirstRunCache()
+
+	// Seed one agent user with a token so the data-plane endpoints are
+	// reachable. The transport swap below makes http.DefaultClient
+	// attach this token automatically, so the bulk of existing tests
+	// keep working without threading tokens through every call.
+	if _, err := authStore.CreateUser(auth.CreateUserParams{
+		Username: "test-agent",
+		Kind:     auth.KindAgent,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	testToken, _ := auth.GenerateToken()
+	if _, err := authStore.CreateToken(auth.CreateTokenParams{
+		Username:  "test-agent",
+		TokenHash: auth.HashToken(testToken),
+		Label:     "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := http.DefaultClient.Transport
+	if orig == nil {
+		orig = http.DefaultTransport
+	}
+	http.DefaultClient.Transport = &testAuthTransport{token: testToken, inner: orig}
+	t.Cleanup(func() { http.DefaultClient.Transport = orig })
 
 	srv := New(ServerConfig{
 		Project:   proj,
@@ -482,11 +522,12 @@ func TestMCPToolsList(t *testing.T) {
 
 	result := rpc["result"].(map[string]interface{})
 	tools := result["tools"].([]interface{})
-	// 13 data/page/component core + 3 file tools + 2 error tools + 1 grab tool = 19.
-	// (Component-upload write/delete are gated on --allow-component-upload and
-	//  aren't advertised in the default test config.)
-	if len(tools) != 21 {
-		t.Errorf("expected 21 MCP tools, got %d", len(tools))
+	// 13 data/page/component core + 3 file tools + 2 skill tools + 2 error
+	// tools + 1 grab tool + 1 search tool = 22.
+	// (Component-upload write/delete are gated on --allow-component-upload
+	//  and aren't advertised in the default test config.)
+	if len(tools) != 22 {
+		t.Errorf("expected 22 MCP tools, got %d", len(tools))
 	}
 }
 
@@ -598,7 +639,6 @@ func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
 			t.Fatal(err)
 		}
 	}
-	auth.InvalidateFirstRunCache()
 
 	srv := New(ServerConfig{
 		Project:   proj,
@@ -710,15 +750,37 @@ func TestAuthMiddleware(t *testing.T) {
 	})
 }
 
-func TestAuthDisabledWhenTokenEmpty(t *testing.T) {
+// TestUnclaimedBoardRequiresSetup confirms the post-refactor posture: a
+// freshly-initialized DB with no users 401s the data plane but leaves
+// the setup endpoints open so the browser can claim admin. No more
+// "zero users = everything works unauthed" behavior.
+func TestUnclaimedBoardRequiresSetup(t *testing.T) {
 	ts := newAuthedTestServer(t, "")
 
+	// Data endpoint requires auth even with zero users.
 	resp, err := http.Get(ts.URL + "/api/data")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want 200 (auth should be disabled when token empty)", resp.StatusCode)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("unclaimed /api/data = %d, want 401", resp.StatusCode)
+	}
+
+	// Setup status endpoint is open and reports not initialized.
+	resp2, err := http.Get(ts.URL + "/api/setup/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("/api/setup/status = %d, want 200", resp2.StatusCode)
+	}
+	var body struct {
+		Initialized bool `json:"initialized"`
+	}
+	json.NewDecoder(resp2.Body).Decode(&body)
+	if body.Initialized {
+		t.Error("/api/setup/status.initialized = true on fresh DB, want false")
 	}
 }
