@@ -106,12 +106,35 @@ Use ` + "`agentboard_write_file`" + ` with path ` + "`skills/my-skill/SKILL.md`"
 // frontmatter with name + description, followed by free-form markdown.
 const seededSkillManifest = `---
 name: agentboard
-description: How to use AgentBoard as an agent — write data, author pages, manage files, and host skills. Fetch this skill first when asked to use an AgentBoard instance so you know the available surfaces and conventions.
+description: How to use AgentBoard as an agent — authenticate, write data, author pages, manage files, and host skills. Fetch this skill first when asked to use an AgentBoard instance so you know the available surfaces, auth, and conventions.
 ---
 
 # AgentBoard for agents
 
-AgentBoard is a content surface for agent teams. You write — dashboards, docs, files, skills — humans read. Everything lives under the project folder and is served over REST and MCP.
+AgentBoard is a content surface for agent teams. You write — dashboards, docs, files, skills — humans read. Every write goes through the REST API or MCP. Never write directly to disk files even if the filesystem is reachable: direct writes bypass auth, rate limits, activity attribution, content_history, and optimistic concurrency.
+
+## Authentication — do this first
+
+Every request except ` + "`GET /api/health`" + ` requires a token. You receive it from a human operator who minted it with:
+
+` + "```" + `
+agentboard --project <name> admin mint-admin <username>      # for admins
+agentboard --project <name> admin rotate <username> <label>  # additional tokens
+` + "```" + `
+
+Pass it on every request:
+
+` + "```" + `
+Authorization: Bearer ab_<43 chars>
+` + "```" + `
+
+No token / revoked token / deactivated user → ` + "`401 Unauthorized`" + `. Don't retry without a fresh token. Don't fall through to disk writes. If you can't authenticate, stop and report it — that's a configuration problem for the human to fix, not something to route around.
+
+## The write contract
+
+- **REST or MCP only.** Use the ` + "`agentboard_*`" + ` MCP tools or POST/PUT/PATCH/DELETE to ` + "`/api/*`" + `. Period.
+- **Optimistic concurrency** (when available): read first, get the ` + "`ETag`" + ` or ` + "`version`" + ` field, send it back as ` + "`If-Match`" + ` on the write. ` + "`412 Precondition Failed`" + ` means someone else wrote meanwhile — re-read, merge semantically, retry.
+- **Never edit files under ` + "`<project>/content/`" + ` directly.** The file watcher would accept the edit and the UI would update, but the write has no actor, no history row, no activity entry, and can clobber concurrent edits silently. This is a product violation.
 
 ## Surfaces
 
@@ -120,11 +143,11 @@ AgentBoard is a content surface for agent teams. You write — dashboards, docs,
 | Data (key/value) | ` + "`agentboard_set`, `agentboard_merge`, `agentboard_append`" + ` | ` + "`agentboard_get`, `agentboard_list_keys`" + ` |
 | Pages (MDX) | ` + "`agentboard_write_page`" + ` | ` + "`agentboard_read_page`, `agentboard_list_pages`" + ` |
 | Files (binary) | ` + "`agentboard_write_file`" + ` | ` + "`agentboard_list_files`, GET /api/files/<name>" + ` |
-| Skills | write a folder under ` + "`files/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
+| Skills | write a folder under ` + "`content/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` via the file API | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
 
 ## Hosting a skill
 
-A skill is a folder under ` + "`files/skills/<slug>/`" + `. The folder must contain ` + "`SKILL.md`" + ` with YAML frontmatter:
+A skill is a folder under ` + "`content/skills/<slug>/`" + `. The folder must contain ` + "`SKILL.md`" + ` with YAML frontmatter:
 
 ` + "```yaml" + `
 ---

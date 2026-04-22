@@ -41,6 +41,33 @@ Never use `--project default`. Never use `~/.agentboard/default/`. This instance
 
 ---
 
+## Authenticating against the dev instance
+
+The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health` returns `401 Unauthorized` without a Bearer token. If you hit 401:
+
+1. Check whether the instance has an admin user:
+   ```bash
+   ./agentboard --project agentboard-dev admin list
+   ```
+   Empty table → no one has bootstrapped. Fix with:
+   ```bash
+   ./agentboard --project agentboard-dev admin mint-admin bootstrap
+   ```
+   It prints the token once. Stash it in an env var for the session:
+   ```bash
+   export AB_TOKEN=ab_<the printed token>
+   ```
+2. Use the token on every request:
+   ```bash
+   curl -H "Authorization: Bearer $AB_TOKEN" http://localhost:3000/api/content | jq
+   ```
+
+**Never fall back to writing `content/…md` files directly on disk.** The file watcher accepts it, but direct disk writes bypass auth, activity attribution, rate limits, `content_history`, and optimistic concurrency. It's a product-invariant violation — if you can't authenticate, that's a config problem worth stopping to report, not routing around.
+
+The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'll mint in `~/.agentboard/default/` instead of agentboard-dev. Always pass `--project agentboard-dev` (or `AGENTBOARD_PROJECT=agentboard-dev` in the env).
+
+---
+
 ## When the user ships a feature
 
 If the user just shipped something (landed a commit, says "we shipped X", asks for the dashboard to reflect new work), update the dashboard in this order:
