@@ -210,6 +210,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// Data endpoints
 		r.Get("/data", s.handleGetAllData)
 		r.Get("/data/schema", s.handleGetSchema)
+		r.Post("/data/bulk-delete", s.handleBulkDeleteData)
 
 		// Data key endpoints — use a wildcard to support dotted keys
 		r.Route("/data/{key}", func(r chi.Router) {
@@ -229,6 +230,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// Content endpoints (MDX dashboards + knowledge docs)
 		r.Get("/content", s.handleListPages)
 		r.Post("/content/move", s.handleMovePage)
+		r.Post("/content/bulk-delete", s.handleBulkDeleteContent)
 		r.Get("/content/*", s.handleGetPage)
 		r.Put("/content/*", s.handleWritePage)
 		r.Delete("/content/*", s.handleDeletePage)
@@ -242,6 +244,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 
 		// File endpoints (/api/files/*  supports nested paths like exports/q1.csv)
 		r.Get("/files", s.handleListFiles)
+		r.Post("/files/bulk-delete", s.handleBulkDeleteFiles)
 		r.Get("/files/*", s.handleGetFile)
 		r.Head("/files/*", s.handleGetFile)
 		r.Put("/files/*", s.handleWriteFile)
