@@ -6,24 +6,110 @@ The concrete path from where AgentBoard is today to something a non-technical te
 
 ---
 
-## TL;DR
+## Two cut lines
 
-- **Shipped today:** everything below the "v1 cut line." Single instance works, dogfoodable, 10 principles codified.
-- **v1 cut line:** six milestones (A–F), roughly 6–10 engineer-weeks. Lands safe co-authoring + history + plugin foundations.
-- **Post-v1:** third-party sandboxed plugins, full-text search, review gates, mobile polish — sequenced but not gating the release.
+There are two release targets — a near-term dogfoodable cut that lets a small team test the product, and the real v1 that adds history + backup + full plugin foundations.
+
+- **Dogfood cut (v0.5) — ~3 weeks, 5 milestones (D1–D5).** Minimum to test with a real team of 2–5 people. Explicitly defers history + backup; you rely on manual care + Git in the ops layer.
+- **v1 cut — dogfood cut + milestones A/B/C/D/E/F.** Full safety net: optimistic concurrency, content_history, activity feed, admin restore, §10 contract tests, path ACLs.
 
 ```
-[Phase 0 SHIPPED] ──→ [A concurrency] ──→ [B history] ──→ [C safety] ──→ [D UI]
-                                                                          │
-                                              [E plugin foundations] ←────┤
-                                              [F workspaces]         ←────┘
-                                                         │
-                                                  ━━━━━━━┻━━━━━━━━━━━ v1
-                                                         │
-                                              [G plugin sandboxing]
-                                              [H mobile + polish]
-                                              [I ergonomics / search]
+[Phase 0 SHIPPED]
+        │
+        ├─→ [D1 concurrency] ──→ [D2 onboarding UX] ──→ [D3 path ACLs] ──→ [D4 plugin graceful + mentions] ──→ [D5 mobile]
+        │                                                                                                            │
+        │                                                                                              ━━━━━━━━━━━━━━┻━━━━━━━━━ v0.5 (dogfood cut)
+        │                                                                                                            │
+        └─→ [B history + backup] ──→ [C safety layer] ──→ [D UI surfaces] ──→ [E plugin contract] ──→ [F full workspaces]
+                                                                                                                     │
+                                                                                                              ━━━━━━━┻━━━━━━━━━ v1
+                                                                                                                     │
+                                                                                                      [G plugin sandboxing]
+                                                                                                      [I ergonomics / search]
 ```
+
+---
+
+## Dogfood cut (v0.5) — what ships for a testable multi-user product
+
+Goal: a team of 2–5 people (1–2 humans + their agents) can use one AgentBoard instance for a week without stepping on each other, without losing work, and on the devices the direction doc commits to (phone + cloud agent + browser). History, backup, and rollback are deferred — the team leans on conservative behavior + manual snapshots until we ship the full safety net.
+
+**Why this cut exists.** History and backup are the biggest chunk of work in v1 (~2 weeks of Milestone B alone) and they only matter *after* something goes wrong. Before we ship them, the dogfood mitigations are: don't let two writes clobber each other (concurrency), don't let anyone write anywhere they shouldn't (path ACLs), keep a manual backup as a cron job (`sqlite3 .backup` + tar + scp — no UI needed). That gets us to testable without blocking on the big piece.
+
+**What you accept by shipping this cut:**
+- If something goes wrong (a bad edit, an agent loop), recovery is *command-line only*. No history restore UI.
+- No activity feed showing "who did what" — attribution lives on individual pages (last-edited-by) and in server logs.
+- No rate-limit-triggered alerts. The path ACLs + rate limits in D3 prevent the big-blast-radius case; subtler misuse goes unobserved.
+
+**What you *don't* accept:** silent write clobbering (D1), any token writing anywhere (D3), missing-brick pages hard-failing (D4), the phone being unusable (D5). Those stay blocking because they're *current* failure modes a test team would hit on day one.
+
+### D1 — Optimistic concurrency on pages + data (~1 week)
+
+Same design as Milestone A below but scoped: pages and data keys only (skip files for v0.5 — binary upload clobbering is rarer and lower-impact). Adds `If-Match` + returns 412 with current state.
+
+- [ ] Pages: include `etag` in `GET /api/content/:path`; accept `If-Match` on PUT/DELETE.
+- [ ] Data keys: `updated_at` is already returned; accept `If-Match` on the write verbs; 412 includes current value.
+- [ ] MCP tool wrapper: read → edit → write-with-If-Match with 3-attempt retry + semantic merge.
+- [ ] Bruno contract tests for the happy path + stale-write path.
+
+**Why blocking:** two agents on the same page silently clobber today. That's the first thing a team of two will hit.
+
+### D2 — Team onboarding UX (~3–5 days)
+
+The CLI is fine for self-host; for team dogfood the bootstrap has to happen in the browser.
+
+- [ ] First-run setup page at `/admin/setup` — if no admin users exist, show a "Create first admin" form (minimal: username + display name). The form consumes a one-time bootstrap code created via `agentboard admin mint-bootstrap-code` on the host. Code expires on use.
+- [ ] Admin invite flow on `/admin`: "Invite user" generates a token and returns a share-link preloaded with the token + a login form. Click once → your session has the token.
+- [ ] Clear 401 pages: when the user lands unauthenticated, the login surface says "paste your invite token" with the format hint. No dead 401 text.
+- [ ] `agentboard admin list-tokens --user <name>` rotation UX: surface on `/admin` too.
+
+**Why blocking:** a team of five is not going to SSH into the host five times.
+
+### D3 — Path ACLs + rate limits (~1 week)
+
+Minimum safety floor. Combines the path-scoped half of Milestone F with the cheapest pieces of C.
+
+- [ ] Extend the auth rules engine (already exists, `access_mode` + `rules_json`) to support `{op: allow_write, path_prefix: "workspaces/alice/"}`. Middleware enforces on mutating routes → 403 on violations.
+- [ ] Seeded-on-first-login: every user gets `content/workspaces/<username>/` auto-created with write access. `shared/` has open write for all active users.
+- [ ] Per-token rate limit: default 30 writes/min (config knob). 429 on exceed.
+- [ ] Admin rules UI on `/admin/users/:username` — list of path-prefix rules with add/remove.
+
+**Why blocking:** one token with write-everywhere is fine for a solo dogfood but fails the "one compromised agent wipes the tree" test on a team.
+
+### D4 — Plugin graceful degradation + attribution (~3–5 days)
+
+Carved out of Milestone E (full contract suite is v1). Two concrete things:
+
+- [ ] Missing-brick placeholder: page references `<UnknownBrick/>` → page renders with a dotted-border "brick not installed" card in place, not a compile error. Rest of the page still renders.
+- [ ] `@mention` rendering in MDX: `@alice` → lookup in users table → render as a colored badge with avatar. If the user exists, link to a (simple) user page; if not, render as plain text.
+- [ ] "Last edited by" footer on every page: reads from a new lightweight `page_meta(path, last_actor, last_at)` table updated on every write. Three columns, not a full history table — just the most recent write.
+
+**Why blocking:** without the placeholder, a teammate deleting a `.jsx` file kills every page referencing the brick. Without attribution, nobody knows who wrote what and the "who did what" pressure-test is impossible.
+
+### D5 — Mobile polish (~1 week)
+
+The direction doc commits to phone + cloud agents being first-class. Dogfood on the phone has to work or the direction is theoretical.
+
+- [ ] Sidebar becomes a slide-over drawer under a breakpoint. Hamburger toggle. Swipe-to-close.
+- [ ] Touch-target audit: Grab checkboxes, folder chevrons, page action menu, tab order — all ≥ 44px hit areas.
+- [ ] Grab tray positions above the keyboard on mobile; buttons scale up.
+- [ ] Token-paste login works on phone Safari + Chrome (verify).
+- [ ] Smoke test: a team member can open a page → grab three cards → copy to share sheet → paste into ChatGPT mobile, on an iPhone. That's the 🎯 use case.
+
+**Why blocking:** mobile is in the pitch. A pitch that doesn't ship on the pitch's hardware isn't real.
+
+### What stays explicitly deferred from the dogfood cut
+
+- **All of Milestone B (history + backup).** Replaced by a manual cron job in the install script: `sqlite3 .backup + tar + scp`. Operator's problem for v0.5. Admin UI comes in v1.
+- **Anomaly alerts + mass-revert** (parts of C). Rate limits in D3 cover the "runaway loop" case; mass-revert waits for content_history.
+- **History menu in page actions** (part of D). Users know what they wrote; v0.5 assumes good memory + Git on the ops side.
+- **Full §10 contract suite** (part of E). D4's graceful placeholder covers the LOC the test would catch; the smoke test matrix is v1.
+- **Branch-scoped workspaces** (Milestone F Phase 2). Path ACLs cover 90% of the pain.
+- **Plugin sandboxing** (Milestone G). First-party + upload-JSX is enough for the dogfood team to author their own bricks.
+
+### Total effort
+
+5 milestones × 3–5 days each = **~3 weeks of focused work** to v0.5. Then B/C/D/E/F turn it into v1.
 
 ---
 
