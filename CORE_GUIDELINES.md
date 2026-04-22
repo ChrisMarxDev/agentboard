@@ -40,15 +40,19 @@ The rendered output — dashboard, doc, skill reference, or runbook — is a pol
 
 No SQL panels, no log viewers as primary UX, no "advanced" toggles, no jargon in the default view. If a non-developer can't glance at the page and understand it, the design failed.
 
-## 6. Data and UI are separated, always
+## 6. Rendering is one-way
 
-Agents push data to a key-value store via REST. Pages are MDX. Data changes constantly; pages change rarely. The two never bleed into each other:
+Storage is flexible. Scalars can live inline in MDX (the page is the truth — `<Status state="running" label="Deploy" />`). Collections, cross-page values, and agent-pushed state live in the KV store (atomic updates matter there). Files live in `content/`. A component reads from whichever source the author picked.
 
-- A render path never writes data.
-- A write path never produces UI.
-- Components don't compute; they display.
+What's **not** flexible is the flow direction:
 
-This separation is what lets agents and humans co-author the same dashboard without stepping on each other.
+- A render path **never mutates durable state.** Components read; they don't write back. No useEffect that does `PUT /api/data`, no submit handler that writes a file.
+- A write path (REST, MCP, file save) **never produces UI directly.** It mutates and emits an SSE event. The UI observes the event and re-reads. No HTTP handler ships HTML.
+- **Components don't compute; they display.** Transform your data on the way in or on the way out, not during render.
+
+Ephemeral UI state — sort order on a Table, expand/collapse on a folder, pending picks in Grab mode — is separate from durable state. localStorage and React state are fine. Those aren't "data" in this principle's sense.
+
+The rule, in one line: **state → render, never render → state.** It's what lets agents and humans co-author the same page without stepping on each other.
 
 ## 7. Reliable rails for an agentic world
 
