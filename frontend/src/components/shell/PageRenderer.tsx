@@ -4,6 +4,7 @@ import { compile, run } from '@mdx-js/mdx'
 import remarkGfm from 'remark-gfm'
 import * as runtime from 'react/jsx-runtime'
 import { useDataContext } from '../../hooks/DataContext'
+import { apiFetch } from '../../lib/session'
 import { getComponents } from '../../lib/componentRegistry'
 import PageActionsMenu from './PageActionsMenu'
 import FileViewer from '../files/FileViewer'
@@ -39,7 +40,7 @@ export default function PageRenderer() {
 
     // Try page first. If not a page, try file.
     try {
-      const pageResp = await fetch(`/api/content/${pagePath}`, {
+      const pageResp = await apiFetch(`/api/content/${pagePath}`, {
         headers: { Accept: 'text/markdown' },
       })
 
@@ -68,7 +69,7 @@ export default function PageRenderer() {
 
       // 404 from pages: maybe it's a file at exactly this path.
       if (filePath) {
-        const head = await fetch(`/api/files/${filePath}`, { method: 'HEAD' })
+        const head = await apiFetch(`/api/files/${filePath}`, { method: 'HEAD' })
         if (head.ok) {
           setResolved({ kind: 'file' })
           setLoading(false)

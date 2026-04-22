@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react'
+import { apiFetch, sseURL } from '../lib/session'
 
 interface DataContextType {
   data: Record<string, unknown>
@@ -33,7 +34,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     let retryDelay = 1000
 
     function connect() {
-      const es = new EventSource('/api/events')
+      // SSE can't set Authorization headers; send the token as ?token= instead.
+      const es = new EventSource(sseURL('/api/events'))
       eventSourceRef.current = es
 
       es.addEventListener('data', (event) => {
@@ -86,7 +88,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   // Initial data fetch
   const fetchAll = useCallback(async () => {
     try {
-      const resp = await fetch('/api/data')
+      const resp = await apiFetch('/api/data')
+      if (!resp.ok) return
       const allData = await resp.json()
       setData(allData)
     } catch {
@@ -112,7 +115,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const fetchKey = useCallback(async (key: string) => {
     try {
-      const resp = await fetch(`/api/data/${key}`)
+      const resp = await apiFetch(`/api/data/${key}`)
       if (resp.ok) {
         const meta = await resp.json()
         setData(prev => ({ ...prev, [key]: meta.value }))

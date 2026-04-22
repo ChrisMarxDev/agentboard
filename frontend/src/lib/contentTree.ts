@@ -264,6 +264,29 @@ export function findFolder(nodes: ContentTreeNode[], path: string): ContentFolde
   return null
 }
 
+/**
+ * Flatten the content tree to page hrefs in the same DFS order the sidebar
+ * renders: at each level, folder indexPages come before descending into the
+ * folder's children, and folders come before sibling page leaves. File leaves
+ * are skipped (j/k navigation targets pages). Used to keep keyboard navigation
+ * in lockstep with the visible sidebar ordering.
+ */
+export function flattenContentTreePageHrefs(nodes: ContentTreeNode[]): string[] {
+  const out: string[] = []
+  const walk = (ns: ContentTreeNode[]) => {
+    for (const n of ns) {
+      if (n.kind === 'folder') {
+        if (n.indexPage) out.push(n.indexPage.href)
+        walk(n.children)
+      } else if (n.kind === 'page') {
+        out.push(n.href)
+      }
+    }
+  }
+  walk(nodes)
+  return out
+}
+
 export function ancestorFolderPathsForHref(href: string): string[] {
   const parts = href.replace(/^\/+/, '').replace(/\/+$/, '').split('/').filter(Boolean)
   if (parts.length < 2) return []

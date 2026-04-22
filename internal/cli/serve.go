@@ -123,13 +123,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Flag overrides config (off by default in both).
 	uploadEnabled := proj.Config.AllowComponentUpload || allowComponentUpload
 
-	// Legacy env var auto-migrates to an identity; see AUTH.md migration.
+	// Mint the initial admin token on first run (and fold AGENTBOARD_AUTH_TOKEN
+	// into a legacy-agent identity if it's set). Idempotent: no-op if any
+	// identity already exists. See AUTH.md §"Bootstrap".
 	legacyToken := authToken
 	if legacyToken == "" {
 		legacyToken = os.Getenv("AGENTBOARD_AUTH_TOKEN")
 	}
-	if err := authStore.MigrateLegacyToken(legacyToken, log.Default()); err != nil {
-		return fmt.Errorf("auth legacy migration: %w", err)
+	if err := authStore.BootstrapOnEmpty(legacyToken, log.Default()); err != nil {
+		return fmt.Errorf("auth bootstrap: %w", err)
 	}
 
 	// Create server
@@ -148,12 +150,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")
 	}
-	hasAdmin, _ := authStore.HasAdmin()
-	if !hasAdmin && legacyToken == "" {
-		log.Printf("WARNING: no admin identity exists and no legacy token set. Server is open — only safe on loopback. Visit /setup or run `agentboard admin bootstrap-code` to claim admin.")
-	} else {
-		log.Printf("Auth: identity-backed. Agent endpoints require a Bearer/Basic/?token= credential matching a live identity.")
-	}
+	log.Printf("Auth: identity-backed. Paste the admin token printed above into /admin to manage tokens. Agents use their tokens via Bearer/Basic/?token=.")
 
 	// Start page watcher
 	if err := srv.Pages.StartWatcher(func(pagePath string) {

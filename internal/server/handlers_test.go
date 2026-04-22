@@ -582,13 +582,18 @@ func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
 		t.Fatal(err)
 	}
 	// Empty token = preserve the "no auth configured" (loopback) posture —
-	// leave the identities table empty so the middleware stays in open mode.
+	// leave the users table empty so the middleware stays in open mode.
 	if token != "" {
-		if _, err := authStore.CreateIdentity(auth.CreateIdentityParams{
-			Name:       "test-agent",
-			Kind:       auth.KindAgent,
-			TokenHash:  auth.HashToken(token),
-			AccessMode: auth.ModeAllowAll,
+		if _, err := authStore.CreateUser(auth.CreateUserParams{
+			Username: "test-agent",
+			Kind:     auth.KindAgent,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := authStore.CreateToken(auth.CreateTokenParams{
+			Username:  "test-agent",
+			TokenHash: auth.HashToken(token),
+			Label:     "test",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -620,15 +625,18 @@ func TestAuthMiddleware(t *testing.T) {
 		return resp
 	}
 
-	t.Run("missing credentials return 401 with WWW-Authenticate", func(t *testing.T) {
+	t.Run("missing credentials return bare 401 (no browser popup)", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
 		resp := do(t, req)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("status = %d, want 401", resp.StatusCode)
 		}
-		if got := resp.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Basic") {
-			t.Errorf("WWW-Authenticate = %q, want to contain Basic", got)
+		// We deliberately do NOT emit WWW-Authenticate: Basic, because
+		// that header triggers the browser's native login popup. The SPA
+		// has its own /login page; it catches 401s via apiFetch.
+		if got := resp.Header.Get("WWW-Authenticate"); got != "" {
+			t.Errorf("WWW-Authenticate = %q, want empty (no browser popup)", got)
 		}
 	})
 

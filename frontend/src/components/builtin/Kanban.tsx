@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useData } from '../../hooks/useData'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
+import { apiFetch } from '../../lib/session'
 
 interface KanbanProps {
   source: string
@@ -51,7 +52,7 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     if (String(card[groupBy] ?? 'other') === targetCol) return
 
     try {
-      const res = await fetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
+      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [groupBy]: targetCol }),

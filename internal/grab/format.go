@@ -49,14 +49,14 @@ func renderMarkdown(sections []Section) string {
 // stripLayoutTags removes AgentBoard-specific MDX chrome from a section body
 // so the agent-facing output is plain markdown + code fences. Three classes:
 //
-//   1. Layout wrappers (Card/Deck/Stack): open+close tags removed, children
-//      preserved. Content survives, the chrome doesn't.
-//   2. Self-closing data-bound components (Metric, Counter, …, Mermaid, …):
-//      removed entirely — their resolved values are emitted separately via
-//      markdownFenceFor, so keeping the JSX tag would duplicate the payload.
-//   3. Self-closing discovery components (ApiList, Errors): removed entirely
-//      — they fetch REST endpoints at render time and don't have a
-//      materializable static value.
+//  1. Layout wrappers (Card/Deck/Stack): open+close tags removed, children
+//     preserved. Content survives, the chrome doesn't.
+//  2. Self-closing data-bound components (Metric, Counter, …, Mermaid, …):
+//     removed entirely — their resolved values are emitted separately via
+//     markdownFenceFor, so keeping the JSX tag would duplicate the payload.
+//  3. Self-closing discovery components (ApiList, Errors): removed entirely
+//     — they fetch REST endpoints at render time and don't have a
+//     materializable static value.
 //
 // Fence-aware: tags inside ```code``` blocks are left alone so example MDX in
 // docs doesn't get mangled. Tags can appear anywhere on a line — inline

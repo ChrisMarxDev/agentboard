@@ -6,15 +6,10 @@ import (
 	"log"
 	"path/filepath"
 	"testing"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
 
-// newTestStore opens a fresh in-memory-ish SQLite on disk and creates the
-// meta table that auth.migrate() requires (normally created by the data
-// store). Returning both the Store and raw DB lets individual tests inspect
-// rows when needed.
 func newTestStore(t *testing.T) (*Store, *sql.DB) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "auth.sqlite")
@@ -23,7 +18,6 @@ func newTestStore(t *testing.T) (*Store, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// auth.migrate() writes to the shared `meta` table; create it.
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`); err != nil {
 		t.Fatal(err)
 	}
@@ -35,233 +29,231 @@ func newTestStore(t *testing.T) (*Store, *sql.DB) {
 }
 
 func TestTokenRoundTrip(t *testing.T) {
-	token, err := GenerateToken()
+	tok, err := GenerateToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(token) < 20 || token[:3] != "ab_" {
-		t.Errorf("unexpected token shape: %s", token)
+	if len(tok) < 20 || tok[:3] != "ab_" {
+		t.Errorf("unexpected shape: %s", tok)
 	}
-	hash := HashToken(token)
-	if hash == token {
+	h := HashToken(tok)
+	if h == tok {
 		t.Error("hash should not equal plaintext")
 	}
-	if !TokensEqual(hash, HashToken(token)) {
+	if !TokensEqual(h, HashToken(tok)) {
 		t.Error("stable hash lookup")
 	}
 }
 
-func TestPasswordRoundTrip(t *testing.T) {
-	h, err := HashPassword("correct horse battery staple")
-	if err != nil {
-		t.Fatal(err)
+func TestValidateUsername(t *testing.T) {
+	good := []string{"alice", "a", "bot-1", "user_42", "a1"}
+	for _, u := range good {
+		if err := ValidateUsername(u); err != nil {
+			t.Errorf("ValidateUsername(%q) = %v", u, err)
+		}
 	}
-	if err := VerifyPassword("correct horse battery staple", h); err != nil {
-		t.Errorf("correct password should verify: %v", err)
-	}
-	if err := VerifyPassword("wrong", h); !errors.Is(err, ErrInvalidPassword) {
-		t.Errorf("wrong password should return ErrInvalidPassword, got %v", err)
-	}
-}
-
-func TestIdentityCRUD(t *testing.T) {
-	s, _ := newTestStore(t)
-
-	token, _ := GenerateToken()
-	ident, err := s.CreateIdentity(CreateIdentityParams{
-		Name:       "alice",
-		Kind:       KindAgent,
-		TokenHash:  HashToken(token),
-		AccessMode: ModeAllowAll,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ident.ID == "" || ident.Name != "alice" || ident.Kind != KindAgent {
-		t.Errorf("unexpected identity: %+v", ident)
-	}
-
-	// Lookup by token hash.
-	found, err := s.GetIdentityByTokenHash(HashToken(token))
-	if err != nil {
-		t.Fatalf("lookup by token: %v", err)
-	}
-	if found.ID != ident.ID {
-		t.Errorf("mismatch: %s != %s", found.ID, ident.ID)
-	}
-
-	// Name collision.
-	_, err = s.CreateIdentity(CreateIdentityParams{
-		Name:      "alice",
-		Kind:      KindAgent,
-		TokenHash: HashToken("x"),
-	})
-	if !errors.Is(err, ErrNameTaken) {
-		t.Errorf("expected ErrNameTaken, got %v", err)
-	}
-
-	// Update rules + mode.
-	newRules := []Rule{Allow("/api/data/marketing.**")}
-	newMode := ModeRestrictToList
-	updated, err := s.UpdateIdentity(ident.ID, UpdateIdentityParams{
-		AccessMode: &newMode,
-		Rules:      &newRules,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.AccessMode != ModeRestrictToList || len(updated.Rules) != 1 {
-		t.Errorf("update failed: %+v", updated)
-	}
-
-	// Revoke → lookup fails with ErrRevoked.
-	if err := s.Revoke(ident.ID); err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.GetIdentityByTokenHash(HashToken(token))
-	if !errors.Is(err, ErrRevoked) {
-		t.Errorf("expected ErrRevoked after revoke, got %v", err)
-	}
-
-	// Revoke is idempotent-ish: second call returns ErrNotFound (no active row).
-	if err := s.Revoke(ident.ID); !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected ErrNotFound on re-revoke, got %v", err)
+	bad := []string{"", "1alice", "Alice", "a b", "a!", "a@b", "0abc", "🥜"}
+	for _, u := range bad {
+		if err := ValidateUsername(u); err == nil {
+			t.Errorf("ValidateUsername(%q) expected error", u)
+		}
 	}
 }
 
-func TestSessionLifecycle(t *testing.T) {
+func TestUserTokenCRUD(t *testing.T) {
 	s, _ := newTestStore(t)
 
-	pw, _ := HashPassword("hunter2")
-	admin, err := s.CreateIdentity(CreateIdentityParams{
-		Name:         "admin",
-		Kind:         KindAdmin,
-		PasswordHash: pw,
+	alice, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindAgent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alice.AvatarColor == "" {
+		t.Error("expected avatar_color set on create")
+	}
+
+	// Case-insensitive duplicate.
+	if _, err := s.CreateUser(CreateUserParams{Username: "ALICE", Kind: KindAgent}); !errors.Is(err, ErrUsernameTaken) {
+		t.Errorf("case-insensitive dup = %v, want ErrUsernameTaken", err)
+	}
+
+	rawTok, _ := GenerateToken()
+	tok, err := s.CreateToken(CreateTokenParams{
+		Username: alice.Username, TokenHash: HashToken(rawTok), Label: "laptop",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	sess, err := s.CreateSession(admin.ID, "ua", "1.2.3.4", 1*time.Hour)
+	user, resolved, err := s.ResolveToken(HashToken(rawTok))
+	if err != nil {
+		t.Fatalf("ResolveToken: %v", err)
+	}
+	if user.Username != "alice" || resolved.ID != tok.ID {
+		t.Errorf("mismatch: user=%s tok=%s", user.Username, resolved.ID)
+	}
+
+	// Rotate.
+	newRaw, _ := GenerateToken()
+	if err := s.RotateToken(tok.ID, HashToken(newRaw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ResolveToken(HashToken(rawTok)); !errors.Is(err, ErrNotFound) {
+		t.Errorf("old token = %v, want ErrNotFound", err)
+	}
+	if _, _, err := s.ResolveToken(HashToken(newRaw)); err != nil {
+		t.Errorf("new token unresolvable: %v", err)
+	}
+
+	// Second token coexists.
+	secondRaw, _ := GenerateToken()
+	if _, err := s.CreateToken(CreateTokenParams{
+		Username: alice.Username, TokenHash: HashToken(secondRaw), Label: "ci",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeToken(tok.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.ResolveToken(HashToken(newRaw)); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("revoked token = %v, want ErrTokenRevoked", err)
+	}
+	if _, _, err := s.ResolveToken(HashToken(secondRaw)); err != nil {
+		t.Errorf("second token unresolvable: %v", err)
+	}
+
+	tokens, err := s.ListTokensForUser(alice.Username)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.ID == "" || sess.CSRFToken == "" {
-		t.Error("session missing id or csrf token")
+	if len(tokens) != 2 {
+		t.Errorf("want 2 tokens, got %d", len(tokens))
 	}
 
-	got, err := s.GetSession(sess.ID)
+	// Update mutable fields.
+	newName := "Alice Chen"
+	updated, err := s.UpdateUser(alice.Username, UpdateUserParams{DisplayName: &newName})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.IdentityID != admin.ID {
-		t.Errorf("identity mismatch: %s", got.IdentityID)
+	if updated.DisplayName != "Alice Chen" {
+		t.Errorf("display_name update: %q", updated.DisplayName)
 	}
 
-	// Expired session.
-	expired, err := s.CreateSession(admin.ID, "ua", "", -1*time.Second)
-	if err != nil {
+	// Deactivate — tokens revoked, subsequent resolves fail.
+	if err := s.Deactivate(alice.Username); err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.GetSession(expired.ID)
-	if !errors.Is(err, ErrSessionExpired) {
-		t.Errorf("expected ErrSessionExpired, got %v", err)
+	if _, _, err := s.ResolveToken(HashToken(secondRaw)); !errors.Is(err, ErrTokenRevoked) {
+		t.Errorf("post-deactivate = %v, want ErrTokenRevoked", err)
 	}
 
-	// Delete all sessions for identity.
-	if err := s.DeleteSessionsForIdentity(admin.ID); err != nil {
-		t.Fatal(err)
-	}
-	_, err = s.GetSession(sess.ID)
-	if !errors.Is(err, ErrNotFound) {
-		t.Errorf("expected ErrNotFound after delete, got %v", err)
+	// Username reserved forever — can't re-create.
+	if _, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindAgent}); !errors.Is(err, ErrUsernameTaken) {
+		t.Errorf("re-create deactivated username = %v, want ErrUsernameTaken", err)
 	}
 }
 
-func TestBootstrapCodeOneTime(t *testing.T) {
+func TestRenameUser(t *testing.T) {
 	s, _ := newTestStore(t)
+	u, _ := s.CreateUser(CreateUserParams{Username: "alicee", Kind: KindAgent})
+	raw, _ := GenerateToken()
+	tok, _ := s.CreateToken(CreateTokenParams{Username: u.Username, TokenHash: HashToken(raw)})
 
-	code, _, err := s.CreateBootstrapCode(1*time.Hour, "test")
+	stats, err := s.RenameUser("alicee", "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Wrong code.
-	if err := s.ConsumeBootstrapCode("not-the-right-code"); !errors.Is(err, ErrCodeInvalid) {
-		t.Errorf("expected ErrCodeInvalid for wrong code, got %v", err)
+	if stats.UsersUpdated != 1 || stats.TokensUpdated != 1 {
+		t.Errorf("stats: %+v", stats)
 	}
 
-	// Correct code consumes once.
-	if err := s.ConsumeBootstrapCode(code); err != nil {
+	// Old username is gone.
+	if _, err := s.GetUser("alicee"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("old username still resolves: %v", err)
+	}
+	// New username works.
+	if renamed, err := s.GetUser("alice"); err != nil || renamed.Username != "alice" {
+		t.Errorf("new username not set: %v %+v", err, renamed)
+	}
+	// Token row now references the new username.
+	user, resolved, err := s.ResolveToken(HashToken(raw))
+	if err != nil || user.Username != "alice" || resolved.ID != tok.ID {
+		t.Errorf("token resolve after rename: user=%v tok=%v err=%v", user, resolved, err)
+	}
+
+	// Renaming to a taken username fails.
+	if _, err := s.CreateUser(CreateUserParams{Username: "bob", Kind: KindAgent}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.RenameUser("alice", "bob"); !errors.Is(err, ErrUsernameTaken) {
+		t.Errorf("rename to taken = %v, want ErrUsernameTaken", err)
+	}
 
-	// Second use fails.
-	if err := s.ConsumeBootstrapCode(code); !errors.Is(err, ErrCodeInvalid) {
-		t.Errorf("second use should fail, got %v", err)
+	// Renaming to an invalid new name fails.
+	if _, err := s.RenameUser("alice", "0bad"); !errors.Is(err, ErrInvalidUsername) {
+		t.Errorf("rename to invalid = %v", err)
 	}
 }
 
-func TestBootstrapCodeExpires(t *testing.T) {
+func TestBootstrapOnEmpty(t *testing.T) {
 	s, _ := newTestStore(t)
-
-	code, _, err := s.CreateBootstrapCode(-1*time.Second, "already-expired")
+	if err := s.BootstrapOnEmpty("", log.New(&captureWriter{}, "", 0)); err != nil {
+		t.Fatal(err)
+	}
+	admin, err := s.GetUser("admin")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("admin should exist: %v", err)
 	}
-	if err := s.ConsumeBootstrapCode(code); !errors.Is(err, ErrCodeInvalid) {
-		t.Errorf("expired code should fail, got %v", err)
+	if admin.Kind != KindAdmin {
+		t.Errorf("kind = %s", admin.Kind)
+	}
+	tokens, _ := s.ListTokensForUser(admin.Username)
+	if len(tokens) != 1 {
+		t.Errorf("want 1 initial token, got %d", len(tokens))
+	}
+	// Idempotent.
+	before, _ := s.ListUsers(false)
+	_ = s.BootstrapOnEmpty("", log.New(&captureWriter{}, "", 0))
+	after, _ := s.ListUsers(false)
+	if len(before) != len(after) {
+		t.Errorf("bootstrap not idempotent")
 	}
 }
 
-func TestMigrateLegacyToken(t *testing.T) {
+func TestBootstrapOnEmpty_WithLegacyToken(t *testing.T) {
 	s, _ := newTestStore(t)
-
-	logger := log.New(&captureWriter{}, "", 0)
-	if err := s.MigrateLegacyToken("old-secret-token", logger); err != nil {
+	if err := s.BootstrapOnEmpty("legacy-secret", log.New(&captureWriter{}, "", 0)); err != nil {
 		t.Fatal(err)
 	}
-
-	// Legacy agent should exist.
-	ident, err := s.GetIdentityByName("legacy-agent")
+	legacy, err := s.GetUser("legacy-agent")
 	if err != nil {
 		t.Fatalf("legacy-agent should exist: %v", err)
 	}
-	if ident.Kind != KindAgent {
-		t.Errorf("kind = %s, want agent", ident.Kind)
+	if legacy.Kind != KindAgent {
+		t.Errorf("kind = %s", legacy.Kind)
 	}
-	if ident.TokenHash != HashToken("old-secret-token") {
-		t.Error("legacy-agent token hash doesn't match")
+	if u, _, err := s.ResolveToken(HashToken("legacy-secret")); err != nil || u.Username != legacy.Username {
+		t.Errorf("legacy token resolve: u=%v err=%v", u, err)
 	}
-
-	// Second call is a no-op once any admin identity exists.
-	// First, simulate admin creation via a bootstrap code consumption.
-	_, err = s.CreateIdentity(CreateIdentityParams{
-		Name:         "admin-alice",
-		Kind:         KindAdmin,
-		PasswordHash: mustHashPassword(t, "x"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Now migration is a no-op.
-	before, _ := s.ListIdentities()
-	if err := s.MigrateLegacyToken("old-secret-token", logger); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := s.ListIdentities()
-	if len(before) != len(after) {
-		t.Errorf("second migration should be no-op: before=%d after=%d", len(before), len(after))
+	if _, err := s.GetUser("admin"); err != nil {
+		t.Errorf("admin not created alongside legacy: %v", err)
 	}
 }
 
-func mustHashPassword(t *testing.T, p string) string {
-	t.Helper()
-	h, err := HashPassword(p)
+func TestResolveUsernames(t *testing.T) {
+	s, _ := newTestStore(t)
+	for _, name := range []string{"alice", "bob", "charlie"} {
+		if _, err := s.CreateUser(CreateUserParams{Username: name, Kind: KindAgent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resolved, err := s.ResolveUsernames([]string{"alice", "nobody", "CHARLIE"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return h
+	if len(resolved) != 2 {
+		t.Errorf("want 2 matches, got %d", len(resolved))
+	}
 }
 
 type captureWriter struct{ lines [][]byte }

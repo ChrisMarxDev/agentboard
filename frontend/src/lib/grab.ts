@@ -1,3 +1,5 @@
+import { apiFetch } from './session'
+
 // Client-side state for the Grab feature. Mirrors internal/grab/slug.go —
 // the kebab-case rules must match or picks won't resolve on the server.
 //
@@ -185,7 +187,7 @@ export async function materialize(picks: Pick[], format: GrabFormat): Promise<st
     })),
     format,
   })
-  const r = await fetch('/api/grab', {
+  const r = await apiFetch('/api/grab', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,

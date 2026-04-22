@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation } from 'react-router-dom'
-import { Magnet, Search, X } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { LogOut, Magnet, Search, ShieldCheck, X } from 'lucide-react'
+import { clearToken, getToken, redirectToLogin } from '../../lib/session'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
 import ContentNav from './ContentNav'
@@ -266,6 +267,8 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
         />
       </div>
 
+      <SystemNavItems activePath={location.pathname} />
+
       <div className="flex items-center gap-2 pt-2">
         <ThemeSwitch />
         <button
@@ -322,6 +325,7 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
             <Kbd>?</Kbd>
           </button>
         )}
+        <SignOutButton />
       </div>
 
       {onResize && (
@@ -354,5 +358,61 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
         />
       )}
     </nav>
+  )
+}
+
+// SignOutButton clears the stored token and redirects to /login. Hidden
+// when there's no token (open-mode / loopback install) so we don't show a
+// sign-out affordance that means nothing.
+function SignOutButton() {
+  if (!getToken()) return null
+  return (
+    <button
+      onClick={() => {
+        clearToken()
+        redirectToLogin()
+      }}
+      aria-label="Sign out"
+      title="Sign out"
+      className="h-8 flex items-center justify-center rounded-md px-2"
+      style={{
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
+      }}
+    >
+      <LogOut size={14} />
+    </button>
+  )
+}
+
+// SystemNavItems holds the non-content "destinations" (currently just Auth).
+// Kept outside the content tree so page-search doesn't affect it and so the
+// styling reads as a distinct section. Sits above the utility-icon row.
+function SystemNavItems({ activePath }: { activePath: string }) {
+  const active = activePath === '/admin' || activePath.startsWith('/admin/')
+  return (
+    <div className="flex flex-col gap-1 pt-2 pb-1 border-t" style={{ borderColor: 'var(--border)' }}>
+      <Link
+        to="/admin"
+        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm"
+        style={{
+          background: active ? 'var(--accent-light)' : 'transparent',
+          color: active ? 'var(--accent)' : 'var(--text-secondary)',
+          fontWeight: active ? 600 : 500,
+          textDecoration: 'none',
+        }}
+        onMouseEnter={e => {
+          if (!active) e.currentTarget.style.background = 'var(--bg)'
+        }}
+        onMouseLeave={e => {
+          if (!active) e.currentTarget.style.background = 'transparent'
+        }}
+      >
+        <ShieldCheck size={14} />
+        <span>Auth</span>
+      </Link>
+    </div>
   )
 }

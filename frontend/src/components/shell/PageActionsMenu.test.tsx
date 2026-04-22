@@ -144,7 +144,10 @@ describe('PageActionsMenu', () => {
       await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
       const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
       expect(url).toBe('/api/content/features/kanban')
-      expect(init.headers.Accept).toBe('text/markdown')
+      // apiFetch normalises headers via `new Headers(...)`, so the init
+      // carries a Headers instance rather than the plain object we passed.
+      const headers = init.headers as Headers
+      expect(headers.get('Accept')).toBe('text/markdown')
     })
 
     it('triggers a download with filename = last path segment + .md', async () => {

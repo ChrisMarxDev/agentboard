@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useData } from '../../hooks/useData'
 import { resolveFileUrl, resolveFileLabel, type FileRef } from '../../lib/fileUrl'
+import { apiFetch } from '../../lib/session'
 
 interface FileProps {
   source?: string
@@ -51,7 +52,7 @@ export function File({ source, src, label }: FileProps) {
     if (!resolved.startsWith('/api/files/')) return
     let cancelled = false
     const name = decodeURIComponent(resolved.replace(/^\/api\/files\//, ''))
-    fetch('/api/files', { headers: { Accept: 'application/json' } })
+    apiFetch('/api/files', { headers: { Accept: 'application/json' } })
       .then(r => r.ok ? r.json() : null)
       .then((list: ServerInfo[] | null) => {
         if (cancelled || !list) return

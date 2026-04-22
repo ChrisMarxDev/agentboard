@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { apiFetch } from '../lib/session'
 
 export interface FileEntry {
   name: string
@@ -18,7 +19,7 @@ export function useFiles() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
-    fetch('/api/files')
+    apiFetch('/api/files')
       .then(r => {
         if (!r.ok) throw new Error(`/api/files → ${r.status}`)
         return r.json() as Promise<FileEntry[]>

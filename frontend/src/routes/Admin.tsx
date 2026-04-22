@@ -1,227 +1,476 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import {
-  createAgent,
-  createBootstrapCode,
-  listBootstrapCodes,
-  listIdentities,
-  logout,
-  rotateAgent,
-  revokeIdentity,
-  updateIdentity,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  KeyRound,
+  Plus,
+  RotateCw,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react'
+import {
+  createTokenForUser,
+  createUser,
+  deactivateUser,
+  fetchMe,
+  listUsers,
+  revokeToken,
+  rotateToken,
+  updateUser,
   type AccessMode,
-  type BootstrapCode,
-  type CreatedAgent,
-  type CreatedBootstrapCode,
-  type Identity,
+  type CreatedToken,
+  type Kind,
+  type Me,
   type Rule,
+  type User,
+  type UserToken,
 } from '../lib/auth'
+import { clearToken, getToken, redirectToLogin } from '../lib/session'
 
-// Admin page.
-//
-// Scope for the first cut:
-//   - list identities (grouped by admin / agent)
-//   - create new agents (name, access_mode, rules as JSON)
-//   - rotate / revoke agents
-//   - edit name + rules on existing agents
-//   - mint bootstrap codes for onboarding another admin
-//   - log out
-//
-// Intentionally NOT in v1 (all deferrable without schema changes):
-//   - graceful rotation
-//   - WebAuthn passkey enrollment
-//   - per-session listing / remote session kill
-//   - richer rules editor — JSON textarea is fine for now
+// Admin page. Rendered inside Layout so the sidebar persists. Uses the
+// shared session token — no separate admin-token store. If the user's
+// token isn't admin-kind, we show a clear message instead of a prompt.
 
-const METHOD_OPTIONS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', '*'] as const
+const CARD: CSSProperties = {
+  background: 'var(--bg)',
+  border: '1px solid var(--border)',
+  borderRadius: '0.75rem',
+  padding: '1.25rem 1.5rem',
+  boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.06)',
+}
+const LABEL: CSSProperties = {
+  fontSize: '0.6875rem',
+  fontWeight: 600,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: 'var(--text-secondary)',
+}
+const INPUT: CSSProperties = {
+  width: '100%',
+  padding: '0.5rem 0.75rem',
+  border: '1px solid var(--border)',
+  borderRadius: '0.5rem',
+  background: 'var(--bg)',
+  color: 'var(--text)',
+  fontSize: '0.875rem',
+  outline: 'none',
+}
+const BTN_PRIMARY: CSSProperties = {
+  padding: '0.5rem 1rem',
+  borderRadius: '0.5rem',
+  background: 'var(--accent)',
+  color: 'white',
+  fontSize: '0.875rem',
+  fontWeight: 500,
+  border: 'none',
+  cursor: 'pointer',
+}
+const BTN_GHOST: CSSProperties = {
+  padding: '0.375rem 0.75rem',
+  borderRadius: '0.375rem',
+  border: '1px solid var(--border)',
+  background: 'transparent',
+  color: 'var(--text)',
+  fontSize: '0.8125rem',
+  cursor: 'pointer',
+}
+const BTN_DANGER: CSSProperties = { ...BTN_GHOST, color: 'var(--error)', borderColor: 'var(--error)' }
 
-export default function Admin({ adminName }: { adminName: string }) {
-  const navigate = useNavigate()
-  const [identities, setIdentities] = useState<Identity[] | null>(null)
+export default function Admin() {
+  const [me, setMe] = useState<Me | null>(null)
+  const [state, setState] = useState<'loading' | 'ok' | 'not-admin' | 'no-token'>('loading')
+
+  useEffect(() => {
+    // Must have a token; if not, send to login.
+    if (!getToken()) {
+      redirectToLogin('missing')
+      return
+    }
+    let cancelled = false
+    fetchMe()
+      .then((m) => {
+        if (cancelled) return
+        setMe(m)
+        setState(m.kind === 'admin' ? 'ok' : 'not-admin')
+      })
+      .catch(() => {
+        // fetchMe 403s when the current token is agent-kind. apiFetch doesn't
+        // treat 403 as auth-expired, so we surface it as not-admin. 401
+        // would have already been redirected by apiFetch.
+        if (cancelled) return
+        setState('not-admin')
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  if (state === 'loading') {
+    return (
+      <Shell>
+        <div style={{ color: 'var(--text-secondary)' }}>Checking admin status…</div>
+      </Shell>
+    )
+  }
+  if (state === 'no-token') return null // redirected already
+  if (state === 'not-admin' || !me) return <NotAdmin />
+  return <AdminPanel me={me} />
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        padding: '2rem 1.5rem',
+        maxWidth: '60rem',
+        margin: '0 auto',
+        width: '100%',
+        color: 'var(--text)',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+function NotAdmin() {
+  return (
+    <Shell>
+      <div style={{ ...CARD, maxWidth: '32rem', margin: '3rem auto 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+          <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
+          <h1 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Admin-only area</h1>
+        </div>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
+          The token you're signed in with is an agent token. User and token
+          management requires an admin token. Ask your admin for one, or
+          mint one on the host:
+        </p>
+        <pre
+          style={{
+            background: 'var(--bg-secondary)',
+            padding: '0.75rem',
+            borderRadius: '0.375rem',
+            fontSize: '0.8125rem',
+            overflowX: 'auto',
+          }}
+        >
+          agentboard admin mint-admin &lt;username&gt;
+        </pre>
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={() => {
+              clearToken()
+              redirectToLogin()
+            }}
+            style={BTN_GHOST}
+          >
+            Sign out
+          </button>
+          <Link to="/" style={{ ...BTN_PRIMARY, textDecoration: 'none', display: 'inline-block' }}>
+            Back to dashboard
+          </Link>
+        </div>
+      </div>
+    </Shell>
+  )
+}
+
+// ---------- main panel ----------
+
+function AdminPanel({ me }: { me: Me }) {
+  const [users, setUsers] = useState<User[] | null>(null)
+  const [reveal, setReveal] = useState<CreatedToken | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [fresh, setFresh] = useState<CreatedAgent | null>(null)
-  const [freshCode, setFreshCode] = useState<CreatedBootstrapCode | null>(null)
-  const [codes, setCodes] = useState<BootstrapCode[]>([])
+  const [creating, setCreating] = useState<boolean>(false)
 
   const refresh = useCallback(async () => {
     try {
-      const [i, c] = await Promise.all([listIdentities(), listBootstrapCodes()])
-      setIdentities(i)
-      setCodes(c)
+      const list = await listUsers()
+      setUsers(list)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
   }, [])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
-
-  async function onLogout() {
-    await logout()
-    navigate('/login', { replace: true })
-  }
+  useEffect(() => { void refresh() }, [refresh])
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-8 p-6">
-      <header className="flex items-baseline justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Auth</h1>
-          <p className="text-sm opacity-60">
-            Logged in as <b>{adminName}</b>. Only the admin realm can manage
-            identities — agents authenticate with tokens against data endpoints.
+    <Shell>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <header>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
+            <h1 style={{ fontSize: '1.25rem', fontWeight: 600, margin: 0 }}>Auth</h1>
+          </div>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0' }}>
+            Signed in as <b>@{me.username}</b>. Manage users and their
+            tokens. Usernames are stable (so @mentions keep working);
+            tokens are what you hand to agents.
           </p>
-        </div>
-        <button
-          onClick={onLogout}
-          className="rounded border border-black/15 px-3 py-1 text-sm dark:border-white/15"
-        >
-          Log out
-        </button>
-      </header>
+        </header>
 
-      {error && (
-        <div className="rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">
-          {error}
-        </div>
-      )}
-
-      {fresh && (
-        <OneTimeTokenBanner
-          created={fresh}
-          onDismiss={() => setFresh(null)}
-        />
-      )}
-      {freshCode && (
-        <OneTimeCodeBanner
-          created={freshCode}
-          onDismiss={() => setFreshCode(null)}
-        />
-      )}
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Identities</h2>
-        {identities === null ? (
-          <div className="text-sm opacity-60">Loading…</div>
-        ) : (
-          <IdentitiesTable
-            identities={identities}
-            onChanged={refresh}
-            onRotated={setFresh}
-            onError={(e) => setError(e)}
-          />
+        {error && (
+          <div
+            style={{
+              padding: '0.75rem 1rem',
+              borderRadius: '0.5rem',
+              background: 'color-mix(in srgb, var(--error) 12%, transparent)',
+              color: 'var(--error)',
+              fontSize: '0.875rem',
+            }}
+          >
+            {error}
+          </div>
         )}
-        <CreateAgentForm
-          onCreated={(a) => {
-            setFresh(a)
-            void refresh()
-          }}
-          onError={(e) => setError(e)}
-        />
-      </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Bootstrap codes</h2>
-        <p className="text-sm opacity-60">
-          Codes are single-use. Hand one to another human so they can claim a
-          second admin identity via <code>/setup</code>.
-        </p>
-        <BootstrapCodeList codes={codes} onChanged={refresh} onError={setError} />
-        <CreateBootstrapCodeForm
-          onCreated={(c) => {
-            setFreshCode(c)
-            void refresh()
-          }}
-          onError={setError}
-        />
-      </section>
-    </div>
-  )
-}
+        {reveal && <RevealBanner created={reveal} onDismiss={() => setReveal(null)} />}
 
-// ---------- identities table ----------
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={LABEL}>Users</div>
+            {!creating && (
+              <button onClick={() => setCreating(true)} style={BTN_GHOST}>
+                <Plus size={13} style={{ verticalAlign: '-2px', marginRight: '0.25rem' }} />
+                New user
+              </button>
+            )}
+          </div>
 
-function IdentitiesTable({
-  identities,
-  onChanged,
-  onRotated,
-  onError,
-}: {
-  identities: Identity[]
-  onChanged: () => void
-  onRotated: (c: CreatedAgent) => void
-  onError: (msg: string) => void
-}) {
-  return (
-    <div className="overflow-x-auto rounded border border-black/10 dark:border-white/10">
-      <table className="w-full text-sm">
-        <thead className="bg-black/5 text-left text-xs uppercase tracking-wide opacity-70 dark:bg-white/5">
-          <tr>
-            <th className="px-3 py-2">Name</th>
-            <th className="px-3 py-2">Kind</th>
-            <th className="px-3 py-2">Mode</th>
-            <th className="px-3 py-2">Last used</th>
-            <th className="px-3 py-2">Rules</th>
-            <th className="px-3 py-2"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {identities.map((id) => (
-            <IdentityRow
-              key={id.id}
-              identity={id}
-              onChanged={onChanged}
-              onRotated={onRotated}
-              onError={onError}
+          {creating && (
+            <NewUserCard
+              onCreated={(c) => {
+                setReveal(c)
+                setCreating(false)
+                void refresh()
+              }}
+              onCancel={() => setCreating(false)}
+              onError={setError}
             />
-          ))}
-        </tbody>
-      </table>
+          )}
+
+          <UsersList
+            users={users}
+            meUsername={me.username}
+            onRefresh={refresh}
+            onReveal={setReveal}
+            onError={setError}
+          />
+        </section>
+      </div>
+    </Shell>
+  )
+}
+
+// ---------- user rows ----------
+
+function UsersList({
+  users,
+  meUsername,
+  onRefresh,
+  onReveal,
+  onError,
+}: {
+  users: User[] | null
+  meUsername: string
+  onRefresh: () => void
+  onReveal: (c: CreatedToken) => void
+  onError: (msg: string) => void
+}) {
+  if (users === null) return <div style={{ ...CARD, color: 'var(--text-secondary)' }}>Loading…</div>
+  if (users.length === 0)
+    return <div style={{ ...CARD, color: 'var(--text-secondary)' }}>No users yet.</div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {users.map((u) => (
+        <UserCard
+          key={u.username}
+          user={u}
+          isSelf={u.username === meUsername}
+          onRefresh={onRefresh}
+          onReveal={onReveal}
+          onError={onError}
+        />
+      ))}
     </div>
   )
 }
 
-function IdentityRow({
-  identity,
-  onChanged,
-  onRotated,
+function UserCard({
+  user,
+  isSelf,
+  onRefresh,
+  onReveal,
   onError,
 }: {
-  identity: Identity
-  onChanged: () => void
-  onRotated: (c: CreatedAgent) => void
+  user: User
+  isSelf: boolean
+  onRefresh: () => void
+  onReveal: (c: CreatedToken) => void
   onError: (msg: string) => void
 }) {
-  const [editing, setEditing] = useState(false)
+  const [expanded, setExpanded] = useState<boolean>(isSelf)
+  const [editing, setEditing] = useState<boolean>(false)
+  const deactivated = Boolean(user.deactivated_at)
+  const activeTokens = (user.tokens ?? []).filter((t) => !t.revoked_at).length
 
-  if (editing) {
-    return (
-      <IdentityEditRow
-        identity={identity}
-        onDone={() => {
-          setEditing(false)
-          onChanged()
-        }}
-        onCancel={() => setEditing(false)}
-        onError={onError}
-      />
-    )
-  }
-
-  async function onRotate() {
+  async function onDeactivate() {
+    if (!window.confirm(`Deactivate @${user.username}? Every token stops working immediately, and the username stays reserved forever.`)) return
     try {
-      const rotated = await rotateAgent(identity.id)
-      onRotated(rotated)
+      await deactivateUser(user.username)
+      onRefresh()
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  async function onRevoke() {
-    if (!window.confirm(`Revoke "${identity.name}"? Its token stops working immediately.`)) return
+  async function onAddToken() {
+    const label = window.prompt(`Label for the new token on @${user.username}? (optional)`, '')
     try {
-      await revokeIdentity(identity.id)
+      const created = await createTokenForUser(user.username, label ?? '')
+      onReveal(created)
+      onRefresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <div style={{ ...CARD, padding: 0, opacity: deactivated ? 0.6 : 1 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          padding: '0.875rem 1rem',
+          cursor: 'pointer',
+        }}
+        onClick={() => setExpanded((e) => !e)}
+      >
+        <Avatar username={user.username} color={user.avatar_color} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontWeight: 500, fontSize: '0.9375rem' }}>@{user.username}</span>
+            {user.display_name && (
+              <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                {user.display_name}
+              </span>
+            )}
+            <KindPill kind={user.kind} />
+            {isSelf && <SelfPill />}
+            {deactivated && <DeactivatedPill />}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.125rem' }}>
+            {deactivated
+              ? 'deactivated'
+              : `${activeTokens} active token${activeTokens === 1 ? '' : 's'} · ${user.access_mode === 'allow_all' ? 'allow all' : 'restricted'}${user.rules.length ? ` · ${user.rules.length} rule${user.rules.length === 1 ? '' : 's'}` : ''}`}
+          </div>
+        </div>
+        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: '1px solid var(--border)', padding: '0.875rem 1rem', background: 'var(--bg-secondary)' }}>
+          {editing ? (
+            <UserEditForm
+              user={user}
+              onDone={() => {
+                setEditing(false)
+                onRefresh()
+              }}
+              onCancel={() => setEditing(false)}
+              onError={onError}
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <TokensTable
+                tokens={user.tokens ?? []}
+                username={user.username}
+                onRotated={onReveal}
+                onChanged={onRefresh}
+                onError={onError}
+              />
+              {!deactivated && (
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                  <button onClick={() => setEditing(true)} style={BTN_GHOST}>Edit</button>
+                  <button onClick={onAddToken} style={BTN_GHOST}>
+                    <Plus size={13} style={{ verticalAlign: '-2px', marginRight: '0.25rem' }} />
+                    Add token
+                  </button>
+                  {!isSelf && (
+                    <button onClick={onDeactivate} style={BTN_DANGER}>Deactivate</button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TokensTable({
+  tokens,
+  username,
+  onRotated,
+  onChanged,
+  onError,
+}: {
+  tokens: UserToken[]
+  username: string
+  onRotated: (c: CreatedToken) => void
+  onChanged: () => void
+  onError: (msg: string) => void
+}) {
+  if (tokens.length === 0)
+    return <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>No tokens.</div>
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      {tokens.map((t) => (
+        <TokenRow
+          key={t.id}
+          token={t}
+          username={username}
+          onRotated={onRotated}
+          onChanged={onChanged}
+          onError={onError}
+        />
+      ))}
+    </div>
+  )
+}
+
+function TokenRow({
+  token,
+  username,
+  onRotated,
+  onChanged,
+  onError,
+}: {
+  token: UserToken
+  username: string
+  onRotated: (c: CreatedToken) => void
+  onChanged: () => void
+  onError: (msg: string) => void
+}) {
+  const revoked = Boolean(token.revoked_at)
+  async function onRotate() {
+    try {
+      const c = await rotateToken(username, token.id)
+      onRotated(c)
+      onChanged()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }
+  async function onRevoke() {
+    if (!window.confirm(`Revoke token "${token.label || 'unnamed'}"? It stops working immediately.`)) return
+    try {
+      await revokeToken(username, token.id)
       onChanged()
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err))
@@ -229,58 +478,55 @@ function IdentityRow({
   }
 
   return (
-    <tr className={identity.revoked_at ? 'opacity-50' : ''}>
-      <td className="px-3 py-2 font-medium">{identity.name}</td>
-      <td className="px-3 py-2">{identity.kind}</td>
-      <td className="px-3 py-2">{identity.access_mode}</td>
-      <td className="px-3 py-2 text-xs opacity-70">
-        {identity.last_used_at ? new Date(identity.last_used_at).toLocaleString() : '—'}
-      </td>
-      <td className="px-3 py-2 text-xs opacity-70">
-        {identity.rules.length === 0 ? '—' : `${identity.rules.length} rule${identity.rules.length === 1 ? '' : 's'}`}
-      </td>
-      <td className="px-3 py-2 text-right">
-        {!identity.revoked_at && identity.kind === 'agent' && (
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={() => setEditing(true)}
-              className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-            >
-              Edit
-            </button>
-            <button
-              onClick={onRotate}
-              className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-            >
-              Rotate
-            </button>
-            <button
-              onClick={onRevoke}
-              className="rounded border border-red-500/40 px-2 py-1 text-xs text-red-700 dark:text-red-300"
-            >
-              Revoke
-            </button>
-          </div>
-        )}
-      </td>
-    </tr>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr auto',
+        gap: '0.75rem',
+        alignItems: 'center',
+        padding: '0.5rem 0.75rem',
+        borderRadius: '0.375rem',
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        opacity: revoked ? 0.55 : 1,
+      }}
+    >
+      <div style={{ fontSize: '0.875rem' }}>
+        <span style={{ fontWeight: 500 }}>{token.label || 'unnamed'}</span>
+        {revoked && <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: 'var(--error)' }}>revoked</span>}
+      </div>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+        {token.last_used_at ? `used ${relativeTime(token.last_used_at)}` : 'never used'}
+      </div>
+      {!revoked && (
+        <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
+          <button onClick={onRotate} style={BTN_GHOST} title="Rotate">
+            <RotateCw size={12} style={{ verticalAlign: '-1px' }} />
+          </button>
+          <button onClick={onRevoke} style={BTN_DANGER} title="Revoke">
+            <Trash2 size={12} style={{ verticalAlign: '-1px' }} />
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
-function IdentityEditRow({
-  identity,
+function UserEditForm({
+  user,
   onDone,
   onCancel,
   onError,
 }: {
-  identity: Identity
+  user: User
   onDone: () => void
   onCancel: () => void
   onError: (msg: string) => void
 }) {
-  const [name, setName] = useState(identity.name)
-  const [mode, setMode] = useState<AccessMode>(identity.access_mode)
-  const [rulesText, setRulesText] = useState(JSON.stringify(identity.rules, null, 2))
+  // Username is read-only. To rename, run the CLI escape hatch.
+  const [displayName, setDisplayName] = useState(user.display_name ?? '')
+  const [mode, setMode] = useState<AccessMode>(user.access_mode)
+  const [rulesText, setRulesText] = useState(JSON.stringify(user.rules, null, 2))
 
   async function save() {
     let rules: Rule[]
@@ -292,7 +538,11 @@ function IdentityEditRow({
       return
     }
     try {
-      await updateIdentity(identity.id, { name, access_mode: mode, rules })
+      await updateUser(user.username, {
+        display_name: displayName,
+        access_mode: mode,
+        rules,
+      })
       onDone()
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err))
@@ -300,71 +550,65 @@ function IdentityEditRow({
   }
 
   return (
-    <tr className="bg-black/5 dark:bg-white/5">
-      <td colSpan={6} className="px-3 py-3">
-        <div className="flex flex-col gap-2 text-sm">
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2">
-              Name
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-              />
-            </label>
-            <label className="flex items-center gap-2">
-              Mode
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value as AccessMode)}
-                className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-              >
-                <option value="allow_all">allow_all (blocklist)</option>
-                <option value="restrict_to_list">restrict_to_list (allowlist-only)</option>
-              </select>
-            </label>
-          </div>
-          <label className="flex flex-col gap-1">
-            <span className="opacity-70 text-xs">Rules (JSON array)</span>
-            <textarea
-              rows={6}
-              value={rulesText}
-              onChange={(e) => setRulesText(e.target.value)}
-              className="rounded border border-black/15 bg-white px-2 py-1 font-mono text-xs dark:border-white/15 dark:bg-black"
-            />
-          </label>
-          <div className="flex justify-end gap-2">
-            <button
-              onClick={onCancel}
-              className="rounded border border-black/15 px-3 py-1 text-xs dark:border-white/15"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={save}
-              className="rounded bg-black px-3 py-1 text-xs text-white dark:bg-white dark:text-black"
-            >
-              Save
-            </button>
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div>
+        <div style={LABEL}>Username</div>
+        <div
+          style={{
+            padding: '0.5rem 0.75rem',
+            borderRadius: '0.5rem',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-secondary)',
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: '0.875rem',
+          }}
+          title="Usernames are immutable. To rename, run `agentboard admin rename-user` on the host."
+        >
+          @{user.username}
         </div>
-      </td>
-    </tr>
+      </div>
+      <div>
+        <div style={LABEL}>Display name</div>
+        <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={INPUT} />
+      </div>
+      <div>
+        <div style={LABEL}>Access mode</div>
+        <select value={mode} onChange={(e) => setMode(e.target.value as AccessMode)} style={INPUT}>
+          <option value="allow_all">allow_all — blocklist applies</option>
+          <option value="restrict_to_list">restrict_to_list — allowlist only</option>
+        </select>
+      </div>
+      <div>
+        <div style={LABEL}>Rules (JSON array)</div>
+        <textarea
+          rows={6}
+          value={rulesText}
+          onChange={(e) => setRulesText(e.target.value)}
+          style={{ ...INPUT, fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', resize: 'vertical' }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <button onClick={onCancel} style={BTN_GHOST}>Cancel</button>
+        <button onClick={save} style={BTN_PRIMARY}>Save</button>
+      </div>
+    </div>
   )
 }
 
-// ---------- create agent ----------
-
-function CreateAgentForm({
+function NewUserCard({
   onCreated,
+  onCancel,
   onError,
 }: {
-  onCreated: (a: CreatedAgent) => void
+  onCreated: (c: CreatedToken) => void
+  onCancel: () => void
   onError: (msg: string) => void
 }) {
-  const [name, setName] = useState('')
-  const [mode, setMode] = useState<AccessMode>('allow_all')
+  const [username, setUsername] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [kind, setKind] = useState<Kind>('agent')
   const [template, setTemplate] = useState<'full' | 'viewer' | 'custom'>('full')
+  const [mode, setMode] = useState<AccessMode>('allow_all')
   const [rulesText, setRulesText] = useState('[]')
   const [busy, setBusy] = useState(false)
 
@@ -394,10 +638,14 @@ function CreateAgentForm({
     e.preventDefault()
     setBusy(true)
     try {
-      const rules: Rule[] = JSON.parse(rulesText) as Rule[]
-      const created = await createAgent(name.trim(), mode, rules)
-      setName('')
-      applyTemplate('full')
+      const rules: Rule[] = kind === 'admin' ? [] : (JSON.parse(rulesText) as Rule[])
+      const created = await createUser({
+        username: username.trim().toLowerCase(),
+        display_name: displayName.trim() || undefined,
+        kind,
+        access_mode: kind === 'admin' ? 'allow_all' : mode,
+        rules,
+      })
       onCreated(created)
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err))
@@ -407,61 +655,90 @@ function CreateAgentForm({
   }
 
   return (
-    <form
-      onSubmit={onSubmit}
-      className="flex flex-col gap-3 rounded border border-black/10 p-4 dark:border-white/10"
-    >
-      <h3 className="text-sm font-semibold">Create agent identity</h3>
-      <div className="flex flex-wrap gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="opacity-70">Name</span>
+    <form onSubmit={onSubmit} style={CARD}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+        <div style={LABEL}>New user</div>
+        <button type="button" onClick={onCancel} style={{ ...BTN_GHOST, padding: '0.25rem' }} aria-label="Cancel">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 9rem', gap: '0.75rem' }}>
+        <div>
+          <div style={LABEL}>Username</div>
           <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. ci-bot or alice-laptop"
-            className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="alice"
+            pattern="^[a-z][a-z0-9_-]{0,31}$"
+            title="Lowercase letters, digits, _ or -; start with a letter; max 32"
+            style={INPUT}
             required
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="opacity-70">Template</span>
-          <select
-            value={template}
-            onChange={(e) => applyTemplate(e.target.value as 'full' | 'viewer' | 'custom')}
-            className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-          >
-            <option value="full">Full access</option>
-            <option value="viewer">Read-only viewer</option>
-            <option value="custom">Custom</option>
+        </div>
+        <div>
+          <div style={LABEL}>Display name (optional)</div>
+          <input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Alice Chen"
+            style={INPUT}
+          />
+        </div>
+        <div>
+          <div style={LABEL}>Kind</div>
+          <select value={kind} onChange={(e) => setKind(e.target.value as Kind)} style={INPUT}>
+            <option value="agent">agent</option>
+            <option value="admin">admin</option>
           </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="opacity-70">Mode</span>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as AccessMode)}
-            className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-          >
-            <option value="allow_all">allow_all</option>
-            <option value="restrict_to_list">restrict_to_list</option>
-          </select>
-        </label>
+        </div>
       </div>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="opacity-70">Rules (JSON array, methods: {METHOD_OPTIONS.join(', ')})</span>
-        <textarea
-          rows={6}
-          value={rulesText}
-          onChange={(e) => setRulesText(e.target.value)}
-          className="rounded border border-black/15 bg-white px-2 py-1 font-mono text-xs dark:border-white/15 dark:bg-black"
-        />
-      </label>
-      <div className="flex justify-end">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-black px-3 py-1.5 text-sm text-white disabled:opacity-60 dark:bg-white dark:text-black"
-        >
+
+      {kind === 'agent' && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
+            <div>
+              <div style={LABEL}>Template</div>
+              <select
+                value={template}
+                onChange={(e) => applyTemplate(e.target.value as 'full' | 'viewer' | 'custom')}
+                style={INPUT}
+              >
+                <option value="full">Full access</option>
+                <option value="viewer">Read-only viewer</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+            <div>
+              <div style={LABEL}>Mode</div>
+              <select value={mode} onChange={(e) => setMode(e.target.value as AccessMode)} style={INPUT}>
+                <option value="allow_all">allow_all</option>
+                <option value="restrict_to_list">restrict_to_list</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: '0.75rem' }}>
+            <div style={LABEL}>Rules (JSON array)</div>
+            <textarea
+              rows={5}
+              value={rulesText}
+              onChange={(e) => setRulesText(e.target.value)}
+              style={{ ...INPUT, fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', resize: 'vertical' }}
+            />
+          </div>
+        </>
+      )}
+
+      {kind === 'admin' && (
+        <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+          Admin users always have full access. Use rule scoping on agents,
+          not admins.
+        </p>
+      )}
+
+      <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="submit" disabled={busy} style={BTN_PRIMARY}>
+          <KeyRound size={14} style={{ verticalAlign: '-2px', marginRight: '0.375rem' }} />
           {busy ? 'Creating…' : 'Create + show token'}
         </button>
       </div>
@@ -469,172 +746,157 @@ function CreateAgentForm({
   )
 }
 
-// ---------- bootstrap codes ----------
-
-function BootstrapCodeList({
-  codes,
-  onChanged: _onChanged,
-  onError: _onError,
-}: {
-  codes: BootstrapCode[]
-  onChanged: () => void
-  onError: (msg: string) => void
-}) {
-  if (codes.length === 0) {
-    return <div className="text-sm opacity-60">No outstanding codes.</div>
-  }
+function Avatar({ username, color }: { username: string; color?: string }) {
+  const bg = color ?? 'var(--accent)'
+  const initial = username.charAt(0).toUpperCase() || '?'
   return (
-    <div className="rounded border border-black/10 text-sm dark:border-white/10">
-      {codes.map((c) => (
-        <div
-          key={c.id}
-          className="flex items-center justify-between border-b border-black/5 px-3 py-2 last:border-none dark:border-white/5"
-        >
-          <div>
-            <div className="font-mono text-xs opacity-80">{c.fingerprint}…</div>
-            {c.note && <div className="text-xs opacity-60">{c.note}</div>}
-          </div>
-          <div className="text-xs opacity-60">
-            expires {new Date(c.expires_at).toLocaleString()}
-          </div>
-        </div>
-      ))}
+    <div
+      aria-hidden
+      style={{
+        width: '2rem',
+        height: '2rem',
+        borderRadius: '9999px',
+        background: bg,
+        color: 'white',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontWeight: 600,
+        fontSize: '0.875rem',
+        flexShrink: 0,
+      }}
+    >
+      {initial}
     </div>
   )
 }
 
-function CreateBootstrapCodeForm({
-  onCreated,
-  onError,
-}: {
-  onCreated: (c: CreatedBootstrapCode) => void
-  onError: (msg: string) => void
-}) {
-  const [ttl, setTtl] = useState(24)
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    try {
-      const c = await createBootstrapCode(ttl, note)
-      setNote('')
-      onCreated(c)
-    } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-
+function KindPill({ kind }: { kind: Kind }) {
+  const isAdmin = kind === 'admin'
   return (
-    <form
-      onSubmit={onSubmit}
-      className="flex flex-wrap items-end gap-3 rounded border border-black/10 p-3 dark:border-white/10"
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.25rem',
+        padding: '0.125rem 0.5rem',
+        borderRadius: '9999px',
+        fontSize: '0.6875rem',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        background: isAdmin ? 'var(--accent-light)' : 'var(--bg-secondary)',
+        color: isAdmin ? 'var(--accent)' : 'var(--text-secondary)',
+      }}
     >
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="opacity-70">TTL (hours)</span>
-        <input
-          type="number"
-          min={1}
-          max={720}
-          value={ttl}
-          onChange={(e) => setTtl(Number(e.target.value))}
-          className="w-24 rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="opacity-70">Note (optional)</span>
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="e.g. onboarding bob"
-          className="rounded border border-black/15 bg-white px-2 py-1 dark:border-white/15 dark:bg-black"
-        />
-      </label>
-      <button
-        type="submit"
-        disabled={busy}
-        className="rounded bg-black px-3 py-1.5 text-sm text-white disabled:opacity-60 dark:bg-white dark:text-black"
-      >
-        {busy ? 'Minting…' : 'Mint code'}
-      </button>
-    </form>
+      {isAdmin && <ShieldCheck size={11} />}
+      {kind}
+    </span>
   )
 }
 
-// ---------- one-time reveal banners ----------
+function SelfPill() {
+  return (
+    <span
+      style={{
+        fontSize: '0.6875rem',
+        padding: '0.125rem 0.375rem',
+        borderRadius: '0.25rem',
+        background: 'var(--accent-light)',
+        color: 'var(--accent)',
+        fontWeight: 600,
+      }}
+    >
+      you
+    </span>
+  )
+}
 
-function OneTimeTokenBanner({
+function DeactivatedPill() {
+  return (
+    <span
+      style={{
+        fontSize: '0.6875rem',
+        padding: '0.125rem 0.375rem',
+        borderRadius: '0.25rem',
+        background: 'var(--bg-secondary)',
+        color: 'var(--text-secondary)',
+        fontWeight: 600,
+      }}
+    >
+      deactivated
+    </span>
+  )
+}
+
+function RevealBanner({
   created,
   onDismiss,
 }: {
-  created: CreatedAgent
+  created: CreatedToken
   onDismiss: () => void
 }) {
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(created.token)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard blocked */ }
+  }
   return (
-    <div className="rounded border border-amber-500/50 bg-amber-500/10 p-4">
-      <div className="mb-1 text-sm font-semibold text-amber-900 dark:text-amber-200">
-        Copy this token now. It cannot be retrieved after you leave this page.
+    <div
+      style={{
+        ...CARD,
+        borderColor: 'var(--warning)',
+        background: 'color-mix(in srgb, var(--warning) 8%, var(--bg))',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: '0.8125rem', color: 'var(--warning)', fontWeight: 600 }}>
+          Token for @{created.username}{created.label ? ` (${created.label})` : ''} — copy it now. It won't be shown again.
+        </div>
+        <button aria-label="Dismiss" onClick={onDismiss} style={{ ...BTN_GHOST, padding: '0.25rem 0.375rem' }}>
+          <X size={14} />
+        </button>
       </div>
-      <div className="mb-2 text-xs opacity-70">
-        Identity: <b>{created.name}</b>
-      </div>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded bg-black/5 px-2 py-1 font-mono text-xs dark:bg-white/10">
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem' }}>
+        <code
+          style={{
+            flex: 1,
+            padding: '0.5rem 0.75rem',
+            borderRadius: '0.375rem',
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: '0.8125rem',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+          }}
+        >
           {created.token}
         </code>
-        <button
-          onClick={() => void navigator.clipboard.writeText(created.token)}
-          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-        >
-          Copy
-        </button>
-        <button
-          onClick={onDismiss}
-          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-        >
-          Done
+        <button onClick={copy} style={BTN_GHOST}>
+          {copied ? (
+            <><Check size={13} style={{ verticalAlign: '-1px', marginRight: '0.25rem' }} /> Copied</>
+          ) : (
+            <><Copy size={13} style={{ verticalAlign: '-1px', marginRight: '0.25rem' }} /> Copy</>
+          )}
         </button>
       </div>
     </div>
   )
 }
 
-function OneTimeCodeBanner({
-  created,
-  onDismiss,
-}: {
-  created: CreatedBootstrapCode
-  onDismiss: () => void
-}) {
-  return (
-    <div className="rounded border border-amber-500/50 bg-amber-500/10 p-4">
-      <div className="mb-1 text-sm font-semibold text-amber-900 dark:text-amber-200">
-        One-time bootstrap code — single-use, save it before leaving.
-      </div>
-      <div className="mb-2 text-xs opacity-70">
-        Expires {new Date(created.expires_at).toLocaleString()}
-        {created.note ? ` · ${created.note}` : ''}
-      </div>
-      <div className="flex items-center gap-2">
-        <code className="flex-1 overflow-x-auto rounded bg-black/5 px-2 py-1 font-mono text-xs dark:bg-white/10">
-          {created.code}
-        </code>
-        <button
-          onClick={() => void navigator.clipboard.writeText(created.code)}
-          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-        >
-          Copy
-        </button>
-        <button
-          onClick={onDismiss}
-          className="rounded border border-black/15 px-2 py-1 text-xs dark:border-white/15"
-        >
-          Done
-        </button>
-      </div>
-    </div>
-  )
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime()
+  const now = Date.now()
+  const s = Math.max(0, Math.round((now - then) / 1000))
+  if (s < 60) return `${s}s ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.round(h / 24)
+  return `${d}d ago`
 }

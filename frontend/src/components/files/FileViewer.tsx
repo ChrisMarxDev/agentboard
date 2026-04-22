@@ -4,6 +4,7 @@ import { ArrowLeft, Download } from 'lucide-react'
 import { compile, run } from '@mdx-js/mdx'
 import remarkGfm from 'remark-gfm'
 import * as runtime from 'react/jsx-runtime'
+import { apiFetch } from '../../lib/session'
 
 /**
  * Generic read-only file viewer for any path under `/files/*`. Picks a
@@ -40,7 +41,7 @@ export default function FileViewer() {
 
     ;(async () => {
       try {
-        const r = await fetch(apiUrl)
+        const r = await apiFetch(apiUrl)
         if (!r.ok) throw new Error(`${apiUrl} → ${r.status}`)
         const contentType = r.headers.get('Content-Type') || 'application/octet-stream'
         const size = Number(r.headers.get('Content-Length') || '0')

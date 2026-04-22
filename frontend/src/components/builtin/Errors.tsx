@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { apiFetch } from '../../lib/session'
 
 interface ErrorEntry {
   key: string
@@ -29,7 +30,7 @@ export function Errors({ limit = 10 }: ErrorsProps) {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch('/api/errors')
+      const r = await apiFetch('/api/errors')
       if (!r.ok) return
       const list = (await r.json()) as ErrorEntry[]
       setEntries(list)
@@ -51,13 +52,13 @@ export function Errors({ limit = 10 }: ErrorsProps) {
   }, [refresh])
 
   const clearAll = async () => {
-    await fetch('/api/errors', { method: 'DELETE' })
+    await apiFetch('/api/errors', { method: 'DELETE' })
     // SSE will refresh, but optimistic clear keeps the UI responsive.
     setEntries([])
   }
 
   const clearOne = async (key: string) => {
-    await fetch(`/api/errors?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
+    await apiFetch(`/api/errors?key=${encodeURIComponent(key)}`, { method: 'DELETE' })
     setEntries(es => es.filter(e => e.key !== key))
   }
 

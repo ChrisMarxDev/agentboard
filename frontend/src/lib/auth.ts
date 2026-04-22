@@ -1,39 +1,8 @@
-// Admin-session helpers. The session cookie is HTTP-only and scoped to
-// /api/admin, so the browser attaches it automatically on every admin
-// fetch. We keep a CSRF token in memory (received on setup/login/me) and
-// attach it to state-changing requests.
-//
-// This module intentionally does NOT store anything on disk. localStorage
-// is reserved for agent tokens; the admin session lives entirely in the
-// cookie + this in-memory CSRF token.
+// Admin-endpoint helpers. The token is shared with the rest of the SPA
+// (see lib/session.ts) — admin vs agent capability comes from the token's
+// `kind`, not from a separate store.
 
-export interface Me {
-  id: string
-  name: string
-  csrf_token: string
-}
-
-let csrfToken: string | null = null
-
-export function setCSRF(t: string) {
-  csrfToken = t
-}
-
-export function getCSRF(): string | null {
-  return csrfToken
-}
-
-export function clearCSRF() {
-  csrfToken = null
-}
-
-function headers(extra?: HeadersInit): HeadersInit {
-  const base: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-  if (csrfToken) base['X-CSRF-Token'] = csrfToken
-  return { ...base, ...(extra as Record<string, string>) }
-}
+import { apiFetch } from './session'
 
 async function parseError(res: Response): Promise<Error> {
   try {
@@ -49,62 +18,18 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T
 }
 
-// -------- session lifecycle --------
-
-export async function fetchMe(): Promise<Me | null> {
-  const res = await fetch('/api/admin/me', { credentials: 'same-origin' })
-  if (res.status === 401) return null
-  const me = await json<Me>(res)
-  setCSRF(me.csrf_token)
-  return me
+export interface Me {
+  username: string
+  display_name?: string
+  kind: 'admin' | 'agent'
+  avatar_color?: string
 }
 
-export async function setup(code: string, name: string, password: string): Promise<Me> {
-  const res = await fetch('/api/admin/setup', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({ code, name, password }),
-  })
-  const me = await json<Me>(res)
-  setCSRF(me.csrf_token)
-  return me
+export async function fetchMe(): Promise<Me> {
+  return json<Me>(await apiFetch('/api/admin/me'))
 }
 
-export async function login(name: string, password: string): Promise<Me> {
-  const res = await fetch('/api/admin/login', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({ name, password }),
-  })
-  const me = await json<Me>(res)
-  setCSRF(me.csrf_token)
-  return me
-}
-
-export async function logout(): Promise<void> {
-  await fetch('/api/admin/logout', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-  })
-  clearCSRF()
-}
-
-export async function changePassword(current: string, next: string): Promise<Me> {
-  const res = await fetch('/api/admin/password', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({ current, new: next }),
-  })
-  const me = await json<Me>(res)
-  setCSRF(me.csrf_token)
-  return me
-}
-
-// -------- identities --------
+// -------- users --------
 
 export type Kind = 'admin' | 'agent'
 export type AccessMode = 'allow_all' | 'restrict_to_list'
@@ -115,142 +40,101 @@ export interface Rule {
   methods: string[]
 }
 
-export interface Identity {
+export interface UserToken {
   id: string
-  name: string
-  kind: Kind
-  access_mode: AccessMode
-  rules: Rule[]
+  username: string
+  label?: string
   created_at: string
-  created_by?: string
   last_used_at?: string
   revoked_at?: string
 }
 
-export async function listIdentities(): Promise<Identity[]> {
-  const res = await fetch('/api/admin/identities', { credentials: 'same-origin' })
-  const data = await json<{ identities: Identity[] }>(res)
-  return data.identities ?? []
+export interface User {
+  username: string
+  display_name?: string
+  kind: Kind
+  avatar_color?: string
+  access_mode: AccessMode
+  rules: Rule[]
+  created_at: string
+  created_by?: string
+  deactivated_at?: string
+  tokens?: UserToken[]
 }
 
-export interface CreatedAgent {
-  id: string
-  name: string
+export async function listUsers(): Promise<User[]> {
+  const data = await json<{ users: User[] }>(await apiFetch('/api/admin/users'))
+  return data.users ?? []
+}
+
+export interface CreatedToken {
+  username: string
+  token_id: string
+  label?: string
   token: string
 }
 
-export async function createAgent(
-  name: string,
-  accessMode: AccessMode,
-  rules: Rule[],
-): Promise<CreatedAgent> {
-  const res = await fetch('/api/admin/identities', {
+export async function createUser(params: {
+  username: string
+  display_name?: string
+  kind: Kind
+  access_mode: AccessMode
+  rules: Rule[]
+  initial_token_label?: string
+}): Promise<CreatedToken> {
+  return json<CreatedToken>(await apiFetch('/api/admin/users', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({
-      name,
-      kind: 'agent',
-      access_mode: accessMode,
-      rules,
-    }),
-  })
-  return json<CreatedAgent>(res)
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  }))
 }
 
-export async function createAdmin(name: string, password: string): Promise<Identity> {
-  const res = await fetch('/api/admin/identities', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({ name, kind: 'admin', password }),
-  })
-  return json<Identity>(res)
-}
-
-export async function updateIdentity(
-  id: string,
-  patch: { name?: string; access_mode?: AccessMode; rules?: Rule[] },
-): Promise<Identity> {
-  const res = await fetch(`/api/admin/identities/${encodeURIComponent(id)}`, {
+// updateUser does NOT accept username. Usernames are immutable; to rename,
+// run `agentboard admin rename-user <old> <new>` on the host.
+export async function updateUser(
+  username: string,
+  patch: {
+    display_name?: string
+    access_mode?: AccessMode
+    rules?: Rule[]
+  },
+): Promise<User> {
+  return json<User>(await apiFetch(`/api/admin/users/${encodeURIComponent(username)}`, {
     method: 'PATCH',
-    credentials: 'same-origin',
-    headers: headers(),
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
-  })
-  return json<Identity>(res)
+  }))
 }
 
-export async function rotateAgent(id: string): Promise<CreatedAgent> {
-  const res = await fetch(
-    `/api/admin/identities/${encodeURIComponent(id)}/rotate`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: headers(),
-    },
-  )
-  return json<CreatedAgent>(res)
-}
-
-export async function revokeIdentity(id: string): Promise<void> {
-  const res = await fetch(
-    `/api/admin/identities/${encodeURIComponent(id)}/revoke`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: headers(),
-    },
-  )
+export async function deactivateUser(username: string): Promise<void> {
+  const res = await apiFetch(`/api/admin/users/${encodeURIComponent(username)}/deactivate`, { method: 'POST' })
   if (!res.ok) throw await parseError(res)
 }
 
-// -------- bootstrap codes --------
+// -------- tokens --------
 
-export interface BootstrapCode {
-  id: string
-  fingerprint: string
-  created_at: string
-  expires_at: string
-  note?: string
-}
-
-export interface CreatedBootstrapCode {
-  id: string
-  code: string
-  expires_at: string
-  note?: string
-}
-
-export async function createBootstrapCode(
-  ttlHours: number,
-  note?: string,
-): Promise<CreatedBootstrapCode> {
-  const res = await fetch('/api/admin/bootstrap-codes', {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: headers(),
-    body: JSON.stringify({ ttl_hours: ttlHours, note: note ?? '' }),
-  })
-  return json<CreatedBootstrapCode>(res)
-}
-
-export async function listBootstrapCodes(): Promise<BootstrapCode[]> {
-  const res = await fetch('/api/admin/bootstrap-codes', {
-    credentials: 'same-origin',
-  })
-  const data = await json<{ codes: BootstrapCode[] }>(res)
-  return data.codes ?? []
-}
-
-export async function deleteBootstrapCode(id: string): Promise<void> {
-  const res = await fetch(
-    `/api/admin/bootstrap-codes/${encodeURIComponent(id)}`,
+export async function createTokenForUser(username: string, label?: string): Promise<CreatedToken> {
+  return json<CreatedToken>(await apiFetch(
+    `/api/admin/users/${encodeURIComponent(username)}/tokens`,
     {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: headers(),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: label ?? '' }),
     },
+  ))
+}
+
+export async function rotateToken(username: string, tokenId: string): Promise<CreatedToken> {
+  return json<CreatedToken>(await apiFetch(
+    `/api/admin/users/${encodeURIComponent(username)}/tokens/${encodeURIComponent(tokenId)}/rotate`,
+    { method: 'POST' },
+  ))
+}
+
+export async function revokeToken(username: string, tokenId: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/admin/users/${encodeURIComponent(username)}/tokens/${encodeURIComponent(tokenId)}/revoke`,
+    { method: 'POST' },
   )
   if (!res.ok) throw await parseError(res)
 }

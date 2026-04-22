@@ -13,62 +13,66 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// adminCmd is the parent "agentboard admin ..." group. Every subcommand
-// operates directly on the project's SQLite file — gated by filesystem
-// access, which is the correct trust boundary for recovery operations.
 var adminCmd = &cobra.Command{
 	Use:   "admin",
-	Short: "Administer AgentBoard identities and auth (local file access; not over the network)",
+	Short: "Administer AgentBoard users + tokens (local file access; no network needed)",
 	Long: `agentboard admin exposes local-file operations on the auth store:
-mint bootstrap codes, list identities, reset admin access after a lockout.
+list users, mint a fresh admin after a lockout, rotate a token, or rename
+a user (the only path to change a username — usernames are immutable via
+the web UI because they're the primary key that @mentions resolve to).
 
-All commands require filesystem access to the project database. Run them
-on the host where AgentBoard runs. They do NOT speak to any network API.`,
-}
-
-var adminBootstrapTTL int
-
-var adminBootstrapCodeCmd = &cobra.Command{
-	Use:   "bootstrap-code",
-	Short: "Generate a one-time bootstrap code for claiming admin via /setup",
-	Long: `Prints a fresh bootstrap code and stores its hash in the project
-database. Visit /setup in the browser and enter the code along with a
-username and password to create (or claim) admin access.
-
-Codes are single-use and expire after --ttl hours (default 24).`,
-	RunE: runAdminBootstrapCode,
-}
-
-var adminResetCmd = &cobra.Command{
-	Use:   "reset",
-	Short: "Reset admin access after a lockout (invalidates all admin sessions)",
-	Long: `Generates a new bootstrap code AND clears password hashes for every
-existing admin identity. Active admin sessions are destroyed. Use this
-when the only admin forgot their password; the legacy agent tokens and
-non-admin identities are left untouched.`,
-	RunE: runAdminReset,
+All commands require filesystem access to the project database. They do
+NOT speak to any network API.`,
 }
 
 var adminListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List identities in the project database",
-	Long: `Prints one row per identity with name, kind, last-used, and revoked
-status. Never prints tokens or password hashes — they're one-way and
-not recoverable from the database.`,
-	RunE: runAdminList,
+	Short: "List users and their tokens",
+	RunE:  runAdminList,
+}
+
+var adminMintAdminCmd = &cobra.Command{
+	Use:   "mint-admin <username>",
+	Short: "Create a new admin user with one token (recovery)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAdminMintAdmin,
+}
+
+var adminRotateCmd = &cobra.Command{
+	Use:   "rotate <username> [token-label]",
+	Short: "Rotate a user's token. If no label given and the user has one token, rotate it.",
+	Args:  cobra.RangeArgs(1, 2),
+	RunE:  runAdminRotate,
+}
+
+var adminRenameUserYes bool
+
+var adminRenameUserCmd = &cobra.Command{
+	Use:   "rename-user <old> <new>",
+	Short: "Rename a user (escape hatch — usernames are normally immutable)",
+	Long: `Renames a user AND every token they own. Other string references
+(data.updated_by, @mentions in MDX page content, assignees arrays on
+cards, etc.) are NOT rewritten — mentions of the old username in free
+text will silently stop resolving.
+
+Usernames are designed to be immutable so @mentions and attribution
+strings keep meaning across time; this command exists only for fixing
+typos shortly after a user was created. Confirm with --yes to skip the
+prompt.`,
+	Args: cobra.ExactArgs(2),
+	RunE: runAdminRenameUser,
 }
 
 func init() {
-	adminBootstrapCodeCmd.Flags().IntVar(&adminBootstrapTTL, "ttl", 24, "Hours until the code expires")
-	adminCmd.AddCommand(adminBootstrapCodeCmd)
-	adminCmd.AddCommand(adminResetCmd)
+	adminRenameUserCmd.Flags().BoolVar(&adminRenameUserYes, "yes", false, "Skip the confirmation prompt")
+
 	adminCmd.AddCommand(adminListCmd)
+	adminCmd.AddCommand(adminMintAdminCmd)
+	adminCmd.AddCommand(adminRotateCmd)
+	adminCmd.AddCommand(adminRenameUserCmd)
 	rootCmd.AddCommand(adminCmd)
 }
 
-// openAuthStore opens the project's SQLite DB and returns a Store. The
-// caller is responsible for closing the underlying DB via the returned
-// closer.
 func openAuthStore() (*auth.Store, func(), error) {
 	projPath := resolveProjectPath()
 	if _, err := os.Stat(projPath); os.IsNotExist(err) {
@@ -90,88 +94,6 @@ func openAuthStore() (*auth.Store, func(), error) {
 	return authStore, func() { store.Close() }, nil
 }
 
-func runAdminBootstrapCode(cmd *cobra.Command, _ []string) error {
-	a, closer, err := openAuthStore()
-	if err != nil {
-		return err
-	}
-	defer closer()
-
-	ttl := time.Duration(adminBootstrapTTL) * time.Hour
-	code, bc, err := a.CreateBootstrapCode(ttl, "cli")
-	if err != nil {
-		return fmt.Errorf("create bootstrap code: %w", err)
-	}
-	fmt.Printf(`One-time bootstrap code (expires %s):
-
-  %s
-
-Visit /setup in the browser and enter this code to create admin access.
-The code is stored as a one-way hash; save it before closing this terminal.
-`, bc.ExpiresAt.Local().Format(time.RFC1123), code)
-	return nil
-}
-
-func runAdminReset(cmd *cobra.Command, _ []string) error {
-	a, closer, err := openAuthStore()
-	if err != nil {
-		return err
-	}
-	defer closer()
-
-	// Print a loud banner and require confirmation unless --yes is set.
-	if !adminResetYes {
-		fmt.Fprintln(os.Stderr, "WARNING: this will clear passwords for ALL admin identities and destroy their sessions.")
-		fmt.Fprint(os.Stderr, "Type 'reset' to continue: ")
-		var got string
-		fmt.Scanln(&got)
-		if strings.TrimSpace(got) != "reset" {
-			return fmt.Errorf("aborted")
-		}
-	}
-
-	admins, err := a.ListIdentities()
-	if err != nil {
-		return err
-	}
-	cleared := 0
-	for _, ident := range admins {
-		if ident.Kind != auth.KindAdmin || ident.RevokedAt != nil {
-			continue
-		}
-		// Password-less admins can't log in; a fresh bootstrap code is the
-		// only way back in.
-		if err := a.SetPassword(ident.ID, ""); err != nil {
-			return fmt.Errorf("clear password for %s: %w", ident.Name, err)
-		}
-		if err := a.DeleteSessionsForIdentity(ident.ID); err != nil {
-			return fmt.Errorf("clear sessions for %s: %w", ident.Name, err)
-		}
-		cleared++
-	}
-
-	code, bc, err := a.CreateBootstrapCode(24*time.Hour, "admin-reset")
-	if err != nil {
-		return fmt.Errorf("create bootstrap code: %w", err)
-	}
-
-	fmt.Printf(`Admin reset complete. Cleared %d admin password(s) and killed their sessions.
-
-One-time bootstrap code (expires %s):
-
-  %s
-
-Visit /setup in the browser and enter this code with a new username + password.
-`, cleared, bc.ExpiresAt.Local().Format(time.RFC1123), code)
-	return nil
-}
-
-var adminResetYes bool
-
-func init() {
-	adminResetCmd.Flags().BoolVar(&adminResetYes, "yes", false, "Skip the confirmation prompt (unsafe)")
-}
-
 func runAdminList(cmd *cobra.Command, _ []string) error {
 	a, closer, err := openAuthStore()
 	if err != nil {
@@ -179,30 +101,170 @@ func runAdminList(cmd *cobra.Command, _ []string) error {
 	}
 	defer closer()
 
-	idents, err := a.ListIdentities()
+	users, err := a.ListUsers(true)
 	if err != nil {
 		return err
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tKIND\tMODE\tLAST USED\tREVOKED\tCREATED")
-	for _, ident := range idents {
-		lastUsed := "-"
-		if ident.LastUsedAt != nil {
-			lastUsed = humanDuration(time.Since(*ident.LastUsedAt)) + " ago"
+	fmt.Fprintln(tw, "USERNAME\tDISPLAY\tKIND\tMODE\tTOKENS\tLAST USED\tDEACTIVATED\tCREATED")
+	for _, u := range users {
+		activeTokens := 0
+		var lastUsed time.Time
+		for _, t := range u.Tokens {
+			if t.RevokedAt == nil {
+				activeTokens++
+			}
+			if t.LastUsedAt != nil && t.LastUsedAt.After(lastUsed) {
+				lastUsed = *t.LastUsedAt
+			}
 		}
-		revoked := "-"
-		if ident.RevokedAt != nil {
-			revoked = ident.RevokedAt.Local().Format("2006-01-02")
+		lastUsedStr := "-"
+		if !lastUsed.IsZero() {
+			lastUsedStr = humanDuration(time.Since(lastUsed)) + " ago"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			ident.Name, ident.Kind, ident.AccessMode,
-			lastUsed, revoked, ident.CreatedAt.Local().Format("2006-01-02"))
+		deactivated := "-"
+		if u.DeactivatedAt != nil {
+			deactivated = u.DeactivatedAt.Local().Format("2006-01-02")
+		}
+		display := u.DisplayName
+		if display == "" {
+			display = "-"
+		}
+		fmt.Fprintf(tw, "@%s\t%s\t%s\t%s\t%d/%d\t%s\t%s\t%s\n",
+			u.Username, display, u.Kind, u.AccessMode,
+			activeTokens, len(u.Tokens),
+			lastUsedStr, deactivated,
+			u.CreatedAt.Local().Format("2006-01-02"))
 	}
 	return tw.Flush()
 }
 
-// humanDuration returns "5m", "3h", "2d" — the short form people want in
-// a terminal listing.
+func runAdminMintAdmin(cmd *cobra.Command, args []string) error {
+	a, closer, err := openAuthStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+
+	username := args[0]
+	if _, err := a.CreateUser(auth.CreateUserParams{
+		Username:  username,
+		Kind:      auth.KindAdmin,
+		CreatedBy: "cli",
+	}); err != nil {
+		return fmt.Errorf("create admin: %w", err)
+	}
+	token, err := auth.GenerateToken()
+	if err != nil {
+		return err
+	}
+	if _, err := a.CreateToken(auth.CreateTokenParams{
+		Username:  username,
+		TokenHash: auth.HashToken(token),
+		Label:     "cli",
+	}); err != nil {
+		return fmt.Errorf("create token: %w", err)
+	}
+	fmt.Printf(`Admin @%s created. Copy this token and paste it into /admin:
+
+  %s
+
+It won't be shown again. Rotate with: `+"`"+`agentboard admin rotate %s`+"`"+`.
+`, username, token, username)
+	return nil
+}
+
+func runAdminRotate(cmd *cobra.Command, args []string) error {
+	a, closer, err := openAuthStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+
+	user, err := a.GetUser(args[0])
+	if err != nil {
+		return fmt.Errorf("user @%s not found", args[0])
+	}
+	tokens, err := a.ListTokensForUser(user.Username)
+	if err != nil {
+		return err
+	}
+
+	var target *auth.UserToken
+	if len(args) == 2 {
+		for i := range tokens {
+			if tokens[i].Label == args[1] && tokens[i].RevokedAt == nil {
+				target = &tokens[i]
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("no active token with label %q on @%s", args[1], user.Username)
+		}
+	} else {
+		for i := range tokens {
+			if tokens[i].RevokedAt == nil {
+				if target != nil {
+					return fmt.Errorf("@%s has multiple active tokens; pass the label as second arg", user.Username)
+				}
+				target = &tokens[i]
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("@%s has no active tokens; use `admin mint-admin` or add one via the UI", user.Username)
+		}
+	}
+
+	newToken, err := auth.GenerateToken()
+	if err != nil {
+		return err
+	}
+	if err := a.RotateToken(target.ID, auth.HashToken(newToken)); err != nil {
+		return fmt.Errorf("rotate: %w", err)
+	}
+	fmt.Printf(`Rotated token %q on @%s. Paste the new value:
+
+  %s
+
+The previous token stops working immediately.
+`, target.Label, user.Username, newToken)
+	return nil
+}
+
+func runAdminRenameUser(cmd *cobra.Command, args []string) error {
+	a, closer, err := openAuthStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+
+	oldName, newName := strings.ToLower(args[0]), strings.ToLower(args[1])
+
+	if !adminRenameUserYes {
+		fmt.Fprintf(os.Stderr, `WARNING: renaming @%s → @%s.
+
+This updates the user row and every token they own. It does NOT rewrite
+free-text references in MDX pages, data values, data_history, or
+assignees arrays on cards. Mentions of @%s elsewhere will silently stop
+resolving.
+
+Type the new username (@%s) to confirm: `, oldName, newName, oldName, newName)
+		var got string
+		fmt.Scanln(&got)
+		if strings.TrimSpace(got) != newName {
+			return fmt.Errorf("aborted")
+		}
+	}
+
+	stats, err := a.RenameUser(oldName, newName)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Renamed @%s → @%s. Rows updated: users=%d, user_tokens=%d.\n",
+		oldName, newName, stats.UsersUpdated, stats.TokensUpdated)
+	return nil
+}
+
 func humanDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))

@@ -1,150 +1,101 @@
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
-	"net/http/cookiejar"
-	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/christophermarx/agentboard/internal/auth"
 )
 
-// newAdminClient produces an http.Client that keeps cookies, so the session
-// cookie set on setup/login is automatically sent on subsequent requests.
-func newAdminClient(t *testing.T) *http.Client {
+// seedAdmin creates one admin user + token and returns the plaintext token.
+func seedAdmin(t *testing.T, srv *Server) string {
 	t.Helper()
-	jar, err := cookiejar.New(nil)
-	if err != nil {
+	if _, err := srv.Auth.CreateUser(auth.CreateUserParams{
+		Username: "admin",
+		Kind:     auth.KindAdmin,
+	}); err != nil {
 		t.Fatal(err)
 	}
-	return &http.Client{Jar: jar}
+	tok, _ := auth.GenerateToken()
+	if _, err := srv.Auth.CreateToken(auth.CreateTokenParams{
+		Username:  "admin",
+		TokenHash: auth.HashToken(tok),
+		Label:     "test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	auth.InvalidateFirstRunCache()
+	return tok
 }
 
-// bootstrapAdminFlow walks through /setup to create the first admin and
-// returns the (authenticated client, csrf token).
-func bootstrapAdminFlow(t *testing.T, srv *Server, ts *httptest.Server) (*http.Client, string) {
+func seedAgent(t *testing.T, srv *Server, username string) string {
 	t.Helper()
-
-	// Mint a code directly via the store (the CLI / installer would do this).
-	code, _, err := srv.Auth.CreateBootstrapCode(60*60*1e9, "test")
-	if err != nil {
+	if _, err := srv.Auth.CreateUser(auth.CreateUserParams{
+		Username: username,
+		Kind:     auth.KindAgent,
+	}); err != nil {
 		t.Fatal(err)
 	}
-
-	client := newAdminClient(t)
-	body, _ := json.Marshal(setupRequest{Code: code, Name: "alice", Password: "correct-horse"})
-	resp, err := client.Post(ts.URL+"/api/admin/setup", "application/json", bytes.NewReader(body))
-	if err != nil {
+	tok, _ := auth.GenerateToken()
+	if _, err := srv.Auth.CreateToken(auth.CreateTokenParams{
+		Username:  username,
+		TokenHash: auth.HashToken(tok),
+	}); err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
-		t.Fatalf("setup status = %d, want 201", resp.StatusCode)
-	}
-	var me meResponse
-	if err := json.NewDecoder(resp.Body).Decode(&me); err != nil {
-		t.Fatal(err)
-	}
-	if me.CSRFToken == "" {
-		t.Fatal("csrf token should be returned on setup")
-	}
-	return client, me.CSRFToken
+	return tok
 }
 
-func TestAdmin_SetupAndLogin(t *testing.T) {
-	srv, ts := newTestServer(t)
-	client, _ := bootstrapAdminFlow(t, srv, ts)
-
-	// /me works with the cookie.
-	req, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
-	resp, err := client.Do(req)
+func authReq(t *testing.T, method, url, body, token string) *http.Request {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body == "" {
+		req, err = http.NewRequest(method, url, nil)
+	} else {
+		req, err = http.NewRequest(method, url, strings.NewReader(body))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		t.Errorf("me status = %d, want 200", resp.StatusCode)
-	}
-
-	// Login with correct password returns 200.
-	login := loginRequest{Name: "alice", Password: "correct-horse"}
-	body, _ := json.Marshal(login)
-	resp2, err := newAdminClient(t).Post(ts.URL+"/api/admin/login", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != 200 {
-		t.Errorf("login status = %d, want 200", resp2.StatusCode)
-	}
-
-	// Wrong password returns 401 and does NOT set a cookie.
-	bad := loginRequest{Name: "alice", Password: "wrong"}
-	body, _ = json.Marshal(bad)
-	resp3, err := newAdminClient(t).Post(ts.URL+"/api/admin/login", "application/json", bytes.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp3.Body.Close()
-	if resp3.StatusCode != 401 {
-		t.Errorf("wrong login status = %d, want 401", resp3.StatusCode)
-	}
-	if len(resp3.Cookies()) > 0 {
-		t.Error("no cookie should be set on failed login")
-	}
-}
-
-func TestAdmin_Me_Requires_Session(t *testing.T) {
-	_, ts := newTestServer(t)
-	resp, err := http.Get(ts.URL + "/api/admin/me")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 401 {
-		t.Errorf("status = %d, want 401 without session", resp.StatusCode)
-	}
-}
-
-func TestAdmin_CSRF_On_Mutations(t *testing.T) {
-	srv, ts := newTestServer(t)
-	client, csrf := bootstrapAdminFlow(t, srv, ts)
-
-	body := bytes.NewReader([]byte(`{"name":"bot-1","kind":"agent"}`))
-	req, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities", body)
 	req.Header.Set("Content-Type", "application/json")
-	// Missing X-CSRF-Token.
-	resp, _ := client.Do(req)
-	if resp.StatusCode != 403 {
-		t.Errorf("expected 403 for missing CSRF, got %d", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	// Correct CSRF.
-	body2 := bytes.NewReader([]byte(`{"name":"bot-1","kind":"agent"}`))
-	req2, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities", body2)
-	req2.Header.Set("Content-Type", "application/json")
-	req2.Header.Set("X-CSRF-Token", csrf)
-	resp2, err := client.Do(req2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != 201 {
-		t.Errorf("create status = %d, want 201", resp2.StatusCode)
-	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
 }
 
-func TestAdmin_CreateAgent_ReturnsTokenOnce(t *testing.T) {
+func TestAdmin_RequiresAdminToken(t *testing.T) {
 	srv, ts := newTestServer(t)
-	client, csrf := bootstrapAdminFlow(t, srv, ts)
+	adminToken := seedAdmin(t, srv)
+	agentToken := seedAgent(t, srv, "bot")
 
-	body := `{"name":"bot-1","kind":"agent","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
-	req, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", csrf)
-	resp, err := client.Do(req)
+	noTok, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
+	r1, _ := http.DefaultClient.Do(noTok)
+	if r1.StatusCode != 401 {
+		t.Errorf("no token = %d, want 401", r1.StatusCode)
+	}
+	r1.Body.Close()
+
+	r2, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", agentToken))
+	if r2.StatusCode != 403 {
+		t.Errorf("agent on admin = %d, want 403", r2.StatusCode)
+	}
+	r2.Body.Close()
+
+	r3, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", adminToken))
+	if r3.StatusCode != 200 {
+		t.Errorf("admin on admin = %d, want 200", r3.StatusCode)
+	}
+	r3.Body.Close()
+}
+
+func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
+	srv, ts := newTestServer(t)
+	adminToken := seedAdmin(t, srv)
+
+	body := `{"username":"viewer","kind":"agent","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
+	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users", body, adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,154 +107,252 @@ func TestAdmin_CreateAgent_ReturnsTokenOnce(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&tok); err != nil {
 		t.Fatal(err)
 	}
+	if tok.Username != "viewer" {
+		t.Errorf("unexpected username: %s", tok.Username)
+	}
 	if !strings.HasPrefix(tok.Token, "ab_") {
-		t.Errorf("token prefix missing: %s", tok.Token)
+		t.Errorf("bad token shape: %s", tok.Token)
 	}
 
-	// The token should work for GET (allowed) and fail for PUT (not in rules).
-	getReq, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
-	getReq.Header.Set("Authorization", "Bearer "+tok.Token)
-	getResp, _ := http.DefaultClient.Do(getReq)
-	if getResp.StatusCode != 200 {
-		t.Errorf("GET with viewer token status = %d, want 200", getResp.StatusCode)
+	// Viewer GET works, PUT denied.
+	gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr.Header.Set("Authorization", "Bearer "+tok.Token)
+	gresp, _ := http.DefaultClient.Do(gr)
+	if gresp.StatusCode != 200 {
+		t.Errorf("GET = %d, want 200", gresp.StatusCode)
 	}
-	getResp.Body.Close()
+	gresp.Body.Close()
 
-	putReq, _ := http.NewRequest("PUT", ts.URL+"/api/data/foo", strings.NewReader(`"bar"`))
-	putReq.Header.Set("Content-Type", "application/json")
-	putReq.Header.Set("Authorization", "Bearer "+tok.Token)
-	putResp, _ := http.DefaultClient.Do(putReq)
-	if putResp.StatusCode != 403 {
-		t.Errorf("PUT with viewer token status = %d, want 403", putResp.StatusCode)
+	pr, _ := http.NewRequest("PUT", ts.URL+"/api/data/foo", strings.NewReader(`"x"`))
+	pr.Header.Set("Content-Type", "application/json")
+	pr.Header.Set("Authorization", "Bearer "+tok.Token)
+	presp, _ := http.DefaultClient.Do(pr)
+	if presp.StatusCode != 403 {
+		t.Errorf("PUT = %d, want 403", presp.StatusCode)
 	}
-	putResp.Body.Close()
-
-	_ = srv
+	presp.Body.Close()
 }
 
-func TestAdmin_SessionCookie_NotSentToDataPlane(t *testing.T) {
-	// The session cookie is scoped to /api/admin, so requests to /api/data
-	// never receive it (browser behavior); the middleware for data endpoints
-	// would ignore it anyway. Smoke-test that unauthenticated /api/data
-	// returns 401 even after an admin has logged in.
+func TestAdmin_UsernameTaken_AndReservedAfterDeactivate(t *testing.T) {
 	srv, ts := newTestServer(t)
-	client, _ := bootstrapAdminFlow(t, srv, ts)
+	adminToken := seedAdmin(t, srv)
 
-	req, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
-	resp, err := client.Do(req)
+	// Create and deactivate a user.
+	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+		`{"username":"alice","kind":"agent"}`, adminToken))
+	resp.Body.Close()
+	deact, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users/alice/deactivate", "", adminToken))
+	deact.Body.Close()
+
+	// Re-creating "alice" must 409 even though she's deactivated.
+	again, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+		`{"username":"alice","kind":"agent"}`, adminToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer again.Body.Close()
+	if again.StatusCode != 409 {
+		t.Errorf("re-create deactivated username = %d, want 409", again.StatusCode)
+	}
+}
+
+func TestAdmin_InvalidUsername(t *testing.T) {
+	srv, ts := newTestServer(t)
+	adminToken := seedAdmin(t, srv)
+
+	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+		`{"username":"0bad","kind":"agent"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	// No identities with a token → the server is NOT in open mode because
-	// an admin identity exists. But there's no agent token either, so 401.
-	if resp.StatusCode != 401 {
-		t.Errorf("data endpoint should 401 without agent token, got %d", resp.StatusCode)
+	if resp.StatusCode != 400 {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 }
 
-func TestAdmin_Revoke_CannotRevokeSelf(t *testing.T) {
+func TestAdmin_UpdateUser_CannotChangeUsername(t *testing.T) {
 	srv, ts := newTestServer(t)
-	client, csrf := bootstrapAdminFlow(t, srv, ts)
+	adminToken := seedAdmin(t, srv)
+	seedAgent(t, srv, "alice")
 
-	// Look up the current admin's ID.
-	req, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
-	resp, _ := client.Do(req)
-	var me meResponse
-	json.NewDecoder(resp.Body).Decode(&me)
+	// The PATCH body doesn't even accept username — it's not in the request
+	// struct. Sending one should be ignored; the user keeps their original
+	// username. Verify by sending a username field and checking the response
+	// still says alice.
+	resp, err := http.DefaultClient.Do(authReq(t, "PATCH", ts.URL+"/api/admin/users/alice",
+		`{"username":"notAlice","display_name":"Alice Chen"}`, adminToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var user struct {
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+	}
+	json.NewDecoder(resp.Body).Decode(&user)
+	if user.Username != "alice" {
+		t.Errorf("username mutated via PATCH: got %q", user.Username)
+	}
+	if user.DisplayName != "Alice Chen" {
+		t.Errorf("display_name not updated: got %q", user.DisplayName)
+	}
+}
+
+func TestAdmin_RotateToken(t *testing.T) {
+	srv, ts := newTestServer(t)
+	adminToken := seedAdmin(t, srv)
+
+	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+		`{"username":"rotator","kind":"agent"}`, adminToken))
+	var created tokenResponse
+	json.NewDecoder(resp.Body).Decode(&created)
 	resp.Body.Close()
+	oldToken := created.Token
 
-	req2, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities/"+me.ID+"/revoke", nil)
-	req2.Header.Set("X-CSRF-Token", csrf)
-	resp2, err := client.Do(req2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != 400 {
-		t.Errorf("self-revoke status = %d, want 400", resp2.StatusCode)
-	}
-	_ = srv
-}
-
-func TestAdmin_BootstrapCode_OneTime(t *testing.T) {
-	srv, ts := newTestServer(t)
-	code, _, err := srv.Auth.CreateBootstrapCode(60*60*1e9, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Use once.
-	body1, _ := json.Marshal(setupRequest{Code: code, Name: "alice", Password: "correct-horse"})
-	resp1, err := http.Post(ts.URL+"/api/admin/setup", "application/json", bytes.NewReader(body1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp1.Body.Close()
-	if resp1.StatusCode != 201 {
-		t.Fatalf("first setup failed: %d", resp1.StatusCode)
-	}
-
-	// Second use must fail.
-	body2, _ := json.Marshal(setupRequest{Code: code, Name: "bob", Password: "correct-horse"})
-	resp2, err := http.Post(ts.URL+"/api/admin/setup", "application/json", bytes.NewReader(body2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != 401 {
-		t.Errorf("second use of code should be 401, got %d", resp2.StatusCode)
-	}
-}
-
-func TestAdmin_Rotate_ReplacesToken(t *testing.T) {
-	srv, ts := newTestServer(t)
-	client, csrf := bootstrapAdminFlow(t, srv, ts)
-
-	// Create an agent.
-	body := strings.NewReader(`{"name":"bot-rotate","kind":"agent"}`)
-	req, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities", body)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-CSRF-Token", csrf)
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tok tokenResponse
-	json.NewDecoder(resp.Body).Decode(&tok)
-	resp.Body.Close()
-	oldToken := tok.Token
-
-	// Rotate.
-	req2, _ := http.NewRequest("POST", ts.URL+"/api/admin/identities/"+tok.ID+"/rotate", nil)
-	req2.Header.Set("X-CSRF-Token", csrf)
-	resp2, err := client.Do(req2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rot tokenResponse
-	json.NewDecoder(resp2.Body).Decode(&rot)
+	resp2, _ := http.DefaultClient.Do(authReq(t, "POST",
+		ts.URL+"/api/admin/users/"+created.Username+"/tokens/"+created.TokenID+"/rotate",
+		"", adminToken))
+	var rotated tokenResponse
+	json.NewDecoder(resp2.Body).Decode(&rotated)
 	resp2.Body.Close()
-	if rot.Token == oldToken {
+	if rotated.Token == oldToken {
 		t.Error("rotated token should differ")
 	}
 
-	// Old token should fail.
-	gr1, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
-	gr1.Header.Set("Authorization", "Bearer "+oldToken)
-	r1, _ := http.DefaultClient.Do(gr1)
-	r1.Body.Close()
-	if r1.StatusCode != 401 {
-		t.Errorf("old token status = %d, want 401", r1.StatusCode)
+	gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr.Header.Set("Authorization", "Bearer "+oldToken)
+	r, _ := http.DefaultClient.Do(gr)
+	r.Body.Close()
+	if r.StatusCode != 401 {
+		t.Errorf("old token = %d, want 401", r.StatusCode)
 	}
-
-	// New token should work.
 	gr2, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
-	gr2.Header.Set("Authorization", "Bearer "+rot.Token)
+	gr2.Header.Set("Authorization", "Bearer "+rotated.Token)
 	r2, _ := http.DefaultClient.Do(gr2)
 	r2.Body.Close()
 	if r2.StatusCode != 200 {
-		t.Errorf("new token status = %d, want 200", r2.StatusCode)
+		t.Errorf("new token = %d, want 200", r2.StatusCode)
 	}
-	_ = srv
+}
+
+func TestAdmin_CannotDeactivateSelf(t *testing.T) {
+	srv, ts := newTestServer(t)
+	adminToken := seedAdmin(t, srv)
+
+	r, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", adminToken))
+	var me meResponse
+	json.NewDecoder(r.Body).Decode(&me)
+	r.Body.Close()
+
+	r2, err := http.DefaultClient.Do(authReq(t, "POST",
+		ts.URL+"/api/admin/users/"+me.Username+"/deactivate", "", adminToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Body.Close()
+	if r2.StatusCode != 400 {
+		t.Errorf("self-deactivate = %d, want 400", r2.StatusCode)
+	}
+}
+
+func TestAdmin_MultipleTokens(t *testing.T) {
+	srv, ts := newTestServer(t)
+	adminToken := seedAdmin(t, srv)
+
+	r, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+		`{"username":"multi","kind":"agent"}`, adminToken))
+	var first tokenResponse
+	json.NewDecoder(r.Body).Decode(&first)
+	r.Body.Close()
+
+	r2, _ := http.DefaultClient.Do(authReq(t, "POST",
+		ts.URL+"/api/admin/users/"+first.Username+"/tokens",
+		`{"label":"ci"}`, adminToken))
+	var second tokenResponse
+	json.NewDecoder(r2.Body).Decode(&second)
+	r2.Body.Close()
+	if first.Token == second.Token {
+		t.Error("second token should differ")
+	}
+
+	for _, tok := range []string{first.Token, second.Token} {
+		gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		gr.Header.Set("Authorization", "Bearer "+tok)
+		g, _ := http.DefaultClient.Do(gr)
+		g.Body.Close()
+		if g.StatusCode != 200 {
+			t.Errorf("token returned %d", g.StatusCode)
+		}
+	}
+
+	rv, _ := http.DefaultClient.Do(authReq(t, "POST",
+		ts.URL+"/api/admin/users/"+first.Username+"/tokens/"+first.TokenID+"/revoke",
+		"", adminToken))
+	rv.Body.Close()
+
+	gr1, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr1.Header.Set("Authorization", "Bearer "+first.Token)
+	g1, _ := http.DefaultClient.Do(gr1)
+	g1.Body.Close()
+	if g1.StatusCode != 401 {
+		t.Errorf("revoked = %d, want 401", g1.StatusCode)
+	}
+
+	gr2, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr2.Header.Set("Authorization", "Bearer "+second.Token)
+	g2, _ := http.DefaultClient.Do(gr2)
+	g2.Body.Close()
+	if g2.StatusCode != 200 {
+		t.Errorf("second token = %d, want 200", g2.StatusCode)
+	}
+}
+
+func TestUsersDirectory_AgentReadable(t *testing.T) {
+	srv, ts := newTestServer(t)
+	_ = seedAdmin(t, srv)
+	agentToken := seedAgent(t, srv, "agent1")
+	_ = seedAgent(t, srv, "agent2")
+
+	r, err := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/users", "", agentToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatalf("list users = %d", r.StatusCode)
+	}
+	var body struct {
+		Users []struct {
+			Username string `json:"username"`
+		} `json:"users"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if len(body.Users) < 3 {
+		t.Errorf("want >=3 users, got %d", len(body.Users))
+	}
+}
+
+func TestUsersResolve(t *testing.T) {
+	srv, ts := newTestServer(t)
+	_ = seedAdmin(t, srv)
+	agentToken := seedAgent(t, srv, "alice")
+	_ = seedAgent(t, srv, "bob")
+
+	r, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/users/resolve",
+		`{"usernames":["alice","nobody","BOB"]}`, agentToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 200 {
+		t.Fatalf("resolve = %d", r.StatusCode)
+	}
+	var body struct {
+		Users []struct{ Username string } `json:"users"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if len(body.Users) != 2 {
+		t.Errorf("want 2 resolved, got %d", len(body.Users))
+	}
 }

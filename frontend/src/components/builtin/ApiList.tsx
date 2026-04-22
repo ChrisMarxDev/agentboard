@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Download } from 'lucide-react'
+import { apiFetch } from '../../lib/session'
 
 interface ApiListProps {
   src: string
@@ -43,7 +44,9 @@ export function ApiList({
 
   const load = useCallback(async () => {
     try {
-      const r = await fetch(src)
+      // apiFetch only attaches the bearer to same-origin requests, so
+      // user-provided external URLs never leak the token.
+      const r = await apiFetch(src)
       if (!r.ok) throw new Error(`${src} → ${r.status}`)
       const data = await r.json()
       setRows(Array.isArray(data) ? (data as Row[]) : [])

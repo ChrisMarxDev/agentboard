@@ -116,11 +116,15 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {
-		// Admin routes — SessionMiddleware is scoped inside registerAdminRoutes
-		// so it only touches /api/admin/*. TokenMiddleware already skips this
-		// subtree via a prefix check; AuthorizeMiddleware is a no-op when no
-		// agent identity is in context.
+		// Admin routes — AdminRequired is scoped inside registerAdminRoutes
+		// so it only guards /api/admin/*. AuthorizeMiddleware is a no-op for
+		// admin users (they ignore per-user rules).
 		s.registerAdminRoutes(r)
+
+		// Users directory — readable by any authenticated token. Powers
+		// @mention autocomplete and assignee-field resolution.
+		r.Get("/users", s.handleListUsersPublic)
+		r.Post("/users/resolve", s.handleResolveUsernames)
 
 		// Data endpoints
 		r.Get("/data", s.handleGetAllData)

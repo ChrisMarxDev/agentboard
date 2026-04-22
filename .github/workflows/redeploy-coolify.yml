@@ -1,0 +1,42 @@
+name: Redeploy Coolify boards
+
+# Primary path: each Coolify app has its own GitHub webhook (configured in the
+# Coolify UI per app) and redeploys automatically on push to main. This
+# workflow is a backup / manual trigger for the "redeploy everything now" case
+# (e.g. forcing a rebuild after a Dockerfile fix, or fanning out a new
+# dependency without waiting for per-app triggers).
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Board name (leave blank to redeploy all agentboard-* apps)"
+        required: false
+        default: ""
+      force:
+        description: "Force rebuild (bypass Coolify's build cache)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: coolify-redeploy
+  cancel-in-progress: false
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Redeploy via Coolify API
+        env:
+          COOLIFY_URL:   ${{ secrets.COOLIFY_URL }}
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          BOARD:         ${{ inputs.board }}
+          FORCE:         ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          args=()
+          [[ "$FORCE" == "true" ]] && args+=("--force")
+          [[ -n "$BOARD" ]] && args+=("$BOARD")
+          ./scripts/redeploy-boards.sh "${args[@]}"

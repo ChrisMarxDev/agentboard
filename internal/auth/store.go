@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,14 +13,15 @@ import (
 
 // Standard errors. Handlers translate these to HTTP status codes.
 var (
-	ErrNotFound       = errors.New("not found")
-	ErrNameTaken      = errors.New("name already in use")
-	ErrRevoked        = errors.New("identity revoked")
-	ErrSessionExpired = errors.New("session expired")
-	ErrCodeInvalid    = errors.New("bootstrap code invalid or already used")
+	ErrNotFound        = errors.New("not found")
+	ErrUsernameTaken   = errors.New("username already in use")
+	ErrUserDeactivated = errors.New("user is deactivated")
+	ErrTokenRevoked    = errors.New("token revoked")
+	ErrImmutableField  = errors.New("username is immutable; use `agentboard admin rename-user` on the host")
 )
 
-// Kind enumerates the two identity realms.
+// Kind enumerates the two realms. Both auth via tokens; admin additionally
+// unlocks /api/admin/*.
 type Kind string
 
 const (
@@ -27,7 +29,7 @@ const (
 	KindAgent Kind = "agent"
 )
 
-// AccessMode controls how rules are evaluated for an agent identity.
+// AccessMode controls rule evaluation for a user's tokens.
 type AccessMode string
 
 const (
@@ -35,53 +37,40 @@ const (
 	ModeRestrictToList AccessMode = "restrict_to_list"
 )
 
-// Identity is one row in auth_identities.
-//
-// TokenHash and PasswordHash are never exposed over HTTP; they're internal
-// fields used by the middleware and login handler.
-type Identity struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Kind         Kind       `json:"kind"`
-	TokenHash    string     `json:"-"`
-	PasswordHash string     `json:"-"`
-	AccessMode   AccessMode `json:"access_mode"`
-	Rules        []Rule     `json:"rules"`
-	CreatedAt    time.Time  `json:"created_at"`
-	CreatedBy    string     `json:"created_by,omitempty"`
-	LastUsedAt   *time.Time `json:"last_used_at,omitempty"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
+// User is one row in users. The username is the primary key — no separate
+// id field. See AUTH.md for the reasoning.
+type User struct {
+	Username      string     `json:"username"`
+	DisplayName   string     `json:"display_name,omitempty"`
+	Kind          Kind       `json:"kind"`
+	AvatarColor   string     `json:"avatar_color,omitempty"`
+	AccessMode    AccessMode `json:"access_mode"`
+	Rules         []Rule     `json:"rules"`
+	CreatedAt     time.Time  `json:"created_at"`
+	CreatedBy     string     `json:"created_by,omitempty"`
+	DeactivatedAt *time.Time `json:"deactivated_at,omitempty"`
+
+	// Tokens, when populated by ListUsers(withTokens=true), holds every
+	// token owned by this user — metadata only, never plaintext or hash.
+	Tokens []UserToken `json:"tokens,omitempty"`
 }
 
-// Session is one row in auth_sessions.
-type Session struct {
-	ID         string
-	IdentityID string
-	CSRFToken  string
-	CreatedAt  time.Time
-	LastSeenAt time.Time
-	ExpiresAt  time.Time
-	UserAgent  string
-	IP         string
+// UserToken is one row in user_tokens. Tokens rotate and a user can hold
+// several, so tokens have their own uuid. The FK is users.username.
+type UserToken struct {
+	ID         string     `json:"id"`
+	Username   string     `json:"username"`
+	Label      string     `json:"label,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
 
-// BootstrapCode is one row in auth_bootstrap_codes.
-type BootstrapCode struct {
-	ID        string
-	CodeHash  string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	UsedAt    *time.Time
-	Note      string
-}
-
-// Store owns the auth-related tables. It reuses the data store's *sql.DB so
-// backups, WAL mode, and transactions apply uniformly across both realms.
+// Store owns the users and user_tokens tables.
 type Store struct {
 	db *sql.DB
 }
 
-// NewStore runs the auth migrations against db and returns a Store.
 func NewStore(db *sql.DB) (*Store, error) {
 	if err := migrate(db); err != nil {
 		return nil, err
@@ -90,23 +79,26 @@ func NewStore(db *sql.DB) (*Store, error) {
 }
 
 // ------------------------------------------------------------------
-// Identities
+// Users
 // ------------------------------------------------------------------
 
-// CreateIdentityParams bundles inputs for CreateIdentity. One of TokenHash
-// (agent) or PasswordHash (admin) must be set to match Kind.
-type CreateIdentityParams struct {
-	Name         string
-	Kind         Kind
-	TokenHash    string
-	PasswordHash string
-	AccessMode   AccessMode
-	Rules        []Rule
-	CreatedBy    string
+// CreateUserParams bundles inputs for CreateUser.
+type CreateUserParams struct {
+	Username    string
+	DisplayName string
+	Kind        Kind
+	AccessMode  AccessMode
+	Rules       []Rule
+	CreatedBy   string
 }
 
-// CreateIdentity inserts a new row. Returns ErrNameTaken if the name collides.
-func (s *Store) CreateIdentity(p CreateIdentityParams) (*Identity, error) {
+// CreateUser inserts a new user. Validates username format and uniqueness.
+// Does NOT mint a token — callers use CreateToken afterwards.
+func (s *Store) CreateUser(p CreateUserParams) (*User, error) {
+	p.Username = strings.ToLower(strings.TrimSpace(p.Username))
+	if err := ValidateUsername(p.Username); err != nil {
+		return nil, err
+	}
 	if p.AccessMode == "" {
 		p.AccessMode = ModeAllowAll
 	}
@@ -116,108 +108,86 @@ func (s *Store) CreateIdentity(p CreateIdentityParams) (*Identity, error) {
 	}
 
 	now := time.Now().UTC()
-	id := uuid.NewString()
-
 	_, err = s.db.Exec(
-		`INSERT INTO auth_identities
-		 (id, name, kind, token_hash, password_hash, access_mode, rules_json, created_at, created_by)
-		 VALUES (?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, NULLIF(?, ''))`,
-		id, p.Name, string(p.Kind), p.TokenHash, p.PasswordHash,
+		`INSERT INTO users (username, display_name, kind, avatar_color, access_mode, rules_json, created_at, created_by)
+		 VALUES (?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''))`,
+		p.Username, p.DisplayName, string(p.Kind), avatarColorForUsername(p.Username),
 		string(p.AccessMode), string(rulesJSON), now.Unix(), p.CreatedBy,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return nil, ErrNameTaken
+			return nil, ErrUsernameTaken
 		}
-		return nil, fmt.Errorf("insert identity: %w", err)
+		return nil, fmt.Errorf("insert user: %w", err)
 	}
-
-	return s.GetIdentity(id)
+	return s.GetUser(p.Username)
 }
 
-// GetIdentity returns the identity with the given id. Returns ErrNotFound
-// if no row matches.
-func (s *Store) GetIdentity(id string) (*Identity, error) {
-	return s.queryIdentity(`SELECT id, name, kind, token_hash, password_hash,
-	                               access_mode, rules_json, created_at, created_by,
-	                               last_used_at, revoked_at
-	                        FROM auth_identities WHERE id = ?`, id)
+// GetUser returns a user by username (case-insensitive).
+func (s *Store) GetUser(username string) (*User, error) {
+	return s.queryUser(`WHERE username = ? COLLATE NOCASE`, strings.ToLower(username))
 }
 
-// GetIdentityByName returns the identity with the given name, or ErrNotFound.
-func (s *Store) GetIdentityByName(name string) (*Identity, error) {
-	return s.queryIdentity(`SELECT id, name, kind, token_hash, password_hash,
-	                               access_mode, rules_json, created_at, created_by,
-	                               last_used_at, revoked_at
-	                        FROM auth_identities WHERE name = ?`, name)
-}
-
-// GetIdentityByTokenHash returns the agent identity whose token hash matches.
-// Returns ErrNotFound if no match, or ErrRevoked if the identity is revoked.
-func (s *Store) GetIdentityByTokenHash(hash string) (*Identity, error) {
-	ident, err := s.queryIdentity(`SELECT id, name, kind, token_hash, password_hash,
-	                                      access_mode, rules_json, created_at, created_by,
-	                                      last_used_at, revoked_at
-	                               FROM auth_identities
-	                               WHERE token_hash = ?`, hash)
-	if err != nil {
-		return nil, err
-	}
-	if ident.RevokedAt != nil {
-		return nil, ErrRevoked
-	}
-	return ident, nil
-}
-
-// ListIdentities returns all identities. Revoked ones are included (UI
-// filters them).
-func (s *Store) ListIdentities() ([]*Identity, error) {
-	rows, err := s.db.Query(`SELECT id, name, kind, token_hash, password_hash,
-	                                access_mode, rules_json, created_at, created_by,
-	                                last_used_at, revoked_at
-	                         FROM auth_identities
-	                         ORDER BY kind DESC, created_at ASC`)
+// ListUsers returns every user. When withTokens is true, each User's
+// Tokens field is populated.
+func (s *Store) ListUsers(withTokens bool) ([]*User, error) {
+	rows, err := s.db.Query(`SELECT username, display_name, kind, avatar_color,
+	                                access_mode, rules_json, created_at, created_by, deactivated_at
+	                         FROM users
+	                         ORDER BY kind DESC, username ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var out []*Identity
+	var users []*User
 	for rows.Next() {
-		ident, err := scanIdentity(rows)
+		u, err := scanUser(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, ident)
+		users = append(users, u)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if withTokens {
+		for _, u := range users {
+			tokens, err := s.ListTokensForUser(u.Username)
+			if err != nil {
+				return nil, err
+			}
+			u.Tokens = tokens
+		}
+	}
+	return users, nil
 }
 
-// HasAdmin returns true if at least one non-revoked admin identity exists.
-// Used by the setup flow to know whether it's the first-run case.
-func (s *Store) HasAdmin() (bool, error) {
+// HasAnyUser reports whether at least one active user exists. Used to
+// decide whether the server runs in "open loopback" mode at startup.
+func (s *Store) HasAnyUser() (bool, error) {
 	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM auth_identities
-	                      WHERE kind = 'admin' AND revoked_at IS NULL`).Scan(&n)
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE deactivated_at IS NULL`).Scan(&n)
 	return n > 0, err
 }
 
-// UpdateIdentity updates mutable fields. Only name, access_mode, and rules
-// are updatable via this method; secrets have dedicated rotate/password
-// endpoints.
-type UpdateIdentityParams struct {
-	Name       *string
-	AccessMode *AccessMode
-	Rules      *[]Rule
+// UpdateUserParams lists the fields normal edits can change. Notably
+// username is not in here — it's immutable via this path.
+type UpdateUserParams struct {
+	DisplayName *string
+	AccessMode  *AccessMode
+	Rules       *[]Rule
 }
 
-func (s *Store) UpdateIdentity(id string, p UpdateIdentityParams) (*Identity, error) {
-	existing, err := s.GetIdentity(id)
+// UpdateUser updates mutable user fields. To change the username, use the
+// RenameUser method (exposed only via CLI).
+func (s *Store) UpdateUser(username string, p UpdateUserParams) (*User, error) {
+	existing, err := s.GetUser(username)
 	if err != nil {
 		return nil, err
 	}
-	if p.Name != nil {
-		existing.Name = *p.Name
+	if p.DisplayName != nil {
+		existing.DisplayName = *p.DisplayName
 	}
 	if p.AccessMode != nil {
 		existing.AccessMode = *p.AccessMode
@@ -230,354 +200,377 @@ func (s *Store) UpdateIdentity(id string, p UpdateIdentityParams) (*Identity, er
 		return nil, fmt.Errorf("marshal rules: %w", err)
 	}
 	_, err = s.db.Exec(
-		`UPDATE auth_identities SET name = ?, access_mode = ?, rules_json = ? WHERE id = ?`,
-		existing.Name, string(existing.AccessMode), string(rulesJSON), id,
+		`UPDATE users SET display_name = NULLIF(?, ''), access_mode = ?, rules_json = ?
+		 WHERE username = ? COLLATE NOCASE`,
+		existing.DisplayName, string(existing.AccessMode), string(rulesJSON), existing.Username,
 	)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return nil, ErrNameTaken
-		}
 		return nil, err
 	}
-	return s.GetIdentity(id)
+	return s.GetUser(existing.Username)
 }
 
-// RotateToken sets a new token hash for an agent identity.
-func (s *Store) RotateToken(id, newTokenHash string) error {
-	res, err := s.db.Exec(
-		`UPDATE auth_identities SET token_hash = ? WHERE id = ? AND kind = 'agent'`,
-		newTokenHash, id,
-	)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// SetPassword replaces an admin identity's password hash.
-func (s *Store) SetPassword(id, newPasswordHash string) error {
-	res, err := s.db.Exec(
-		`UPDATE auth_identities SET password_hash = ? WHERE id = ? AND kind = 'admin'`,
-		newPasswordHash, id,
-	)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// Revoke marks an identity as revoked. Revocation is soft — the row is kept
-// for audit. Revoked identities fail token lookups and cannot log in.
-func (s *Store) Revoke(id string) error {
+// Deactivate marks a user as deactivated and revokes all of their tokens.
+// The username is reserved forever; it cannot be reused by a new user.
+func (s *Store) Deactivate(username string) error {
 	now := time.Now().UTC().Unix()
-	res, err := s.db.Exec(
-		`UPDATE auth_identities SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
-		now, id,
-	)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-// TouchLastUsed records that an identity was used in a request. Called
-// opportunistically from the token-auth middleware; not a hot path per
-// request (the middleware coalesces updates).
-func (s *Store) TouchLastUsed(id string) error {
-	_, err := s.db.Exec(
-		`UPDATE auth_identities SET last_used_at = ? WHERE id = ?`,
-		time.Now().UTC().Unix(), id,
-	)
-	return err
-}
-
-// ------------------------------------------------------------------
-// Sessions
-// ------------------------------------------------------------------
-
-// CreateSession opens an admin session for the given identity.
-func (s *Store) CreateSession(identityID, userAgent, ip string, ttl time.Duration) (*Session, error) {
-	sid, err := GenerateSessionID()
-	if err != nil {
-		return nil, err
-	}
-	csrf, err := GenerateSessionID() // reuse the 32-byte generator; shape is the same
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now().UTC()
-	sess := &Session{
-		ID:         sid,
-		IdentityID: identityID,
-		CSRFToken:  csrf,
-		CreatedAt:  now,
-		LastSeenAt: now,
-		ExpiresAt:  now.Add(ttl),
-		UserAgent:  userAgent,
-		IP:         ip,
-	}
-	_, err = s.db.Exec(
-		`INSERT INTO auth_sessions
-		 (id, identity_id, csrf_token, created_at, last_seen_at, expires_at, user_agent, ip)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sess.ID, sess.IdentityID, sess.CSRFToken,
-		sess.CreatedAt.Unix(), sess.LastSeenAt.Unix(), sess.ExpiresAt.Unix(),
-		sess.UserAgent, sess.IP,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("insert session: %w", err)
-	}
-	return sess, nil
-}
-
-// GetSession fetches a session by ID. Returns ErrNotFound if no match,
-// ErrSessionExpired if the session exists but has aged out (caller should
-// delete it).
-func (s *Store) GetSession(id string) (*Session, error) {
-	var sess Session
-	var createdAt, lastSeenAt, expiresAt int64
-	err := s.db.QueryRow(
-		`SELECT id, identity_id, csrf_token, created_at, last_seen_at, expires_at,
-		        COALESCE(user_agent, ''), COALESCE(ip, '')
-		 FROM auth_sessions WHERE id = ?`, id,
-	).Scan(&sess.ID, &sess.IdentityID, &sess.CSRFToken,
-		&createdAt, &lastSeenAt, &expiresAt, &sess.UserAgent, &sess.IP)
-	if err == sql.ErrNoRows {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	sess.CreatedAt = time.Unix(createdAt, 0).UTC()
-	sess.LastSeenAt = time.Unix(lastSeenAt, 0).UTC()
-	sess.ExpiresAt = time.Unix(expiresAt, 0).UTC()
-	if time.Now().After(sess.ExpiresAt) {
-		return &sess, ErrSessionExpired
-	}
-	return &sess, nil
-}
-
-// TouchSession bumps last_seen_at to now. Called on every admin request.
-func (s *Store) TouchSession(id string) error {
-	_, err := s.db.Exec(
-		`UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?`,
-		time.Now().UTC().Unix(), id,
-	)
-	return err
-}
-
-// DeleteSession removes a session.
-func (s *Store) DeleteSession(id string) error {
-	_, err := s.db.Exec(`DELETE FROM auth_sessions WHERE id = ?`, id)
-	return err
-}
-
-// DeleteSessionsForIdentity removes all sessions owned by an identity.
-// Called on password change, revocation, and admin reset.
-func (s *Store) DeleteSessionsForIdentity(identityID string) error {
-	_, err := s.db.Exec(`DELETE FROM auth_sessions WHERE identity_id = ?`, identityID)
-	return err
-}
-
-// PruneSessions deletes expired sessions. Called by a background job.
-func (s *Store) PruneSessions() error {
-	_, err := s.db.Exec(`DELETE FROM auth_sessions WHERE expires_at < ?`,
-		time.Now().UTC().Unix())
-	return err
-}
-
-// ------------------------------------------------------------------
-// Bootstrap codes
-// ------------------------------------------------------------------
-
-// CreateBootstrapCode issues a new one-time code. Returns the plaintext
-// (printed to the operator) and the stored row. The plaintext is NOT
-// recoverable from the DB — only the hash is stored.
-func (s *Store) CreateBootstrapCode(ttl time.Duration, note string) (string, *BootstrapCode, error) {
-	code, err := GenerateBootstrapCode()
-	if err != nil {
-		return "", nil, err
-	}
-	now := time.Now().UTC()
-	bc := &BootstrapCode{
-		ID:        uuid.NewString(),
-		CodeHash:  HashToken(code),
-		CreatedAt: now,
-		ExpiresAt: now.Add(ttl),
-		Note:      note,
-	}
-	_, err = s.db.Exec(
-		`INSERT INTO auth_bootstrap_codes (id, code_hash, created_at, expires_at, note)
-		 VALUES (?, ?, ?, ?, NULLIF(?, ''))`,
-		bc.ID, bc.CodeHash, bc.CreatedAt.Unix(), bc.ExpiresAt.Unix(), note,
-	)
-	if err != nil {
-		return "", nil, fmt.Errorf("insert bootstrap code: %w", err)
-	}
-	return code, bc, nil
-}
-
-// ConsumeBootstrapCode validates and marks a code as used atomically.
-// Returns ErrCodeInvalid if the code is unknown, expired, or already used.
-func (s *Store) ConsumeBootstrapCode(code string) error {
-	hash := HashToken(code)
-	now := time.Now().UTC().Unix()
-
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
-	var id string
-	var expiresAt int64
-	var usedAt sql.NullInt64
-	err = tx.QueryRow(
-		`SELECT id, expires_at, used_at FROM auth_bootstrap_codes WHERE code_hash = ?`,
-		hash,
-	).Scan(&id, &expiresAt, &usedAt)
-	if err == sql.ErrNoRows {
-		return ErrCodeInvalid
-	}
+	res, err := tx.Exec(`UPDATE users SET deactivated_at = ? WHERE username = ? COLLATE NOCASE AND deactivated_at IS NULL`, now, username)
 	if err != nil {
 		return err
 	}
-	if usedAt.Valid || expiresAt < now {
-		return ErrCodeInvalid
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
 	}
-	if _, err := tx.Exec(
-		`UPDATE auth_bootstrap_codes SET used_at = ? WHERE id = ?`, now, id,
-	); err != nil {
+	if _, err := tx.Exec(`UPDATE user_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE username = ? COLLATE NOCASE`, now, username); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// ListBootstrapCodes returns all non-expired, unused codes (hash only — the
-// plaintext cannot be recovered). Used by the admin UI to show outstanding
-// codes.
-func (s *Store) ListBootstrapCodes() ([]*BootstrapCode, error) {
-	now := time.Now().UTC().Unix()
+// RenameUser is the escape hatch for the typo-on-create case. Transactional.
+// Updates users PK, user_tokens.username, and returns a count of how many
+// rows were updated across tables. Callers (CLI) print that count so the
+// operator knows whether follow-up work is needed on free-text content.
+//
+// Content-side rewrites (MDX pages, data values containing `@old`) are NOT
+// performed — this is deliberate because free-text rewrites across a live
+// system are unsafe. The CLI warns.
+type RenameStats struct {
+	UsersUpdated  int
+	TokensUpdated int
+}
+
+// RenameUser replaces the username on a user plus every token that
+// references it. Fails if the new username is invalid or taken, or if the
+// old username doesn't exist.
+func (s *Store) RenameUser(oldUsername, newUsername string) (*RenameStats, error) {
+	oldUsername = strings.ToLower(strings.TrimSpace(oldUsername))
+	newUsername = strings.ToLower(strings.TrimSpace(newUsername))
+	if err := ValidateUsername(newUsername); err != nil {
+		return nil, err
+	}
+	if oldUsername == newUsername {
+		return &RenameStats{}, nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`UPDATE users SET username = ? WHERE username = ? COLLATE NOCASE`, newUsername, oldUsername)
+	if err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrUsernameTaken
+		}
+		return nil, fmt.Errorf("update users: %w", err)
+	}
+	usersUpdated, _ := res.RowsAffected()
+	if usersUpdated == 0 {
+		return nil, ErrNotFound
+	}
+	res2, err := tx.Exec(`UPDATE user_tokens SET username = ? WHERE username = ? COLLATE NOCASE`, newUsername, oldUsername)
+	if err != nil {
+		return nil, fmt.Errorf("update user_tokens: %w", err)
+	}
+	tokensUpdated, _ := res2.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &RenameStats{
+		UsersUpdated:  int(usersUpdated),
+		TokensUpdated: int(tokensUpdated),
+	}, nil
+}
+
+// ResolveUsernames batches a lookup. Unknown usernames are dropped
+// silently. Used by @mention rendering and by assignee validators.
+func (s *Store) ResolveUsernames(usernames []string) ([]*User, error) {
+	if len(usernames) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(usernames)), ",")
+	args := make([]any, len(usernames))
+	for i, u := range usernames {
+		args[i] = strings.ToLower(strings.TrimSpace(u))
+	}
+	query := `SELECT username, display_name, kind, avatar_color,
+	                 access_mode, rules_json, created_at, created_by, deactivated_at
+	          FROM users WHERE username IN (` + placeholders + `) COLLATE NOCASE`
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+// ------------------------------------------------------------------
+// Tokens
+// ------------------------------------------------------------------
+
+// CreateTokenParams bundles inputs for CreateToken.
+type CreateTokenParams struct {
+	Username  string
+	TokenHash string
+	Label     string
+}
+
+// CreateToken inserts a token for a user. Returns metadata; the plaintext
+// token lives only in whatever the caller generated and shows the operator
+// once.
+func (s *Store) CreateToken(p CreateTokenParams) (*UserToken, error) {
+	if p.TokenHash == "" {
+		return nil, fmt.Errorf("token hash required")
+	}
+	p.Username = strings.ToLower(strings.TrimSpace(p.Username))
+	now := time.Now().UTC()
+	tokenID := uuid.NewString()
+	_, err := s.db.Exec(
+		`INSERT INTO user_tokens (id, username, token_hash, label, created_at)
+		 VALUES (?, ?, ?, NULLIF(?, ''), ?)`,
+		tokenID, p.Username, p.TokenHash, p.Label, now.Unix(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert token: %w", err)
+	}
+	return s.GetToken(tokenID)
+}
+
+// GetToken returns one token row by its uuid.
+func (s *Store) GetToken(id string) (*UserToken, error) {
+	row := s.db.QueryRow(
+		`SELECT id, username, label, created_at, last_used_at, revoked_at
+		 FROM user_tokens WHERE id = ?`, id,
+	)
+	return scanToken(row)
+}
+
+// ListTokensForUser returns every token owned by a user (active + revoked).
+func (s *Store) ListTokensForUser(username string) ([]UserToken, error) {
 	rows, err := s.db.Query(
-		`SELECT id, code_hash, created_at, expires_at, used_at, COALESCE(note, '')
-		 FROM auth_bootstrap_codes
-		 WHERE used_at IS NULL AND expires_at >= ?
-		 ORDER BY created_at DESC`, now,
+		`SELECT id, username, label, created_at, last_used_at, revoked_at
+		 FROM user_tokens WHERE username = ? COLLATE NOCASE ORDER BY created_at ASC`,
+		strings.ToLower(username),
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	var out []*BootstrapCode
+	var out []UserToken
 	for rows.Next() {
-		var bc BootstrapCode
-		var createdAt, expiresAt int64
-		var usedAt sql.NullInt64
-		if err := rows.Scan(&bc.ID, &bc.CodeHash, &createdAt, &expiresAt, &usedAt, &bc.Note); err != nil {
+		t, err := scanToken(rows)
+		if err != nil {
 			return nil, err
 		}
-		bc.CreatedAt = time.Unix(createdAt, 0).UTC()
-		bc.ExpiresAt = time.Unix(expiresAt, 0).UTC()
-		if usedAt.Valid {
-			t := time.Unix(usedAt.Int64, 0).UTC()
-			bc.UsedAt = &t
-		}
-		out = append(out, &bc)
+		out = append(out, *t)
 	}
 	return out, rows.Err()
 }
 
-// DeleteBootstrapCode removes a code. Used when an admin wants to revoke
-// an outstanding code without waiting for expiry.
-func (s *Store) DeleteBootstrapCode(id string) error {
-	_, err := s.db.Exec(`DELETE FROM auth_bootstrap_codes WHERE id = ?`, id)
-	return err
+// RotateToken replaces a token's hash in place and clears revoked_at so a
+// previously-revoked row can be "un-revoked" by rotation. Label + user
+// association are preserved.
+func (s *Store) RotateToken(tokenID, newTokenHash string) error {
+	res, err := s.db.Exec(
+		`UPDATE user_tokens SET token_hash = ?, revoked_at = NULL WHERE id = ?`,
+		newTokenHash, tokenID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
-// PruneBootstrapCodes deletes expired and used codes older than a week.
-// Kept for a while after use for audit.
-func (s *Store) PruneBootstrapCodes() error {
-	cutoff := time.Now().UTC().Add(-7 * 24 * time.Hour).Unix()
+// RevokeToken soft-deletes a single token.
+func (s *Store) RevokeToken(tokenID string) error {
+	now := time.Now().UTC().Unix()
+	res, err := s.db.Exec(
+		`UPDATE user_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`,
+		now, tokenID,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ResolveToken takes a token hash and returns (user, token) for the
+// request. Errors:
+//   - ErrNotFound: no matching token
+//   - ErrTokenRevoked: token row is revoked
+//   - ErrUserDeactivated: user row is deactivated (still returns the
+//     partial structs so middleware can log)
+func (s *Store) ResolveToken(tokenHash string) (*User, *UserToken, error) {
+	row := s.db.QueryRow(
+		`SELECT u.username, u.display_name, u.kind, u.avatar_color,
+		        u.access_mode, u.rules_json, u.created_at, u.created_by, u.deactivated_at,
+		        t.id, t.username, t.label, t.created_at, t.last_used_at, t.revoked_at
+		 FROM user_tokens t JOIN users u ON u.username = t.username COLLATE NOCASE
+		 WHERE t.token_hash = ?`, tokenHash,
+	)
+	var (
+		u User
+		t UserToken
+
+		displayName sql.NullString
+		avatarColor sql.NullString
+		createdBy   sql.NullString
+		userCreated int64
+		deactivated sql.NullInt64
+		rulesJSON   string
+
+		tokenLabel    sql.NullString
+		tokenCreated  int64
+		tokenLastUsed sql.NullInt64
+		tokenRevoked  sql.NullInt64
+	)
+	err := row.Scan(
+		&u.Username, &displayName, &u.Kind, &avatarColor,
+		&u.AccessMode, &rulesJSON, &userCreated, &createdBy, &deactivated,
+		&t.ID, &t.Username, &tokenLabel, &tokenCreated, &tokenLastUsed, &tokenRevoked,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	u.DisplayName = displayName.String
+	u.AvatarColor = avatarColor.String
+	u.CreatedAt = time.Unix(userCreated, 0).UTC()
+	u.CreatedBy = createdBy.String
+	if deactivated.Valid {
+		tt := time.Unix(deactivated.Int64, 0).UTC()
+		u.DeactivatedAt = &tt
+	}
+	u.Rules = ensureRules(nil)
+	if rulesJSON != "" {
+		if err := json.Unmarshal([]byte(rulesJSON), &u.Rules); err != nil {
+			return nil, nil, fmt.Errorf("unmarshal rules: %w", err)
+		}
+	}
+	t.Label = tokenLabel.String
+	t.CreatedAt = time.Unix(tokenCreated, 0).UTC()
+	if tokenLastUsed.Valid {
+		tt := time.Unix(tokenLastUsed.Int64, 0).UTC()
+		t.LastUsedAt = &tt
+	}
+	if tokenRevoked.Valid {
+		tt := time.Unix(tokenRevoked.Int64, 0).UTC()
+		t.RevokedAt = &tt
+		return &u, &t, ErrTokenRevoked
+	}
+	if u.DeactivatedAt != nil {
+		return &u, &t, ErrUserDeactivated
+	}
+	return &u, &t, nil
+}
+
+// TouchTokenLastUsed bumps last_used_at. Called opportunistically by the
+// middleware, coalesced to one write per minute per token.
+func (s *Store) TouchTokenLastUsed(tokenID string) error {
 	_, err := s.db.Exec(
-		`DELETE FROM auth_bootstrap_codes
-		 WHERE (used_at IS NOT NULL AND used_at < ?) OR expires_at < ?`,
-		cutoff, cutoff,
+		`UPDATE user_tokens SET last_used_at = ? WHERE id = ?`,
+		time.Now().UTC().Unix(), tokenID,
 	)
 	return err
 }
 
 // ------------------------------------------------------------------
-// helpers
+// scanners
 // ------------------------------------------------------------------
 
-// scanIdentity reads one row from either a *sql.Row or *sql.Rows (both
-// satisfy the tiny rowScanner interface).
-func scanIdentity(r rowScanner) (*Identity, error) {
-	var ident Identity
-	var tokenHash, passwordHash, createdBy sql.NullString
+func scanUser(r rowScanner) (*User, error) {
+	var u User
+	var displayName, avatarColor, createdBy sql.NullString
 	var createdAt int64
-	var lastUsedAt, revokedAt sql.NullInt64
+	var deactivated sql.NullInt64
 	var rulesJSON string
-
-	err := r.Scan(&ident.ID, &ident.Name, &ident.Kind,
-		&tokenHash, &passwordHash, &ident.AccessMode, &rulesJSON,
-		&createdAt, &createdBy, &lastUsedAt, &revokedAt)
+	err := r.Scan(&u.Username, &displayName, &u.Kind, &avatarColor,
+		&u.AccessMode, &rulesJSON, &createdAt, &createdBy, &deactivated)
 	if err != nil {
 		return nil, err
 	}
-
-	ident.TokenHash = tokenHash.String
-	ident.PasswordHash = passwordHash.String
-	ident.CreatedAt = time.Unix(createdAt, 0).UTC()
-	ident.CreatedBy = createdBy.String
-
-	if lastUsedAt.Valid {
-		t := time.Unix(lastUsedAt.Int64, 0).UTC()
-		ident.LastUsedAt = &t
+	u.DisplayName = displayName.String
+	u.AvatarColor = avatarColor.String
+	u.CreatedBy = createdBy.String
+	u.CreatedAt = time.Unix(createdAt, 0).UTC()
+	if deactivated.Valid {
+		t := time.Unix(deactivated.Int64, 0).UTC()
+		u.DeactivatedAt = &t
 	}
-	if revokedAt.Valid {
-		t := time.Unix(revokedAt.Int64, 0).UTC()
-		ident.RevokedAt = &t
-	}
-	ident.Rules = ensureRules(nil)
+	u.Rules = ensureRules(nil)
 	if rulesJSON != "" {
-		if err := json.Unmarshal([]byte(rulesJSON), &ident.Rules); err != nil {
-			return nil, fmt.Errorf("unmarshal rules for %s: %w", ident.ID, err)
+		if err := json.Unmarshal([]byte(rulesJSON), &u.Rules); err != nil {
+			return nil, fmt.Errorf("unmarshal rules for %s: %w", u.Username, err)
 		}
 	}
-	return &ident, nil
+	return &u, nil
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func (s *Store) queryIdentity(query string, args ...any) (*Identity, error) {
-	row := s.db.QueryRow(query, args...)
-	ident, err := scanIdentity(row)
+func scanToken(r rowScanner) (*UserToken, error) {
+	var t UserToken
+	var label sql.NullString
+	var created int64
+	var lastUsed, revoked sql.NullInt64
+	err := r.Scan(&t.ID, &t.Username, &label, &created, &lastUsed, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	return ident, nil
+	t.Label = label.String
+	t.CreatedAt = time.Unix(created, 0).UTC()
+	if lastUsed.Valid {
+		tt := time.Unix(lastUsed.Int64, 0).UTC()
+		t.LastUsedAt = &tt
+	}
+	if revoked.Valid {
+		tt := time.Unix(revoked.Int64, 0).UTC()
+		t.RevokedAt = &tt
+	}
+	return &t, nil
 }
 
-// isUniqueViolation recognizes SQLite's unique-constraint error without
-// requiring a driver-specific import. We look at the error string because
-// modernc/sqlite surfaces these as plain errors.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) queryUser(whereClause string, args ...any) (*User, error) {
+	query := `SELECT username, display_name, kind, avatar_color,
+	                 access_mode, rules_json, created_at, created_by, deactivated_at
+	          FROM users ` + whereClause
+	row := s.db.QueryRow(query, args...)
+	u, err := scanUser(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return u, err
+}
+
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false

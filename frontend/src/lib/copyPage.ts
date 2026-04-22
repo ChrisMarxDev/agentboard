@@ -3,6 +3,7 @@
 // feedback regardless of which UI surface triggered the copy (shortcut, menu).
 
 import { beaconError } from './errorBeacon'
+import { apiFetch } from './session'
 
 export const COPY_EVENT = 'agentboard:page-copied'
 
@@ -35,7 +36,7 @@ export async function copyPageSource(pagePath: string): Promise<void> {
     return
   }
   try {
-    const res = await fetch(`/api/content/${encodeURI(pagePath)}`, {
+    const res = await apiFetch(`/api/content/${encodeURI(pagePath)}`, {
       headers: { Accept: 'text/markdown' },
     })
     if (!res.ok) {

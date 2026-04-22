@@ -9,63 +9,47 @@ import (
 	"time"
 )
 
-// Session cookie name. Must match the frontend.
-const SessionCookieName = "ab_session"
-
-// Session TTL — absolute. Idle timeout is handled separately by checking
-// LastSeenAt against a sliding window.
-const SessionTTL = 7 * 24 * time.Hour
-
-// IdleTimeout forces re-login after this much inactivity, independent of
-// the absolute TTL.
-const IdleTimeout = 2 * time.Hour
-
-// ctxKey is the type used for context values so our keys can't collide
-// with others.
+// ctxKey is the type used for context values so our keys can't collide.
 type ctxKey int
 
 const (
-	ctxIdentity ctxKey = iota + 1
-	ctxSession
+	ctxUser ctxKey = iota + 1
+	ctxToken
 )
 
-// IdentityFromContext returns the Identity attached to the request's context,
-// or nil if no auth middleware ran (open mode) or auth failed.
-func IdentityFromContext(ctx context.Context) *Identity {
-	v, _ := ctx.Value(ctxIdentity).(*Identity)
+// UserFromContext returns the User attached to the request, or nil if auth
+// didn't run (open mode) or no middleware attached one.
+func UserFromContext(ctx context.Context) *User {
+	v, _ := ctx.Value(ctxUser).(*User)
 	return v
 }
 
-// SessionFromContext returns the admin Session attached to the request's
-// context, or nil if the request wasn't admin-session-authenticated.
-func SessionFromContext(ctx context.Context) *Session {
-	v, _ := ctx.Value(ctxSession).(*Session)
+// TokenFromContext returns the specific token row used to authenticate the
+// request, or nil. Useful when we want to log which token performed a
+// write (a step down from just knowing the user).
+func TokenFromContext(ctx context.Context) *UserToken {
+	v, _ := ctx.Value(ctxToken).(*UserToken)
 	return v
 }
 
-// MiddlewareConfig tunes how the middlewares behave. Zero values are safe
-// defaults.
+// MiddlewareConfig tunes middleware behavior. Zero values are safe defaults.
 type MiddlewareConfig struct {
 	// OpenPaths are HTTP paths that skip all auth. /api/health is always
-	// open regardless; OpenPaths extends that list (currently used for
-	// /api/admin/setup and /api/admin/login).
+	// open regardless.
 	OpenPaths []string
 }
 
-// TokenMiddleware gates every non-open data-plane route by an agent token.
-// Flow:
+// TokenMiddleware resolves the Bearer / Basic / ?token= credential to a
+// user and attaches both to the request context.
 //
-//  1. If /api/health or an OPTIONS preflight → pass through.
-//  2. If no identities have ever been created AND no admin has ever been
-//     created → run in open mode. This preserves the "local-only, no auth"
-//     posture of `task run` and first-run.
-//  3. Otherwise resolve the presented token (Bearer, Basic password, or
-//     ?token=) to an identity. Missing/invalid → 401. Revoked → 401.
-//  4. Attach the identity to the request context and call the next handler.
-//     (Rule authorization happens in AuthorizeMiddleware below, which can be
-//     scoped to specific subtrees.)
+//  1. /api/health and OPTIONS preflights pass through.
+//  2. If no users exist yet (fresh install pre-bootstrap) the request
+//     passes through to preserve the legacy "loopback open" posture.
+//  3. Otherwise resolve the token. 401 on missing/unknown/revoked;
+//     403-ish falls to the admin gate if needed.
 //
-// last_used_at is bumped asynchronously so it doesn't slow the hot path.
+// last_used_at on the token row is bumped at most once per minute per
+// token so this stays off the hot path.
 func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http.Handler {
 	openSet := buildOpenSet(cfg.OpenPaths)
 	updater := newUsageUpdater(store)
@@ -77,15 +61,6 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 				return
 			}
 
-			// Admin endpoints are handled by SessionMiddleware; the token
-			// realm never reaches them.
-			if strings.HasPrefix(r.URL.Path, "/api/admin/") {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Open-mode shortcut: if there are literally no identities in
-			// the DB, the server runs open like before auth-v2 landed.
 			open, err := isFirstRun(store)
 			if err != nil {
 				http.Error(w, "auth backend error", http.StatusInternalServerError)
@@ -101,44 +76,38 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 				unauthorized(w)
 				return
 			}
-
-			ident, err := store.GetIdentityByTokenHash(HashToken(token))
+			user, tok, err := store.ResolveToken(HashToken(token))
 			if err != nil {
-				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrRevoked) {
+				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrUserDeactivated) {
 					unauthorized(w)
 					return
 				}
 				http.Error(w, "auth lookup error", http.StatusInternalServerError)
 				return
 			}
+			updater.touch(tok.ID)
 
-			// Only agents authenticate via tokens on the data plane. An admin
-			// row with a token_hash is unusual but not impossible; treat it
-			// like an agent for data-plane purposes (admin-plane still
-			// requires a cookie session).
-			updater.touch(ident.ID)
-
-			ctx := context.WithValue(r.Context(), ctxIdentity, ident)
+			ctx := context.WithValue(r.Context(), ctxUser, user)
+			ctx = context.WithValue(ctx, ctxToken, tok)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// AuthorizeMiddleware enforces the identity's access_mode + rules. Wrap it
-// around the subtree you want to gate (typically /api/*). It reads the
-// identity from context — only call after TokenMiddleware.
+// AuthorizeMiddleware enforces per-user access_mode + rules. Reads the
+// user from context — only call after TokenMiddleware.
 //
-// When no identity is attached (open-mode request), the middleware allows
-// the request: the gating already happened upstream.
+// Admin users are exempt — admin = full trust, rules don't apply. This
+// avoids the "admin wrote a bad rule and locked themselves out" footgun.
 func AuthorizeMiddleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ident := IdentityFromContext(r.Context())
-			if ident == nil {
+			user := UserFromContext(r.Context())
+			if user == nil || user.Kind == KindAdmin {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if !Authorize(ident.AccessMode, ident.Rules, r.Method, r.URL.Path) {
+			if !Authorize(user.AccessMode, user.Rules, r.Method, r.URL.Path) {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}
@@ -147,80 +116,21 @@ func AuthorizeMiddleware() func(http.Handler) http.Handler {
 	}
 }
 
-// SessionMiddleware gates /api/admin/* by a valid admin session cookie.
-// Open paths (setup, login) bypass the check — they're expected to run
-// before a session exists. Everything else 401s without a valid cookie.
-//
-// On success the session + identity are attached to context; handlers
-// pull them via SessionFromContext / IdentityFromContext.
-//
-// CSRF: state-changing methods (POST/PUT/PATCH/DELETE) also require an
-// X-CSRF-Token header matching the session's stored csrf token. The
-// token is exposed via GET /api/admin/me and is safe to stash in a
-// page-level JS variable because SameSite=Strict keeps the cookie
-// browser-origin only.
-func SessionMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http.Handler {
-	openSet := buildOpenSet(cfg.OpenPaths)
-
+// AdminRequired rejects requests whose user isn't an admin. Scope around
+// /api/admin/*.
+func AdminRequired() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if _, ok := openSet[r.URL.Path]; ok {
-				next.ServeHTTP(w, r)
+			user := UserFromContext(r.Context())
+			if user == nil || user.Kind != KindAdmin {
+				http.Error(w, "admin token required", http.StatusForbidden)
 				return
 			}
-
-			cookie, err := r.Cookie(SessionCookieName)
-			if err != nil || cookie.Value == "" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			sess, err := store.GetSession(cookie.Value)
-			if err != nil {
-				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrSessionExpired) {
-					http.Error(w, "unauthorized", http.StatusUnauthorized)
-					return
-				}
-				http.Error(w, "auth backend error", http.StatusInternalServerError)
-				return
-			}
-
-			// Idle timeout.
-			if time.Since(sess.LastSeenAt) > IdleTimeout {
-				_ = store.DeleteSession(sess.ID)
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			ident, err := store.GetIdentity(sess.IdentityID)
-			if err != nil {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			if ident.RevokedAt != nil || ident.Kind != KindAdmin {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-
-			// CSRF check on state-changing methods.
-			if isStateChanging(r.Method) {
-				presented := r.Header.Get("X-CSRF-Token")
-				if presented == "" || presented != sess.CSRFToken {
-					http.Error(w, "csrf token mismatch", http.StatusForbidden)
-					return
-				}
-			}
-
-			// Refresh last_seen_at inline; it's a single indexed UPDATE.
-			_ = store.TouchSession(sess.ID)
-
-			ctx := context.WithValue(r.Context(), ctxSession, sess)
-			ctx = context.WithValue(ctx, ctxIdentity, ident)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -229,8 +139,6 @@ func SessionMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) ht
 // helpers
 // ------------------------------------------------------------------
 
-// extractToken pulls a token from Authorization (Bearer), HTTP Basic password,
-// or ?token= query parameter — same shape as the legacy authMiddleware.
 func extractToken(r *http.Request) string {
 	if ah := r.Header.Get("Authorization"); ah != "" {
 		if rest, ok := strings.CutPrefix(ah, "Bearer "); ok && rest != "" {
@@ -244,7 +152,11 @@ func extractToken(r *http.Request) string {
 }
 
 func unauthorized(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", `Basic realm="agentboard"`)
+	// Deliberately no WWW-Authenticate header. That header is what triggers
+	// the browser's native Basic Auth popup; we don't want it because the
+	// SPA has its own /login page. Plain 401 lets fetch() see the status
+	// without the browser intercepting, and lets the apiFetch wrapper
+	// redirect to /login on its own terms.
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
@@ -269,18 +181,7 @@ func buildOpenSet(paths []string) map[string]struct{} {
 	return m
 }
 
-func isStateChanging(method string) bool {
-	switch method {
-	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-		return true
-	}
-	return false
-}
-
-// isFirstRun reports whether the server has zero identities — in which case
-// the middleware runs open. Cached for 1s to avoid a DB hit per request at
-// steady state; the cache expires quickly so the moment the first identity
-// is created, the next request (within a second) picks it up.
+// first-run cache so the users-count check isn't a per-request DB hit.
 var (
 	firstRunCacheMu     sync.Mutex
 	firstRunCacheValue  bool
@@ -297,11 +198,11 @@ func isFirstRun(store *Store) (bool, error) {
 	}
 	firstRunCacheMu.Unlock()
 
-	idents, err := store.ListIdentities()
+	has, err := store.HasAnyUser()
 	if err != nil {
 		return false, err
 	}
-	isFirst := len(idents) == 0
+	isFirst := !has
 
 	firstRunCacheMu.Lock()
 	firstRunCacheValue = isFirst
@@ -311,18 +212,14 @@ func isFirstRun(store *Store) (bool, error) {
 	return isFirst, nil
 }
 
-// InvalidateFirstRunCache lets handlers that just created the first identity
-// force the next request to re-check, avoiding a one-second window where
-// the open-mode shortcut is still true.
 func InvalidateFirstRunCache() {
 	firstRunCacheMu.Lock()
 	firstRunCacheSet = false
 	firstRunCacheMu.Unlock()
 }
 
-// usageUpdater coalesces last_used_at bumps so we don't issue a DB write
-// on every request for a hot token. At most one write per identity per
-// minute.
+// usageUpdater coalesces last_used_at bumps to one write per minute per
+// token so the hot path stays allocation-only.
 type usageUpdater struct {
 	store *Store
 	mu    sync.Mutex
@@ -333,16 +230,14 @@ func newUsageUpdater(store *Store) *usageUpdater {
 	return &usageUpdater{store: store, seen: make(map[string]time.Time)}
 }
 
-func (u *usageUpdater) touch(id string) {
+func (u *usageUpdater) touch(tokenID string) {
 	u.mu.Lock()
-	last, ok := u.seen[id]
+	last, ok := u.seen[tokenID]
 	if ok && time.Since(last) < time.Minute {
 		u.mu.Unlock()
 		return
 	}
-	u.seen[id] = time.Now()
+	u.seen[tokenID] = time.Now()
 	u.mu.Unlock()
-	// Coalescing to 1/minute keeps this off the hot path without a goroutine —
-	// async writes against SQLite can collide with reads under test-suite load.
-	_ = u.store.TouchLastUsed(id)
+	_ = u.store.TouchTokenLastUsed(tokenID)
 }

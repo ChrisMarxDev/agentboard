@@ -5,6 +5,8 @@ import Kbd from './Kbd'
 import ShortcutsHelp from './ShortcutsHelp'
 import { useKeyboardShortcuts, type ShortcutMap } from '../../hooks/useKeyboardShortcuts'
 import { usePages } from '../../hooks/usePages'
+import { useFiles } from '../../hooks/useFiles'
+import { buildContentTree, flattenContentTreePageHrefs } from '../../lib/contentTree'
 import { GrabTray } from './GrabTray'
 import CopyToast from './CopyToast'
 import { copyPageSource, pagePathFromLocation } from '../../lib/copyPage'
@@ -46,6 +48,16 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [navWidth])
 
   const pages = usePages()
+  const { files } = useFiles()
+
+  // j/k and digit shortcuts traverse pages in the same visual order the sidebar
+  // renders (folders > indexPage, then children, then sibling pages — all
+  // alphabetical at each level). Computing this from the content tree keeps
+  // keyboard navigation and sidebar ordering in lockstep.
+  const orderedHrefs = useMemo(
+    () => flattenContentTreePageHrefs(buildContentTree(pages, files)),
+    [pages, files]
+  )
 
   const shortcuts = useMemo<ShortcutMap>(() => {
     if (helpOpen) {
@@ -63,26 +75,26 @@ export default function Layout({ children }: { children: ReactNode }) {
       },
     }
 
-    if (pages.length > 0) {
-      const currentIdx = pages.findIndex(p => p.path === location.pathname)
-      const wrap = (i: number) => (i + pages.length) % pages.length
+    if (orderedHrefs.length > 0) {
+      const currentIdx = orderedHrefs.indexOf(location.pathname)
+      const wrap = (i: number) => (i + orderedHrefs.length) % orderedHrefs.length
       map.j = () => {
         const next = currentIdx < 0 ? 0 : wrap(currentIdx + 1)
-        navigate(pages[next].path)
+        navigate(orderedHrefs[next])
       }
       map.k = () => {
-        const prev = currentIdx < 0 ? pages.length - 1 : wrap(currentIdx - 1)
-        navigate(pages[prev].path)
+        const prev = currentIdx < 0 ? orderedHrefs.length - 1 : wrap(currentIdx - 1)
+        navigate(orderedHrefs[prev])
       }
-      for (let i = 0; i < Math.min(9, pages.length); i++) {
+      for (let i = 0; i < Math.min(9, orderedHrefs.length); i++) {
         const digit = String(i + 1)
-        const target = pages[i].path
+        const target = orderedHrefs[i]
         map[digit] = () => navigate(target)
       }
     }
 
     return map
-  }, [helpOpen, pages, location.pathname, navigate])
+  }, [helpOpen, orderedHrefs, location.pathname, navigate])
 
   useKeyboardShortcuts(shortcuts, !kiosk)
 

@@ -1,3 +1,5 @@
+import { apiFetch, getToken } from './session'
+
 /**
  * Beacon a render-time error to the server so agents can see what broke.
  * Never throws — a failing beacon must not become the second failure.
@@ -34,13 +36,17 @@ export function beaconError(payload: BeaconPayload): void {
   const body = JSON.stringify({ ...payload, page })
 
   try {
-    // Prefer sendBeacon so the post survives page navigation. Falls back to fetch.
+    // Prefer sendBeacon so the post survives page navigation. Falls back
+    // to apiFetch. sendBeacon can't set headers, so we attach ?token= for
+    // authenticated instances — same fallback the SSE connection uses.
     if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      const tok = getToken()
+      const url = tok ? `/api/errors?token=${encodeURIComponent(tok)}` : '/api/errors'
       const blob = new Blob([body], { type: 'application/json' })
-      navigator.sendBeacon('/api/errors', blob)
+      navigator.sendBeacon(url, blob)
       return
     }
-    fetch('/api/errors', {
+    apiFetch('/api/errors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
