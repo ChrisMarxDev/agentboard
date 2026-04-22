@@ -80,6 +80,20 @@ A thin backend discovery layer (e.g. walk `files/foo/*`, parse a manifest) is fi
 
 **Concrete heuristic:** if the PR adds more than ~50 frontend LOC for a new content type, stop and ask whether a generic component + an authored page would do the job instead.
 
+## 10. Version compositions, not components
+
+What a user creates is a **composition** — a page that arranges bricks and feeds them data. That composition is versioned, rolled back, audited. The bricks themselves (built-in components, user-authored `.jsx`, future plugins) are stable primitives with backwards-compatible contracts. A brick's implementation evolves through software releases; a composition evolves through user writes. Don't conflate the two histories.
+
+The test: *can a page written today still render against a brick updated tomorrow?* If yes, the brick's contract held. If no, it's a bug in the plugin system, not something the content layer should paper over.
+
+Concretely:
+
+- **`content_history` covers pages, files, data keys** — everything the user composed. Not components.
+- **Component updates are software releases**, rolled forward/back through the update channel, not through the content timeline.
+- **Missing or failed bricks render a graceful placeholder** ("GithubIssues not installed"). They don't take the page down.
+
+The plugin ecosystem (`spec-plugins.md`) is the contract side of this principle: it's what keeps "the brick honors its contract" from being wishful thinking.
+
 ---
 
 ## How to use this file
