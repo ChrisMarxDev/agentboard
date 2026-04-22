@@ -10,12 +10,55 @@ import PageActionsMenu from './PageActionsMenu'
 import FileViewer from '../files/FileViewer'
 import FolderView from './FolderView'
 import { GrabbableHeading } from './GrabbableHeading'
+import { MissingBrick } from './MissingBrick'
+
+// Cache MissingBrick stand-ins per-name at the module level so React sees a
+// stable component reference across renders. Without this, each render
+// produced a fresh arrow function and React's reconciler blew up.
+const missingBrickCache = new Map<string, React.ComponentType>()
+function getMissingBrick(name: string): React.ComponentType {
+  let C = missingBrickCache.get(name)
+  if (!C) {
+    C = () => <MissingBrick name={name} />
+    C.displayName = `MissingBrick(${name})`
+    missingBrickCache.set(name, C)
+  }
+  return C
+}
+
+// buildComponentMap assembles the full component map MDX receives. It
+// starts from the registry + grabbable heading overrides, then scans the
+// page source for unknown uppercase JSX tags and fills them with
+// MissingBrick stand-ins. The spread MDX runs internally then carries the
+// placeholders through without losing them (a Proxy wouldn't survive the
+// spread).
+function buildComponentMap(source: string): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    ...getComponents(),
+    h1: (p: { children?: React.ReactNode }) => <GrabbableHeading level={1}>{p.children}</GrabbableHeading>,
+    h2: (p: { children?: React.ReactNode }) => <GrabbableHeading level={2}>{p.children}</GrabbableHeading>,
+    h3: (p: { children?: React.ReactNode }) => <GrabbableHeading level={3}>{p.children}</GrabbableHeading>,
+  }
+  // Scan for `<Foo ...>` or `<Foo/>` where Foo is PascalCase (JSX component).
+  // Conservative regex: lookbehind-free so it works in Safari.
+  const unknown = new Set<string>()
+  const re = /<([A-Z][A-Za-z0-9]*)\b/g
+  let match: RegExpExecArray | null
+  while ((match = re.exec(source)) !== null) {
+    const name = match[1]
+    if (!(name in base)) unknown.add(name)
+  }
+  for (const name of unknown) {
+    base[name] = getMissingBrick(name)
+  }
+  return base
+}
 import { usePages } from '../../hooks/usePages'
 import { useFiles } from '../../hooks/useFiles'
 import { buildContentTree, findFolder, type ContentFolder } from '../../lib/contentTree'
 
 type Resolved =
-  | { kind: 'page'; Content: React.ComponentType; title?: string }
+  | { kind: 'page'; Content: React.ComponentType; title?: string; source: string }
   | { kind: 'file' }
   | { kind: 'folder'; folder: ContentFolder }
   | { kind: 'missing' }
@@ -58,7 +101,7 @@ export default function PageRenderer() {
           ...runtime,
           baseUrl: import.meta.url,
         })
-        setResolved({ kind: 'page', Content: MDXContent as React.ComponentType, title })
+        setResolved({ kind: 'page', Content: MDXContent as React.ComponentType, title, source })
         setLoading(false)
         return
       }
@@ -147,14 +190,7 @@ export default function PageRenderer() {
     components: Record<string, unknown>
     data: Record<string, unknown>
   }>
-  const components = {
-    ...getComponents(),
-    // Swap in grabbable variants for H1/H2/H3 so doc-style pages can be
-    // picked section-by-section without any authoring changes.
-    h1: (p: { children?: React.ReactNode }) => <GrabbableHeading level={1}>{p.children}</GrabbableHeading>,
-    h2: (p: { children?: React.ReactNode }) => <GrabbableHeading level={2}>{p.children}</GrabbableHeading>,
-    h3: (p: { children?: React.ReactNode }) => <GrabbableHeading level={3}>{p.children}</GrabbableHeading>,
-  }
+  const components = buildComponentMap(resolved.source)
 
   return (
     <div className="relative">
