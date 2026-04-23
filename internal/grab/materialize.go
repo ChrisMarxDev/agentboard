@@ -90,40 +90,53 @@ func (m *Materializer) Materialize(picks []Pick) []Section {
 		keep    bool
 	}
 	items := make([]resolved, len(picks))
+	pageCollision := false
 	for i, p := range picks {
 		s, start, end := m.materializeOne(p)
 		items[i] = resolved{section: s, page: p.Page, start: start, end: end, keep: true}
+		if !pageCollision {
+			for j := 0; j < i; j++ {
+				if items[j].page == p.Page {
+					pageCollision = true
+					break
+				}
+			}
+		}
 	}
 
 	// Dedupe: sort indices by (page, start ASC, length DESC) so parents come
 	// before children within a page. Walk; mark any item whose [start,end) is
 	// fully contained within an earlier kept item on the same page as dropped.
-	order := make([]int, len(items))
-	for i := range order {
-		order[i] = i
-	}
-	sort.SliceStable(order, func(i, j int) bool {
-		a, b := items[order[i]], items[order[j]]
-		if a.page != b.page {
-			return a.page < b.page
+	// Overlap is only possible between picks that share a page, so agents
+	// gathering picks from distinct pages skip the sort + O(n²) walk entirely.
+	if pageCollision {
+		order := make([]int, len(items))
+		for i := range order {
+			order[i] = i
 		}
-		if a.start != b.start {
-			return a.start < b.start
-		}
-		return (a.end - a.start) > (b.end - b.start)
-	})
-	for ii, oi := range order {
-		if !items[oi].keep || items[oi].section.Missing != "" || items[oi].end <= items[oi].start {
-			continue
-		}
-		for jj := 0; jj < ii; jj++ {
-			oj := order[jj]
-			if !items[oj].keep || items[oj].page != items[oi].page {
+		sort.SliceStable(order, func(i, j int) bool {
+			a, b := items[order[i]], items[order[j]]
+			if a.page != b.page {
+				return a.page < b.page
+			}
+			if a.start != b.start {
+				return a.start < b.start
+			}
+			return (a.end - a.start) > (b.end - b.start)
+		})
+		for ii, oi := range order {
+			if !items[oi].keep || items[oi].section.Missing != "" || items[oi].end <= items[oi].start {
 				continue
 			}
-			if items[oj].start <= items[oi].start && items[oj].end >= items[oi].end {
-				items[oi].keep = false
-				break
+			for jj := 0; jj < ii; jj++ {
+				oj := order[jj]
+				if !items[oj].keep || items[oj].page != items[oi].page {
+					continue
+				}
+				if items[oj].start <= items[oi].start && items[oj].end >= items[oi].end {
+					items[oi].keep = false
+					break
+				}
 			}
 		}
 	}
@@ -255,17 +268,18 @@ var headingRegex = regexp.MustCompile(`(?m)^(#{1,3})\s+(.+?)\s*$`)
 // findHeadingBySlug locates a heading whose slug matches headingSlug, then
 // returns the text, body (heading line through the last line before the next
 // heading of equal-or-higher level), the level, and the byte range.
+//
+// Fenced code blocks on an authoring page are rare, so we avoid copying the
+// match slice up front just to exclude fenced headings — a single substring
+// probe lets the common fence-free path skip every fence check entirely.
 func findHeadingBySlug(source, headingSlug string) (text, body string, level, start, end int, ok bool) {
 	matches := headingRegex.FindAllStringSubmatchIndex(source, -1)
-	// Strip out headings that sit inside a fenced code block.
-	filtered := make([][]int, 0, len(matches))
-	for _, m := range matches {
-		if !isInsideFence(source, m[0]) {
-			filtered = append(filtered, m)
-		}
-	}
+	hasFence := strings.Contains(source, "```")
 
-	for i, m := range filtered {
+	for i, m := range matches {
+		if hasFence && isInsideFence(source, m[0]) {
+			continue
+		}
 		lvl := m[3] - m[2] // length of the '#' group
 		t := strings.TrimSpace(source[m[4]:m[5]])
 		if Slug(t) != headingSlug {
@@ -273,10 +287,13 @@ func findHeadingBySlug(source, headingSlug string) (text, body string, level, st
 		}
 		sectionStart := m[0]
 		sectionEnd := len(source)
-		for j := i + 1; j < len(filtered); j++ {
-			nlvl := filtered[j][3] - filtered[j][2]
+		for j := i + 1; j < len(matches); j++ {
+			if hasFence && isInsideFence(source, matches[j][0]) {
+				continue
+			}
+			nlvl := matches[j][3] - matches[j][2]
 			if nlvl <= lvl {
-				sectionEnd = filtered[j][0]
+				sectionEnd = matches[j][0]
 				break
 			}
 		}
