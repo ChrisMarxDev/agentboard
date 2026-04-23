@@ -65,6 +65,7 @@ Don't mock the database in handler tests — the SQLite layer is fast, and mocks
 - Keep packages focused: `internal/data` owns storage, `internal/server` owns HTTP, `internal/mcp` owns MCP. Cross-package leakage is a red flag.
 - Error returns, not panics. Surface errors up to the handler; the handler decides the HTTP status.
 - No CGO. AgentBoard uses pure-Go SQLite (`modernc.org/sqlite`) on purpose — adding a CGO dependency breaks the static-binary promise.
+- **Optimize the happy path, pessimize the rare branch.** If an error or edge case fires <1% of the time, don't allocate or bookkeep on every call to make that branch faster. Don't accumulate a `[]string` of "work done" for a rollback that almost never runs; don't copy a slice upfront to filter out items that almost never appear; don't pre-compute metadata the happy path never reads. On failure, redo the work down a different branch (applying the undo instead of the apply) — slow is fine when it's rare. A cheap probe (`strings.Contains`, a length check, a page-collision scan) is often enough to detect the rare case and skip the machinery entirely. Memory is speed: every allocation costs cache locality on every call, and the error path costs nothing when errors don't happen.
 
 **Frontend:**
 

@@ -108,6 +108,20 @@ body of second
 			t.Fatal("nonexistent slug should be !ok")
 		}
 	})
+	t.Run("headings inside fenced code blocks are skipped", func(t *testing.T) {
+		fenced := "## Real\n\n```\n## Fake\n```\n\n## Next\n"
+		text, body, _, _, _, ok := findHeadingBySlug(fenced, "real")
+		if !ok || text != "Real" {
+			t.Fatalf("real: ok=%v text=%q", ok, text)
+		}
+		// Section boundary should skip the fake heading and stop at "Next".
+		if strings.Contains(body, "Next") {
+			t.Fatalf("section should stop at the next real H2; body=%q", body)
+		}
+		if _, _, _, _, _, ok := findHeadingBySlug(fenced, "fake"); ok {
+			t.Fatal("fenced heading should not be discoverable as a target")
+		}
+	})
 }
 
 func TestIsInsideFence(t *testing.T) {
