@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/christophermarx/agentboard/internal/project"
+	"gopkg.in/yaml.v3"
 )
 
 // ErrStale is returned by WritePageIfMatch / DeletePageIfMatch when the
@@ -60,6 +61,14 @@ type PageInfo struct {
 	File   string `json:"file"`
 	Title  string `json:"title"`
 	Source string `json:"source"`
+	// Summary is a short, agent-authored description pulled from the page's
+	// YAML frontmatter (`summary:` field). Used by search to pre-expand
+	// semantic surface — an agent writing the page knows its use cases
+	// and mentions them here so search finds the page later.
+	Summary string `json:"summary"`
+	// Tags are authored in frontmatter (`tags: [foo, bar]`) and let search
+	// filter by topic in addition to full-text matching.
+	Tags []string `json:"tags"`
 	// Etag is a content-addressed version identifier — sha256(source) prefix.
 	// Handlers echo it as the HTTP ETag header; callers send it back in
 	// If-Match for optimistic concurrency.
@@ -94,17 +103,20 @@ func (pm *PageManager) ScanPages() {
 	// Scan index.md
 	indexPath := pm.project.IndexFile()
 	if content, err := os.ReadFile(indexPath); err == nil {
-		title, source := parseFrontmatter(string(content))
+		fm, source := parseFrontmatter(string(content))
+		title := fm.Title
 		if title == "" {
 			title = "Home"
 		}
 		pm.pages["index"] = &PageInfo{
-			Path:   "/",
-			File:   "index.md",
-			Title:  title,
-			Source: source,
-			Etag:   pageEtag(source),
-			Order:  0,
+			Path:    "/",
+			File:    "index.md",
+			Title:   title,
+			Source:  source,
+			Summary: fm.Summary,
+			Tags:    fm.Tags,
+			Etag:    pageEtag(source),
+			Order:   0,
 		}
 	}
 
@@ -145,7 +157,8 @@ func (pm *PageManager) ScanPages() {
 		}
 		urlPath := "/" + pagePath
 
-		title, source := parseFrontmatter(string(content))
+		fm, source := parseFrontmatter(string(content))
+		title := fm.Title
 		if title == "" {
 			title = titleCase(strings.ReplaceAll(filepath.Base(pagePath), "-", " "))
 		}
@@ -153,11 +166,13 @@ func (pm *PageManager) ScanPages() {
 		collected = append(collected, scanned{
 			pagePath: pagePath,
 			info: &PageInfo{
-				Path:   urlPath,
-				File:   filepath.Join("content", relPath),
-				Title:  title,
-				Source: source,
-				Etag:   pageEtag(source),
+				Path:    urlPath,
+				File:    filepath.Join("content", relPath),
+				Title:   title,
+				Source:  source,
+				Summary: fm.Summary,
+				Tags:    fm.Tags,
+				Etag:    pageEtag(source),
 			},
 		})
 		return nil
@@ -315,29 +330,36 @@ func (pm *PageManager) MovePage(from, to string) error {
 	return nil
 }
 
-// parseFrontmatter extracts title from YAML frontmatter and returns the remaining content.
-func parseFrontmatter(content string) (title string, source string) {
+// frontmatter captures the authored metadata at the top of a page. Fields
+// are YAML-unmarshaled from the block between two `---` lines. Missing
+// fields stay at their zero value — agents can write a page without any
+// of them and the server won't reject it (per #8); search quality just
+// degrades for that page until a summary is filled in.
+type frontmatter struct {
+	Title   string   `yaml:"title"`
+	Summary string   `yaml:"summary"`
+	Tags    []string `yaml:"tags"`
+}
+
+// parseFrontmatter extracts the YAML frontmatter block and returns the
+// remaining source. Unrecognized fields are ignored; malformed YAML leaves
+// the returned struct zero-valued and passes the raw content through as
+// source so the page still renders.
+func parseFrontmatter(content string) (fm frontmatter, source string) {
 	if !strings.HasPrefix(content, "---\n") {
-		return "", content
+		return fm, content
 	}
 
 	end := strings.Index(content[4:], "\n---\n")
 	if end == -1 {
-		return "", content
+		return fm, content
 	}
 
-	frontmatter := content[4 : 4+end]
+	block := content[4 : 4+end]
 	source = content[4+end+5:] // skip the closing ---\n
 
-	// Simple title extraction from frontmatter
-	for _, line := range strings.Split(frontmatter, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "title:") {
-			title = strings.TrimSpace(strings.TrimPrefix(line, "title:"))
-			title = strings.Trim(title, `"'`)
-			break
-		}
-	}
-
-	return title, source
+	// Best-effort: ignore unmarshal errors so a typo'd frontmatter doesn't
+	// break the page. Title falls back to the filename-derived title upstream.
+	_ = yaml.Unmarshal([]byte(block), &fm)
+	return fm, source
 }

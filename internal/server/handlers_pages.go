@@ -83,6 +83,12 @@ func (s *Server) handleListPages(w http.ResponseWriter, r *http.Request) {
 			if allowed["source"] {
 				row["source"] = p.Source
 			}
+			if allowed["summary"] {
+				row["summary"] = p.Summary
+			}
+			if allowed["tags"] {
+				row["tags"] = p.Tags
+			}
 			if allowed["etag"] {
 				row["etag"] = p.Etag
 			}
@@ -153,12 +159,14 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 
 	// Default: return page metadata + source + last-edited meta.
 	payload := map[string]any{
-		"path":   page.Path,
-		"file":   page.File,
-		"title":  page.Title,
-		"source": page.Source,
-		"etag":   page.Etag,
-		"order":  page.Order,
+		"path":    page.Path,
+		"file":    page.File,
+		"title":   page.Title,
+		"source":  page.Source,
+		"summary": page.Summary,
+		"tags":    page.Tags,
+		"etag":    page.Etag,
+		"order":   page.Order,
 	}
 	if meta != nil {
 		payload["last_actor"] = meta.LastActor

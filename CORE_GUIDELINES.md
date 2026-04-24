@@ -98,6 +98,26 @@ Concretely:
 
 The plugin ecosystem (`spec-plugins.md`) is the contract side of this principle: it's what keeps "the brick honors its contract" from being wishful thinking.
 
+## 11. Leverage agents; stay dependency-free
+
+The backend never takes on work that an agent could do. No backend LLM calls, no external model APIs, no language-processing services baked into the server. If a capability needs semantic judgment (summarizing, tagging, classifying, disambiguating, extracting keywords), the writing agent produces the artifact at write time and the backend stores it.
+
+This is what keeps #1 honest as the product grows. Every feature that looks like "we need AI in the server" is actually a prompt we haven't written yet — steer the authoring agent through tool descriptions, schemas, and response hints, and the artifact shows up in the write payload. The agents using AgentBoard are already LLMs; the backend doesn't need its own.
+
+The test: *does this feature require the backend to call an LLM or speak to an external semantic service?* If yes, rework it as an instruction to the authoring agent, delivered through tool schema and response hints.
+
+## 12. Responses are repair manuals (poka-yoke)
+
+Every public response — successful *and* errored — is written for the agent that will act on it. Errors say exactly what went wrong, what the expected shape was, and where possible include a corrected example. Success responses include hints when the call was valid but suboptimal (missing summary, stale cache, deprecated param, unindexed field).
+
+The product enforces correct usage through response design, not through docs the agent may or may not have read. An agent should be able to call a tool incorrectly, receive the 4xx, and self-correct on the next call without a human intervening. Same for a valid-but-thin call: the 2xx tells it how to be a better citizen.
+
+Responses follow a stable shape across tools and versions. Error codes are snake_case, documented, and don't change silently. Agents learn the shape once and generalize.
+
+This is the positive counterpart to #8: #8 says *don't reject content for format*, this says *when you do reject — for safety invariants, missing required params, bad paths — the response is a repair manual, not a stack trace.*
+
+The test: *if an agent calls this wrong, does the response tell it how to succeed?* If the answer is "read the docs," the response is wrong.
+
 ---
 
 ## How to use this file
