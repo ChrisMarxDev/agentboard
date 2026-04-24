@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
+	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
 func (s *Server) toolDefinitions() []ToolDef {
@@ -100,13 +102,32 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_write_page",
-			Description: "Create or update a dashboard page with MDX content.",
+			Name: "agentboard_write_page",
+			Description: "Create or update a page in the shared knowledge base. " +
+				"Source is MDX — starts with a YAML frontmatter block (title, summary, tags), then the body. " +
+				"Summary and tags aren't decorative: they drive how agentboard_search ranks this page. " +
+				"A well-summarized page is findable even when searchers use different vocabulary than the body (e.g. searching \"blog post\" finds a page titled \"social voice guidelines\" because the summary mentions blog posts). " +
+				"Skipping the frontmatter is allowed but the write response will nudge you to add one.\n\n" +
+				"Example source:\n" +
+				"---\n" +
+				"title: Social Voice Guidelines\n" +
+				"summary: Tone and voice for blog posts, social media, marketing copy, newsletters.\n" +
+				"tags: [voice, content, writing]\n" +
+				"---\n" +
+				"\n" +
+				"# Body\n" +
+				"Your prose here.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"path":   map[string]string{"type": "string", "description": "Page path (e.g. index, ops)"},
-					"source": map[string]string{"type": "string", "description": "MDX source content"},
+					"path": map[string]string{
+						"type":        "string",
+						"description": "Page path (e.g. docs/voice, ops/deploy). Becomes the URL and the filename (sans .md).",
+					},
+					"source": map[string]string{
+						"type":        "string",
+						"description": "Full MDX source — frontmatter block followed by body. Title/summary/tags live in the frontmatter.",
+					},
 				},
 				"required": []string{"path", "source"},
 			},
@@ -867,12 +888,35 @@ func (s *Server) toolWritePage(args map[string]json.RawMessage) (interface{}, *R
 	path := getString(args, "path")
 	source := getString(args, "source")
 	if path == "" || source == "" {
-		return nil, &RPCError{Code: -32602, Message: "path and source required"}
+		return nil, &RPCError{
+			Code: -32602,
+			Message: "path and source required. " +
+				"path is the URL slug (e.g. \"docs/voice\"); source is the full MDX with YAML frontmatter.",
+		}
 	}
 	if err := s.Pages.WritePage(path, source); err != nil {
 		return nil, &RPCError{Code: -32000, Message: err.Error()}
 	}
-	return mcpContent(fmt.Sprintf("Page %s written successfully", path)), nil
+
+	// Successful write — compose a response that includes any quality
+	// hints (#12: the happy path is also a repair manual). Hints come
+	// from inspecting the page we just wrote.
+	var b strings.Builder
+	fmt.Fprintf(&b, "Page %s written successfully.", path)
+
+	normalized := strings.TrimSuffix(path, ".md")
+	if normalized == "" || normalized == "index" {
+		normalized = "index"
+	}
+	if page := s.Pages.GetPage(normalized); page != nil {
+		for _, h := range mdx.PageHints(page) {
+			fmt.Fprintf(&b, "\n\n[hint:%s] %s", h.Code, h.Message)
+			if h.Example != "" {
+				fmt.Fprintf(&b, "\n\nExample:\n%s", h.Example)
+			}
+		}
+	}
+	return mcpContent(b.String()), nil
 }
 
 func (s *Server) toolDeletePage(args map[string]json.RawMessage) (interface{}, *RPCError) {

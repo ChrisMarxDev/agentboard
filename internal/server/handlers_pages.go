@@ -254,6 +254,11 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	if page != nil {
 		resp["etag"] = page.Etag
 		w.Header().Set("ETag", `"`+page.Etag+`"`)
+		// Quality hints (#12 poka-yoke): the 2xx tells the author how to be
+		// a better citizen. Empty when the page is well-formed.
+		if hints := mdx.PageHints(page); len(hints) > 0 {
+			resp["hints"] = hints
+		}
 	}
 	resp["last_actor"] = actor
 	respondJSON(w, http.StatusOK, resp)
