@@ -218,15 +218,26 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_search",
-			Description: "Full-text search over every page in the project. Returns ranked hits with path, title, and a short snippet highlighting the match. Prefer this over list_pages + read_page when you know what you're looking for but not where it lives.",
+			Name: "agentboard_search",
+			Description: "Search the shared knowledge base for pages relevant to the task at hand. " +
+				"Ranks over title, author-written summary, tags, and body — title and summary matches outrank body matches. " +
+				"Each hit returns path, title, summary, tags, a highlighted snippet, and last-edited attribution (writer, updated_at) — " +
+				"enough to decide whether to open the page with agentboard_read_page without reading the full body. " +
+				"Before creating a new page, search here for an existing one on the same topic.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"q":     map[string]string{"type": "string", "description": "Query. Whitespace-separated terms are ANDed. Quote for exact phrases."},
+					"q": map[string]string{
+						"type":        "string",
+						"description": "Query. Whitespace-separated terms are ANDed. Quote for exact phrases. May be empty when filtering by tags.",
+					},
+					"tags": map[string]any{
+						"type":        "array",
+						"description": "Optional tag filter. Hits must carry at least one of the listed tags. Use when you know the topic (e.g. [\"voice\"], [\"runbook\"]).",
+						"items":       map[string]string{"type": "string"},
+					},
 					"limit": map[string]any{"type": "number", "description": "Max hits (default 20, cap 100)"},
 				},
-				"required": []string{"q"},
 			},
 		},
 		{
@@ -625,9 +636,29 @@ func (s *Server) toolSearch(args map[string]json.RawMessage) (interface{}, *RPCE
 		return map[string]any{"hits": []any{}}, nil
 	}
 	q := getString(args, "q")
-	if q == "" {
-		return nil, &RPCError{Code: -32602, Message: "q is required"}
+
+	var tags []string
+	if raw, ok := args["tags"]; ok {
+		if err := json.Unmarshal(raw, &tags); err != nil {
+			return nil, &RPCError{
+				Code: -32602,
+				Message: "tags must be an array of strings, e.g. [\"voice\", \"runbook\"]. " +
+					"Got: " + string(raw),
+			}
+		}
 	}
+
+	// q may be empty when tags are provided — filter-only queries are valid
+	// (e.g. "show me every runbook"). Reject only when both are empty, and
+	// tell the agent what to do next.
+	if q == "" && len(tags) == 0 {
+		return nil, &RPCError{
+			Code: -32602,
+			Message: "provide either q (free text) or tags (topic filter) — both empty returns nothing. " +
+				"Examples: {\"q\":\"blog post\"} or {\"tags\":[\"voice\"]} or {\"q\":\"tone\",\"tags\":[\"voice\"]}.",
+		}
+	}
+
 	limit := 20
 	if raw, ok := args["limit"]; ok {
 		var n int
@@ -635,7 +666,7 @@ func (s *Server) toolSearch(args map[string]json.RawMessage) (interface{}, *RPCE
 			limit = n
 		}
 	}
-	hits, err := s.Search.Query(q, limit)
+	hits, err := s.Search.Query(q, tags, limit)
 	if err != nil {
 		return nil, &RPCError{Code: -32000, Message: err.Error()}
 	}

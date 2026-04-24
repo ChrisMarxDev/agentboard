@@ -220,7 +220,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	// index drifts, a server restart rebuilds from disk.
 	if s.Search != nil {
 		if p := s.Pages.GetPage(normalizedPath); p != nil {
-			_ = s.Search.IndexPage(p.Path, p.Title, p.Source)
+			_ = s.Search.IndexPage(p.Path, p.Title, p.Summary, p.Tags, p.Source)
 		}
 	}
 

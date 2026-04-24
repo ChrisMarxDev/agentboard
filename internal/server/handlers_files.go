@@ -171,7 +171,7 @@ func (s *Server) reindexUploadedPage(name string) {
 	pageKey = strings.TrimSuffix(pageKey, "/SKILL")
 	if s.Search != nil {
 		if p := s.Pages.GetPage(pageKey); p != nil {
-			_ = s.Search.IndexPage(p.Path, p.Title, p.Source)
+			_ = s.Search.IndexPage(p.Path, p.Title, p.Summary, p.Tags, p.Source)
 		}
 	}
 	s.Broadcaster.Broadcast(SSEEvent{

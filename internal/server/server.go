@@ -139,7 +139,7 @@ func New(cfg ServerConfig) *Server {
 	// failing the boot.
 	var searchStore *mdx.SearchStore
 	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ss, err := mdx.NewSearchStore(dber.DB()); err == nil {
+		if ss, err := mdx.NewSearchStore(dber.DB(), metaStore); err == nil {
 			searchStore = ss
 			// Prime the index from whatever's on disk. Zero-cost on a
 			// fresh project; O(N) on an existing one.
