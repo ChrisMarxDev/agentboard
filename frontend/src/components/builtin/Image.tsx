@@ -3,6 +3,9 @@ import { useData } from '../../hooks/useData'
 import { resolveFileUrl, type FileRef } from '../../lib/fileUrl'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
+type Radius = 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'full' | number
+type Align = 'left' | 'center' | 'right'
+
 interface ImageProps {
   source?: string
   src?: string
@@ -10,9 +13,11 @@ interface ImageProps {
   width?: number | string
   height?: number | string
   fit?: 'contain' | 'cover' | 'fill' | 'none'
+  radius?: Radius
+  align?: Align
 }
 
-export function Image({ source, src, alt, width, height, fit = 'contain' }: ImageProps) {
+export function Image({ source, src, alt, width, height, fit = 'contain', radius = 'md', align = 'left' }: ImageProps) {
   const { data, loading } = useData(source ?? '')
 
   // When src is explicit, skip the data hook's round-trip entirely.
@@ -56,6 +61,11 @@ export function Image({ source, src, alt, width, height, fit = 'contain' }: Imag
   const finalWidth = width ?? dataWidth
   const finalHeight = height ?? dataHeight
   const finalSrc = nonce > 0 ? appendQuery(resolved, `_=${nonce}`) : resolved
+  const borderRadius = radiusToCss(radius)
+  const [marginLeft, marginRight] =
+    align === 'center' ? ['auto', 'auto'] :
+    align === 'right'  ? ['auto', '0'] :
+                         ['0', 'auto']
 
   return (
     <img
@@ -64,12 +74,15 @@ export function Image({ source, src, alt, width, height, fit = 'contain' }: Imag
       width={finalWidth}
       height={finalHeight}
       loading="lazy"
-      className="my-2 rounded-md"
+      className="my-2"
       style={{
         maxWidth: '100%',
         height: finalHeight ? undefined : 'auto',
         objectFit: fit,
         display: 'block',
+        borderRadius,
+        marginLeft,
+        marginRight,
       }}
       onLoad={() => { resetBeacon('Image', source ?? finalSrc) }}
       onError={() => {
@@ -85,4 +98,16 @@ export function Image({ source, src, alt, width, height, fit = 'contain' }: Imag
 
 function appendQuery(url: string, q: string): string {
   return url.includes('?') ? `${url}&${q}` : `${url}?${q}`
+}
+
+function radiusToCss(r: Radius): string {
+  if (typeof r === 'number') return `${r}px`
+  switch (r) {
+    case 'none': return '0'
+    case 'sm':   return '4px'
+    case 'md':   return '6px'
+    case 'lg':   return '8px'
+    case 'xl':   return '12px'
+    case 'full': return '9999px'
+  }
 }

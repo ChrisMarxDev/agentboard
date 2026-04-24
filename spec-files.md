@@ -179,7 +179,9 @@ Inline image. Resolves `source` → URL, renders `<img>`.
 - `alt` (string)
 - `width` (number, CSS px)
 - `height` (number, CSS px)
-- `fit` (string) — `contain` (default) | `cover`
+- `fit` (string) — `contain` (default) | `cover` | `fill` | `none` (CSS `object-fit`)
+- `radius` (string | number) — corner rounding. Presets `none` | `sm` | `md` (default) | `lg` | `xl` | `full`, or a number for px.
+- `align` (string) — horizontal placement in its container: `left` (default) | `center` | `right`. Only visible when the image is narrower than the container.
 
 **URL resolution** (used by both `<Image>` and `<File>`):
 1. If the string starts with `http://` or `https://` → use as-is

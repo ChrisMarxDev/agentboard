@@ -68,6 +68,17 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 				r.Post("/revoke", s.handleRevokeToken)
 			})
 		})
+
+		// Shares — admin view over every unrevoked share token on the
+		// instance. Revoke cascades to view_sessions (handled by the
+		// existing /api/share/{id} DELETE handler).
+		r.Get("/shares", s.handleAdminListShares)
+
+		// Webhooks — every subscription instance-wide, revoked or not.
+		r.Get("/webhooks", s.handleAdminListWebhooks)
+
+		// Teams — create/update/delete + member ops.
+		s.registerAdminTeamRoutes(r)
 	})
 }
 

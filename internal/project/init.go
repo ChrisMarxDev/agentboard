@@ -71,7 +71,7 @@ const skillsPageMd = `# Skills
 
 Anthropic-format skills hosted on this AgentBoard. Agents discover them via ` + "`GET /api/skills`" + ` (or the ` + "`agentboard_list_skills`" + ` MCP tool) and fetch a zip bundle from ` + "`GET /api/skills/<slug>`" + `.
 
-A skill is any folder under ` + "`files/skills/<slug>/`" + ` containing ` + "`SKILL.md`" + ` with ` + "`name`" + ` and ` + "`description`" + ` in YAML frontmatter. Nothing on disk is marked as special — the location + manifest are the only signal.
+A skill is any folder under ` + "`content/skills/<slug>/`" + ` containing ` + "`SKILL.md`" + ` with ` + "`name`" + ` and ` + "`description`" + ` in YAML frontmatter. Uploads go through the ` + "`/api/files/`" + ` endpoint; on disk they land in the content tree (content/ and files/ are one consolidated folder — see CORE_GUIDELINES §9). Nothing on disk is marked as special — the location + manifest are the only signal.
 
 <Card title="Registered skills">
   <ApiList
@@ -80,7 +80,7 @@ A skill is any folder under ` + "`files/skills/<slug>/`" + ` containing ` + "`SK
     descriptionKey="description"
     idKey="slug"
     downloadPrefix="/api/skills/"
-    empty="No skills hosted yet. Write one at files/skills/<slug>/SKILL.md."
+    empty="No skills hosted yet. Write one at content/skills/<slug>/SKILL.md via PUT /api/files/skills/<slug>/SKILL.md."
     refreshOn="agentboard:file-updated"
   />
 </Card>
@@ -99,7 +99,7 @@ Use ` + "`agentboard_write_file`" + ` with path ` + "`skills/my-skill/SKILL.md`"
 </Card>
 `
 
-// seededSkillManifest is the SKILL.md seeded under files/skills/agentboard/
+// seededSkillManifest is the SKILL.md seeded under content/skills/agentboard/
 // on first-run project init. It documents the skill-hosting convention by
 // being an example of it, and teaches any agent that fetches it how to
 // interact with AgentBoard. Format mirrors Anthropic's skill spec: YAML
@@ -263,12 +263,12 @@ func InitProject(projectPath string) (*Project, error) {
 	return proj, nil
 }
 
-// seedAgentboardSkill creates files/skills/agentboard/{SKILL.md, examples.md}
+// seedAgentboardSkill creates content/skills/agentboard/{SKILL.md, examples.md}
 // with the seeded content. Called from InitProject; safe to call even if the
 // folder already exists — overwrites only the two seeded files and leaves any
 // other content alone.
 func seedAgentboardSkill(projectPath string) error {
-	skillDir := filepath.Join(projectPath, "files", "skills", "agentboard")
+	skillDir := filepath.Join(projectPath, "content", "skills", "agentboard")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		return err
 	}

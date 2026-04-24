@@ -43,24 +43,26 @@ Never use `--project default`. Never use `~/.agentboard/default/`. This instance
 
 ## Authenticating against the dev instance
 
-The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health` returns `401 Unauthorized` without a Bearer token. If you hit 401:
+The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health` returns `401 Unauthorized` without a Bearer token.
 
-1. Check whether the instance has an admin user:
-   ```bash
-   ./agentboard --project agentboard-dev admin list
-   ```
-   Empty table → no one has bootstrapped. Fix with:
-   ```bash
-   ./agentboard --project agentboard-dev admin mint-admin bootstrap
-   ```
-   It prints the token once. Stash it in an env var for the session:
-   ```bash
-   export AB_TOKEN=ab_<the printed token>
-   ```
-2. Use the token on every request:
-   ```bash
-   curl -H "Authorization: Bearer $AB_TOKEN" http://localhost:3000/api/content | jq
-   ```
+**The dev token lives at `/tmp/agentboard-token`.** It's a working admin token for `@chris` on the `agentboard-dev` project. Read it into the session and use it as a Bearer:
+
+```bash
+export AB_TOKEN=$(cat /tmp/agentboard-token)
+curl -H "Authorization: Bearer $AB_TOKEN" http://localhost:3000/api/content | jq
+```
+
+The file is outside the repo tree (in `/tmp`), so it will never be committed. If a session's permission policy blocks reading it directly, ask the user to paste the token — don't try to bypass.
+
+If `/tmp/agentboard-token` is missing or the token is 401'ing (rotated, revoked), recover with the admin CLI — ask the user before minting, since each mint-admin call creates a new identity:
+
+```bash
+./agentboard --project agentboard-dev admin list                    # verify state
+./agentboard --project agentboard-dev admin rotate chris <label>    # rotate existing token
+./agentboard --project agentboard-dev admin mint-admin <username>   # last resort — creates new user
+```
+
+Whichever path, write the fresh token back to `/tmp/agentboard-token` (mode `600`) so the next session picks it up.
 
 **Never fall back to writing `content/…md` files directly on disk.** The file watcher accepts it, but direct disk writes bypass auth, activity attribution, rate limits, `content_history`, and optimistic concurrency. It's a product-invariant violation — if you can't authenticate, that's a config problem worth stopping to report, not routing around.
 
@@ -75,6 +77,7 @@ If the user just shipped something (landed a commit, says "we shipped X", asks f
 1. **Write a feature page** under `content/features/<slug>.md` via `PUT /api/content/features/<slug>` or MCP `agentboard_write_page`. Use the feature-page template below.
 2. **Update the feature list data** at `dev.features.shipped` (array of `{id, title, status: "done", landed_at}`) via `agentboard_set` or `PUT /api/data/dev.features.shipped`. The home page Kanban/List reads from this.
 3. **Bump relevant metrics** — `dev.components.count`, `dev.mcp.tools`, `dev.tests.passing`, etc.
+4. **If the session was a bigger phase** (multi-day push, rewrote a subsystem, shipped a cohort of related features together), **also write a `/showcase/<session-slug>` page** — see the "Showcase folder" section below.
 
 ### Feature page template
 
@@ -116,6 +119,102 @@ Each card's source is a `dev.features.<slug>.*` data key. Seed them in the same 
 
 ---
 
+## Showcase folder — one page per major session
+
+`/showcase/<session-slug>` is the narrative timeline of the project. **Every bigger feature session gets one page there.** Sidebar-sorted by order, the folder becomes a browsable history of *how the product evolved* — not just *what's in it right now*.
+
+A "bigger session" is any of:
+
+- A multi-day push against a single theme (view broker, auth rework, approval)
+- A cohort of related features shipped together (e.g. v0.5 dogfood cut landing kanban + public-routes + onboarding + share + approval in one session)
+- A rewrite of an existing subsystem where the *before/after* story is itself interesting
+
+Small one-off tweaks don't get a showcase page — those live on feature pages or in `dev.recent_commits`. The bar: **would someone reading the repo history want to see this session in a single page, with live data and a clear "what changed"?**
+
+### Slugs
+
+Use a descriptive kebab-case slug. Examples of good slugs from actual sessions:
+
+- `v0-5-dogfood-cut` — the cohort of 5 dogfood-ready features
+- `view-broker` — the read-path rewrite
+- `auth-tokens` — the agent/admin token migration (if that were a showcase)
+
+Don't prefix with a date; slugs live alongside an explicit `shipped_at` data key on the page. Don't make the slug the feature name if the session landed several features — use the theme.
+
+### Template
+
+```mdx
+# <Session theme>
+
+<one-paragraph lede answering: what problem did this session solve, and what shape does the answer take?>
+
+## Shipped
+
+<Deck>
+  <Card title="<feature 1>"><Status source="showcase.<slug>.feature1.status" /></Card>
+  <Card title="<feature 2>"><Status source="showcase.<slug>.feature2.status" /></Card>
+  … one Card per concrete deliverable
+</Deck>
+
+## By the numbers
+
+<Deck>
+  <Card title="<metric>"><Counter source="showcase.<slug>.metric_a" label="…" /></Card>
+  …
+</Deck>
+
+## The big idea
+
+<Card title="Before">…</Card>
+<Card title="After">…</Card>
+
+## How it works
+
+Explain the mechanism, with one <Code> block showing the shape of the API / the new convention.
+
+## What got deleted
+
+<Card title="Legacy the axe took">
+  - bullet list of removed code / old behaviour / obsolete patterns
+</Card>
+
+## Phases shipped
+
+<Card title="In order">
+  <Kanban source="showcase.<slug>.timeline" groupBy="status" columns={["planned","in_progress","done"]} />
+</Card>
+
+## Invariants
+
+<Card title="Provable, not aspirational">
+  <Table source="showcase.<slug>.invariants" />
+</Card>
+
+## Try it yourself
+
+A numbered list of 3-5 things the reader can do in this running instance to see the session's work in action.
+```
+
+### Data-key namespace
+
+Showcase pages read from `showcase.<slug>.*` — do **not** reuse `demo.*` (that's for the first-run-default project's seeds) or `dev.*` (that's for the live project dashboard). Typical shapes:
+
+- `showcase.<slug>.shipped_at` — ISO date string
+- `showcase.<slug>.<feature>.status` — `{state, label, detail}` for Status card
+- `showcase.<slug>.timeline` — array `[{id, title, status, order}]` for Kanban
+- `showcase.<slug>.invariants` — array `[{rule, status, proof}]` for Table
+- `showcase.<slug>.metric_*` — numbers for Counter cards
+
+Seed these in parallel with the `PUT /api/content/showcase/<slug>` call so the page isn't empty on first load.
+
+### Sidebar ordering
+
+The content tree sorts subpages alphabetically by path. When the session naturally has a chronological ordering, prefix slugs with `NN-` (e.g. `01-v0-5-dogfood-cut`, `02-view-broker`) so the sidebar reads top-to-bottom in session order. Don't re-number existing slugs when inserting a new one — take the next available number.
+
+Keep the showcase folder's root page (`/showcase`) as an index that lists every session with a one-line summary — again driven by a `showcase.index` data key so the timeline itself is live.
+
+---
+
 ## Data-key conventions
 
 | Key | Shape | Purpose |
@@ -132,7 +231,7 @@ Each card's source is a `dev.features.<slug>.*` data key. Seed them in the same 
 | `dev.seams` | array of `{name, status, breaks_when}` | seams_to_watch.md distilled |
 | `dev.recent_commits` | array of `{timestamp, level, message}` | Log component input (use `git log --oneline -20 --format='%ad %s' --date=short` for timestamps) |
 
-Use the **`dev.*` namespace** exclusively. Don't write to `welcome.*` (that's the default project's seed) or `demo.*`/`showcase.*` (those are the default project's demo namespaces).
+Use **`dev.*`** for live project metrics and **`showcase.*`** for per-session showcase page data (see "Showcase folder" above). Don't write to `welcome.*` (that's the default project's seed) or `demo.*` (that's for the default project's demo pages).
 
 ---
 
@@ -149,6 +248,8 @@ The dashboard should exercise a broad set of components — it's our own visual 
 - **Markdown** (the component, dynamically-loaded) for summaries that change often
 - **File** for linking downloadable project artifacts (a PDF of the spec, an architecture SVG)
 - **ApiList** for surfacing any `/api/*` endpoint that returns an array of objects (skills, errors, pages…) — prefer this over a bespoke React route when you want a listing page. See `content/skills.md` for the canonical example. Per CORE_GUIDELINES §9.
+- **Mention** for `@username` and `@team` pills. Resolution order: user → stored team → reserved (`@all`, `@admins`, `@agents`, `@here`) → plain text.
+- **TeamRoster** (`<TeamRoster slug="marketing" />`) for a roster card on MDX pages — header pill + description + member chips with optional role labels.
 
 One rule: each feature page must use at least **three distinct components** plus a Mermaid diagram. If a feature has nothing diagrammable, it's probably not interesting enough to have its own page — roll it into a sibling.
 
@@ -176,25 +277,32 @@ When the user asks what's currently on the dashboard:
 
 ---
 
-## Hosting skills under files/skills/
+## Hosting skills under content/skills/
 
 AgentBoard's skills surface is a read-view on top of generic file storage. A
-skill is any folder under `files/skills/<slug>/` containing a `SKILL.md` with
-`name` + `description` in YAML frontmatter (Anthropic format). The storage is
-ignorant of skill semantics — nothing on disk is "marked" as a skill; the
-folder's location and the manifest are the only signal.
+skill is any folder under `content/skills/<slug>/` containing a `SKILL.md`
+with `name` + `description` in YAML frontmatter (Anthropic format). The
+storage is ignorant of skill semantics — nothing on disk is "marked" as a
+skill; the folder's location and the manifest are the only signal.
+
+> The REST path is still `/api/files/skills/<slug>/…` (historical name — the
+> `files/` and `content/` trees were consolidated into one folder, see
+> CORE_GUIDELINES §9). On disk that resolves to `content/skills/<slug>/`.
 
 When working in this repo and a new skill needs hosting or updating:
 
-1. Write the manifest via `agentboard_write_file` to `skills/<slug>/SKILL.md`
-   (path is relative to `files/`, so no `files/` prefix in the MCP call).
+1. Write the manifest via `PUT /api/files/skills/<slug>/SKILL.md` (or the MCP
+   tool `agentboard_write_file` with path `skills/<slug>/SKILL.md`). A `.md`
+   upload triggers an inline page reindex, so the SKILL renders at
+   `/skills/<slug>/SKILL` and is full-text searchable immediately.
 2. Upload any supporting files to the same folder.
 3. Verify with `agentboard_list_skills` — the skill should appear with its
    slug, name, and description.
 4. Test the bundle endpoint: `GET /api/skills/<slug>` returns a zip.
 
-Avoid teaching users about `files/skills/` directly — they should go through
-the agent. The convention is enforced by documentation here, not in code.
+Avoid teaching users about `content/skills/` directly — they should go
+through the agent. The convention is enforced by documentation here, not in
+code.
 
 ---
 

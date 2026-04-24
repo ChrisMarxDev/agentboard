@@ -1,6 +1,14 @@
 import { Link } from 'react-router-dom'
-import { Folder as FolderIcon, FileText, File as FileIcon } from 'lucide-react'
+import { Folder as FolderIcon, FileText, File as FileIcon, BookOpen } from 'lucide-react'
 import type { ContentFolder, ContentTreeNode } from '../../lib/contentTree'
+
+// Skills are a first-class agent-install surface, so any folder/page whose
+// own path segment is literally "skills" gets a BookOpen icon instead of
+// the generic folder/page icon.
+function isSkillsSegment(path: string): boolean {
+  const seg = path.split('/').filter(Boolean).pop() ?? ''
+  return seg.toLowerCase() === 'skills'
+}
 
 /**
  * Auto-generated landing page for a folder that has no sibling index `.md`.
@@ -91,8 +99,12 @@ function childMeta(node: ContentTreeNode): {
 }
 
 function iconFor(node: ContentTreeNode) {
-  if (node.kind === 'folder') return FolderIcon
-  if (node.kind === 'page') return FileText
+  if (node.kind === 'folder') {
+    return isSkillsSegment(node.path) ? BookOpen : FolderIcon
+  }
+  if (node.kind === 'page') {
+    return isSkillsSegment(node.href) ? BookOpen : FileText
+  }
   return FileIcon
 }
 

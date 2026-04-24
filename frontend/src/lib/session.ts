@@ -7,6 +7,26 @@
 const STORAGE_KEY = 'agentboard:token'
 export const LOGIN_PATH = '/login'
 
+// publicMode is a module-level flag set by SessionGate when an anonymous
+// visitor lands on a route that matches the project's public.paths
+// config. When on, apiFetch stops redirecting 401s to /login — the
+// visitor is expected to see a degraded (but functional) view and
+// explicitly click "Sign in" if they want more.
+let publicMode = false
+
+export function setPublicMode(on: boolean) {
+  publicMode = on
+}
+
+export function isPublicMode(): boolean {
+  return publicMode
+}
+
+// Share-token transport changed from URL query + header to fragment +
+// cookie. Fragment is read once in SessionGate, exchanged for an
+// HttpOnly cookie via POST /api/share/redeem, and never touches the
+// client-side state again. Nothing else to manage here.
+
 export interface SessionUser {
   username: string
   display_name?: string
@@ -80,9 +100,13 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit & { s
     if (tok && !merged.has('Authorization')) merged.set('Authorization', `Bearer ${tok}`)
   }
   const res = await fetch(input, { ...rest, headers: merged })
-  if (res.status === 401 && !skipAuth && isSameOrigin(urlStr)) {
+  if (res.status === 401 && !skipAuth && isSameOrigin(urlStr) && !publicMode) {
     // Token missing / invalid / revoked. Clear it so the login page shows
     // a fresh prompt rather than re-submitting the dead one, and bounce.
+    // In publicMode we intentionally skip the redirect — an anonymous
+    // visitor landing on a public page can still see a 401 for a
+    // non-public data key, but we surface it as a missing-value render
+    // rather than kicking them to /login.
     clearToken()
     redirectToLogin('expired')
   }
@@ -97,4 +121,46 @@ export function sseURL(path: string): string {
   if (!tok) return path
   const sep = path.includes('?') ? '&' : '?'
   return `${path}${sep}token=${encodeURIComponent(tok)}`
+}
+
+// fetchSetupStatus asks the server whether the board has been claimed yet.
+// Open endpoint — no token needed. Returns false on network error so the
+// UI falls through to the sign-in form rather than showing "claim" on a
+// flaky connection.
+export async function fetchSetupStatus(): Promise<boolean> {
+  try {
+    const res = await fetch('/api/setup/status')
+    if (!res.ok) return true
+    const body = (await res.json()) as { initialized?: boolean }
+    return Boolean(body.initialized)
+  } catch {
+    return true
+  }
+}
+
+export interface ClaimResult {
+  username: string
+  token: string
+}
+
+// claimBoard POSTs /api/setup to create the first admin. 409 means the
+// board was claimed by someone else between our status check and submit.
+export async function claimBoard(username: string, displayName?: string): Promise<ClaimResult> {
+  const res = await fetch('/api/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      username,
+      display_name: displayName ?? undefined,
+    }),
+  })
+  if (!res.ok) {
+    let msg = `${res.status}`
+    try {
+      const body = (await res.json()) as { error?: string; message?: string }
+      msg = body.error || body.message || msg
+    } catch { /* ignore */ }
+    throw new Error(msg)
+  }
+  return (await res.json()) as ClaimResult
 }

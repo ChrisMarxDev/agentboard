@@ -26,7 +26,6 @@ func seedAdmin(t *testing.T, srv *Server) string {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	auth.InvalidateFirstRunCache()
 	return tok
 }
 
@@ -70,8 +69,13 @@ func TestAdmin_RequiresAdminToken(t *testing.T) {
 	adminToken := seedAdmin(t, srv)
 	agentToken := seedAgent(t, srv, "bot")
 
+	// newTestServer installs a global DefaultClient transport that
+	// auto-injects the test-agent token. For the "no token" check we
+	// need a fresh client that bypasses that injection.
+	bareClient := &http.Client{}
+
 	noTok, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
-	r1, _ := http.DefaultClient.Do(noTok)
+	r1, _ := bareClient.Do(noTok)
 	if r1.StatusCode != 401 {
 		t.Errorf("no token = %d, want 401", r1.StatusCode)
 	}

@@ -12,6 +12,8 @@ import (
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/mdx"
+	"github.com/christophermarx/agentboard/internal/teams"
+	"github.com/christophermarx/agentboard/internal/webhooks"
 )
 
 // Server implements the MCP Streamable HTTP transport.
@@ -23,6 +25,10 @@ type Server struct {
 	Files                *files.Manager
 	Errors               *interrors.Buffer
 	Grab                 *grab.Materializer
+	Webhooks             *webhooks.Store
+	WebhookDispatcher    *webhooks.Dispatcher
+	Teams                *teams.Store
+	ActorResolver        func() string // returns current actor for attribution; optional
 	AllowComponentUpload bool
 }
 

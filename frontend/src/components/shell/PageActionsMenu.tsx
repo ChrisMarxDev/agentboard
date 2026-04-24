@@ -27,6 +27,7 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [shareModal, setShareModal] = useState<{ url: string; expiresAt?: string } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -68,6 +69,24 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
       beaconError({ component: 'PageActionsMenu', source: pagePath, error: msg })
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function shareePage() {
+    setOpen(false)
+    try {
+      const pageUrl = pagePath === 'index' ? '/' : '/' + pagePath
+      const res = await apiFetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: pageUrl }),
+      })
+      if (!res.ok) throw new Error(`share ${pagePath} → ${res.status}`)
+      const body = (await res.json()) as { url: string; expires_at?: string }
+      setShareModal({ url: body.url, expiresAt: body.expires_at })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'share failed'
+      beaconError({ component: 'PageActionsMenu', source: pagePath, error: msg })
     }
   }
 
@@ -115,6 +134,12 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
       label: 'Export page',
       tone: 'default',
       run: exportPage,
+    })
+    actions.push({
+      id: 'share',
+      label: 'Share publicly…',
+      tone: 'default',
+      run: shareePage,
     })
     actions.push({
       id: 'grab-page',
@@ -208,6 +233,126 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
           onConfirm={deletePage}
         />
       )}
+
+      {shareModal && (
+        <ShareLinkDialog
+          url={shareModal.url}
+          expiresAt={shareModal.expiresAt}
+          onClose={() => setShareModal(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ShareLinkDialog({
+  url,
+  expiresAt,
+  onClose,
+}: {
+  url: string
+  expiresAt?: string
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+  const copy = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(url)
+      }
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(true)
+    }
+  }
+  const expiresText = expiresAt
+    ? new Date(expiresAt).toLocaleString()
+    : 'never'
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0, 0, 0, 0.4)' }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Share page link"
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="rounded-lg border w-full max-w-md"
+        style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border)' }}
+      >
+        <div
+          className="px-5 py-3 border-b"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <div className="font-semibold text-sm" style={{ color: 'var(--text)' }}>
+            Public share link
+          </div>
+        </div>
+        <div className="px-5 py-4 text-sm" style={{ color: 'var(--text)' }}>
+          <p style={{ color: 'var(--text-secondary)' }} className="mb-2">
+            Anyone with this link can view the page without signing in. Writes still require auth. Expires:{' '}
+            <strong style={{ color: 'var(--text)' }}>{expiresText}</strong>
+          </p>
+          <div
+            className="flex items-stretch gap-2 mt-3 p-2 rounded-md font-mono text-xs"
+            style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+          >
+            <input
+              type="text"
+              readOnly
+              value={url}
+              onClick={e => (e.currentTarget as HTMLInputElement).select()}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text)',
+                outline: 'none',
+                minWidth: 0,
+              }}
+            />
+            <button
+              onClick={() => void copy()}
+              className="px-2 py-1 rounded-md text-xs"
+              style={{
+                background: 'var(--accent)',
+                color: 'white',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+        <div
+          className="px-5 py-3 border-t flex items-center justify-end"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <button
+            onClick={onClose}
+            className="text-sm px-3 py-1.5 rounded-md"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+              cursor: 'pointer',
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

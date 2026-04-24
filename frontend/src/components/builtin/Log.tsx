@@ -1,4 +1,5 @@
 import { useData } from '../../hooks/useData'
+import { RichText } from './RichText'
 
 interface LogProps {
   source: string
@@ -48,7 +49,9 @@ export function Log({ source, limit = 50 }: LogProps) {
                   {String(entry.level)}
                 </span>
               )}
-              <span style={{ color: 'var(--text)' }}>{String(entry.message ?? '')}</span>
+              <span style={{ color: 'var(--text)' }}>
+                <RichText text={String(entry.message ?? '')} />
+              </span>
             </div>
           )
         })

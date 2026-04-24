@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// handleListSkills returns the index of every folder under files/skills/ that
-// has a valid SKILL.md. Folders without a manifest or with malformed
+// handleListSkills returns the index of every folder under content/skills/
+// that has a valid SKILL.md. Folders without a manifest or with malformed
 // frontmatter are silently skipped — skills is a read-view on top of generic
 // file storage, not a separate store.
 func (s *Server) handleListSkills(w http.ResponseWriter, r *http.Request) {

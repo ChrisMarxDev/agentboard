@@ -123,6 +123,9 @@ func (s *Server) handleSetData(w http.ResponseWriter, r *http.Request) {
 		resp["updated_at"] = meta.UpdatedAt
 		w.Header().Set("ETag", `"`+meta.UpdatedAt+`"`)
 	}
+	// Scan the new value for @mentions; anyone referenced gets an
+	// inbox item pointing at the data key.
+	s.dispatchInboxForValueWrite(key, body, resolveActor(r), "")
 	respondJSON(w, http.StatusOK, resp)
 }
 
@@ -161,6 +164,7 @@ func (s *Server) handleMergeData(w http.ResponseWriter, r *http.Request) {
 		resp["updated_at"] = meta.UpdatedAt
 		w.Header().Set("ETag", `"`+meta.UpdatedAt+`"`)
 	}
+	s.dispatchInboxForValueWrite(key, body, resolveActor(r), "")
 	respondJSON(w, http.StatusOK, resp)
 }
 
@@ -198,6 +202,16 @@ func (s *Server) handleAppendData(w http.ResponseWriter, r *http.Request) {
 	if meta != nil {
 		resp["updated_at"] = meta.UpdatedAt
 		w.Header().Set("ETag", `"`+meta.UpdatedAt+`"`)
+	}
+	// Row-shaped append: check the single appended item for mentions
+	// AND treat it as a row-create so freshly-added assignees get
+	// notified.
+	var newRow map[string]any
+	_ = json.Unmarshal(body, &newRow)
+	if newRow != nil {
+		s.dispatchInboxForRowUpdate(key, nil, newRow, resolveActor(r))
+	} else {
+		s.dispatchInboxForValueWrite(key, body, resolveActor(r), "")
 	}
 	respondJSON(w, http.StatusOK, resp)
 }
@@ -258,6 +272,13 @@ func (s *Server) handleUpsertById(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the prior row (if any) so we can diff assignees for the
+	// inbox dispatcher below.
+	var prevRow map[string]any
+	if prev, _ := s.Store.GetById(key, id); len(prev) > 0 {
+		_ = json.Unmarshal(prev, &prevRow)
+	}
+
 	if expected := ifMatch(r); expected != "" {
 		if err := s.Store.UpsertByIdIfMatch(key, id, body, source, expected); err != nil {
 			if errors.Is(err, data.ErrStale) || errors.Is(err, data.ErrNotFoundForMatch) {
@@ -278,6 +299,14 @@ func (s *Server) handleUpsertById(w http.ResponseWriter, r *http.Request) {
 		resp["updated_at"] = meta.UpdatedAt
 		w.Header().Set("ETag", `"`+meta.UpdatedAt+`"`)
 	}
+	// Inbox dispatch: mentions in the new row + assignment diffs.
+	var nextRow map[string]any
+	if err := json.Unmarshal(body, &nextRow); err == nil && nextRow != nil {
+		if _, ok := nextRow["id"]; !ok {
+			nextRow["id"] = id
+		}
+		s.dispatchInboxForRowUpdate(key, prevRow, nextRow, resolveActor(r))
+	}
 	respondJSON(w, http.StatusOK, resp)
 }
 
@@ -295,6 +324,13 @@ func (s *Server) handleMergeById(w http.ResponseWriter, r *http.Request) {
 	if !json.Valid(body) {
 		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "body is not valid JSON")
 		return
+	}
+
+	// Read prior row for assignee diff + post-merge read so the
+	// inbox dispatcher sees the full merged shape, not just the patch.
+	var prevRow map[string]any
+	if prev, _ := s.Store.GetById(key, id); len(prev) > 0 {
+		_ = json.Unmarshal(prev, &prevRow)
 	}
 
 	if expected := ifMatch(r); expected != "" {
@@ -320,6 +356,13 @@ func (s *Server) handleMergeById(w http.ResponseWriter, r *http.Request) {
 	if meta != nil {
 		resp["updated_at"] = meta.UpdatedAt
 		w.Header().Set("ETag", `"`+meta.UpdatedAt+`"`)
+	}
+	// Inbox dispatch: mentions in the merged row + assignment diffs.
+	if nextRaw, _ := s.Store.GetById(key, id); len(nextRaw) > 0 {
+		var nextRow map[string]any
+		if err := json.Unmarshal(nextRaw, &nextRow); err == nil && nextRow != nil {
+			s.dispatchInboxForRowUpdate(key, prevRow, nextRow, resolveActor(r))
+		}
 	}
 	respondJSON(w, http.StatusOK, resp)
 }

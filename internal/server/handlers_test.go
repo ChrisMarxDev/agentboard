@@ -523,11 +523,12 @@ func TestMCPToolsList(t *testing.T) {
 	result := rpc["result"].(map[string]interface{})
 	tools := result["tools"].([]interface{})
 	// 13 data/page/component core + 3 file tools + 2 skill tools + 2 error
-	// tools + 1 grab tool + 1 search tool = 22.
+	// tools + 1 grab tool + 1 search tool + 4 webhook tools = 26.
 	// (Component-upload write/delete are gated on --allow-component-upload
 	//  and aren't advertised in the default test config.)
-	if len(tools) != 22 {
-		t.Errorf("expected 22 MCP tools, got %d", len(tools))
+	// 26 base tools + 6 team tools (agentboard_{list,get,create,delete,add_member,remove_member}_team).
+	if len(tools) != 32 {
+		t.Errorf("expected 32 MCP tools, got %d", len(tools))
 	}
 }
 

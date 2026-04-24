@@ -195,28 +195,19 @@ func TestRenameUser(t *testing.T) {
 	}
 }
 
-func TestBootstrapOnEmpty(t *testing.T) {
+func TestBootstrapOnEmpty_NoLegacyToken_Noop(t *testing.T) {
+	// Without a legacy env var and with an empty DB, BootstrapOnEmpty
+	// should do nothing — admin creation now happens through /api/setup.
 	s, _ := newTestStore(t)
 	if err := s.BootstrapOnEmpty("", log.New(&captureWriter{}, "", 0)); err != nil {
 		t.Fatal(err)
 	}
-	admin, err := s.GetUser("admin")
+	users, err := s.ListUsers(false)
 	if err != nil {
-		t.Fatalf("admin should exist: %v", err)
+		t.Fatal(err)
 	}
-	if admin.Kind != KindAdmin {
-		t.Errorf("kind = %s", admin.Kind)
-	}
-	tokens, _ := s.ListTokensForUser(admin.Username)
-	if len(tokens) != 1 {
-		t.Errorf("want 1 initial token, got %d", len(tokens))
-	}
-	// Idempotent.
-	before, _ := s.ListUsers(false)
-	_ = s.BootstrapOnEmpty("", log.New(&captureWriter{}, "", 0))
-	after, _ := s.ListUsers(false)
-	if len(before) != len(after) {
-		t.Errorf("bootstrap not idempotent")
+	if len(users) != 0 {
+		t.Errorf("want 0 users after no-op bootstrap, got %d", len(users))
 	}
 }
 
@@ -235,8 +226,9 @@ func TestBootstrapOnEmpty_WithLegacyToken(t *testing.T) {
 	if u, _, err := s.ResolveToken(HashToken("legacy-secret")); err != nil || u.Username != legacy.Username {
 		t.Errorf("legacy token resolve: u=%v err=%v", u, err)
 	}
-	if _, err := s.GetUser("admin"); err != nil {
-		t.Errorf("admin not created alongside legacy: %v", err)
+	// No admin is auto-minted anymore; that's now the /api/setup flow's job.
+	if _, err := s.GetUser("admin"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("admin should NOT be created alongside legacy: %v", err)
 	}
 }
 

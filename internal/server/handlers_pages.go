@@ -125,6 +125,22 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Last-At", meta.LastAt)
 		}
 	}
+	// Approval, if any. Stale = the approved etag no longer matches the
+	// page's current etag — show "approved at vX, edited since" in the UI.
+	var approval *mdx.PageApproval
+	var approvalStale bool
+	if s.PageApproval != nil {
+		approval, _ = s.PageApproval.Get(pagePath)
+		if approval != nil {
+			approvalStale = approval.ApprovedEtag != page.Etag
+			w.Header().Set("X-Approved-By", approval.ApprovedBy)
+			w.Header().Set("X-Approved-At", approval.ApprovedAt)
+			w.Header().Set("X-Approved-Etag", approval.ApprovedEtag)
+			if approvalStale {
+				w.Header().Set("X-Approval-Stale", "true")
+			}
+		}
+	}
 
 	// Check Accept header to determine response format
 	accept := r.Header.Get("Accept")
@@ -147,6 +163,14 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 	if meta != nil {
 		payload["last_actor"] = meta.LastActor
 		payload["last_at"] = meta.LastAt
+	}
+	if approval != nil {
+		payload["approval"] = map[string]any{
+			"approved_by":   approval.ApprovedBy,
+			"approved_at":   approval.ApprovedAt,
+			"approved_etag": approval.ApprovedEtag,
+			"stale":         approvalStale,
+		}
 	}
 	respondJSON(w, http.StatusOK, payload)
 }
@@ -192,6 +216,24 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Refresh the static dependency graph so the view broker knows what
+	// this page references. Best-effort; view broker degrades silently
+	// if refs drift.
+	if s.PageRefs != nil {
+		if p := s.Pages.GetPage(normalizedPath); p != nil {
+			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source))
+		}
+	}
+
+	// Mention detection on the new MDX source. Every @username in the
+	// post-write body that maps to an active user gets an inbox item.
+	subjectPath := "/" + normalizedPath
+	if normalizedPath == "index" {
+		subjectPath = "/"
+	}
+	title := "You were mentioned on " + subjectPath
+	s.emitInboxForMentions(string(body), actor, subjectPath, "", title)
+
 	// Broadcast page update via SSE
 	s.Broadcaster.Broadcast(SSEEvent{
 		Type: "page-updated",
@@ -228,11 +270,18 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Drop the meta row too — a recreated page should start with a fresh
-	// attribution rather than inherit the deleter.
+	// Drop the meta + approval rows too — a recreated page should start
+	// with a fresh attribution rather than inherit the deleter, and
+	// absolutely shouldn't carry a stale approval across identity-reuse.
 	normalizedPath := strings.TrimSuffix(pagePath, ".md")
 	if s.PageMeta != nil {
 		_ = s.PageMeta.Delete(normalizedPath)
+	}
+	if s.PageApproval != nil {
+		_ = s.PageApproval.Delete(normalizedPath)
+	}
+	if s.PageRefs != nil {
+		_ = s.PageRefs.Delete(normalizedPath)
 	}
 	if s.Search != nil {
 		// FTS path is stored with a leading slash (matches PageInfo.Path).

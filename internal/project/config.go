@@ -13,6 +13,21 @@ type NavItem struct {
 	Label string `yaml:"label" json:"label"`
 }
 
+// PublicConfig controls anonymous read access. See
+// internal/publicroutes for the matcher semantics.
+type PublicConfig struct {
+	// Paths is a list of glob patterns. A GET/HEAD/OPTIONS request whose
+	// path matches at least one include pattern (and no `!exclude`) is
+	// served without authentication. Writes always require auth; the
+	// `writes_require_auth` field is informational — the invariant is
+	// enforced in code, not config.
+	Paths []string `yaml:"paths,omitempty" json:"paths,omitempty"`
+	// WritesRequireAuth is informational. The real invariant lives in
+	// internal/publicroutes — flipping this to false has no effect on
+	// security, it's here so the intent is documented in the config file.
+	WritesRequireAuth bool `yaml:"writes_require_auth" json:"writes_require_auth"`
+}
+
 // Config holds the agentboard.yaml configuration.
 type Config struct {
 	Title                string    `yaml:"title" json:"title"`
@@ -29,6 +44,9 @@ type Config struct {
 	// MaxFileSizeMB caps per-file uploads to /api/files/:name. Default 50,
 	// hard upper bound 500 (enforced by internal/files). See spec-files.md §5.
 	MaxFileSizeMB int `yaml:"max_file_size_mb" json:"max_file_size_mb"`
+	// Public exposes selected read endpoints without auth. Empty = fully
+	// private instance (default).
+	Public PublicConfig `yaml:"public" json:"public"`
 }
 
 // DefaultConfig returns configuration with sensible defaults.
@@ -84,6 +102,13 @@ func LoadConfig(projectPath string) (*Config, error) {
 	if fileCfg.MaxFileSizeMB > 0 {
 		cfg.MaxFileSizeMB = fileCfg.MaxFileSizeMB
 	}
+	if len(fileCfg.Public.Paths) > 0 {
+		cfg.Public.Paths = fileCfg.Public.Paths
+	}
+	// writes_require_auth is informational only — always surface the
+	// configured value so /api/config accurately reflects what the
+	// operator wrote.
+	cfg.Public.WritesRequireAuth = fileCfg.Public.WritesRequireAuth
 
 	return cfg, nil
 }

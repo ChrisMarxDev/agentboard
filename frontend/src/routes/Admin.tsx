@@ -29,7 +29,7 @@ import {
   type User,
   type UserToken,
 } from '../lib/auth'
-import { clearToken, getToken, redirectToLogin } from '../lib/session'
+import { apiFetch, clearToken, getToken, redirectToLogin } from '../lib/session'
 
 // Admin page. Rendered inside Layout so the sidebar persists. Uses the
 // shared session token — no separate admin-token store. If the user's
@@ -59,23 +59,33 @@ const INPUT: CSSProperties = {
   fontSize: '0.875rem',
   outline: 'none',
 }
+// All button styles use inline-flex so icon + label children align on the
+// optical baseline without per-icon verticalAlign hacks.
 const BTN_PRIMARY: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.375rem',
   padding: '0.5rem 1rem',
   borderRadius: '0.5rem',
   background: 'var(--accent)',
   color: 'white',
   fontSize: '0.875rem',
   fontWeight: 500,
+  lineHeight: 1,
   border: 'none',
   cursor: 'pointer',
 }
 const BTN_GHOST: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.375rem',
   padding: '0.375rem 0.75rem',
   borderRadius: '0.375rem',
   border: '1px solid var(--border)',
   background: 'transparent',
   color: 'var(--text)',
   fontSize: '0.8125rem',
+  lineHeight: 1,
   cursor: 'pointer',
 }
 const BTN_DANGER: CSSProperties = { ...BTN_GHOST, color: 'var(--error)', borderColor: 'var(--error)' }
@@ -234,7 +244,7 @@ function AdminPanel({ me }: { me: Me }) {
             <div style={LABEL}>Users</div>
             {!creating && (
               <button onClick={() => setCreating(true)} style={BTN_GHOST}>
-                <Plus size={13} style={{ verticalAlign: '-2px', marginRight: '0.25rem' }} />
+                <Plus size={14} />
                 New user
               </button>
             )}
@@ -260,10 +270,363 @@ function AdminPanel({ me }: { me: Me }) {
             onError={setError}
           />
         </section>
+
+        <SharesSection onError={setError} />
+
+        <WebhooksSection onError={setError} />
+
+        <TeamsSection onError={setError} />
       </div>
     </Shell>
   )
 }
+
+interface AdminWebhook {
+  id: string
+  event_pattern: string
+  destination_url: string
+  label?: string
+  created_by: string
+  created_at: string
+  revoked_at?: string
+  last_attempt_at?: string
+  last_success_at?: string
+  last_status: 'pending' | 'ok' | 'retrying' | 'dead_lettered'
+  last_status_code: number
+  last_error?: string
+  failure_count: number
+  success_count: number
+}
+
+function WebhooksSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [subs, setSubs] = useState<AdminWebhook[] | null>(null)
+  const [busyID, setBusyID] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/admin/webhooks')
+      if (!res.ok) throw new Error(`GET /api/admin/webhooks → ${res.status}`)
+      setSubs((await res.json()) as AdminWebhook[])
+      onError(null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onError])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const revoke = useCallback(
+    async (id: string) => {
+      if (!confirm('Revoke this webhook? Deliveries stop immediately.')) return
+      setBusyID(id)
+      try {
+        const res = await apiFetch(`/api/webhooks/${id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error(`revoke → ${res.status}`)
+        await refresh()
+      } catch (err) {
+        onError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusyID(null)
+      }
+    },
+    [refresh, onError],
+  )
+
+  const test = useCallback(
+    async (id: string) => {
+      setBusyID(id)
+      try {
+        const res = await apiFetch(`/api/webhooks/${id}/test`, { method: 'POST' })
+        const body = (await res.json()) as { status_code?: number; error?: string }
+        const msg =
+          body.error != null
+            ? `Test delivery failed: ${body.error}`
+            : `Test delivery returned HTTP ${body.status_code}`
+        alert(msg)
+        await refresh()
+      } catch (err) {
+        onError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusyID(null)
+      }
+    },
+    [refresh, onError],
+  )
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={LABEL}>Webhook subscriptions</div>
+
+      {subs === null ? (
+        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Loading…</div>
+      ) : subs.length === 0 ? (
+        <div
+          style={{
+            padding: '1rem',
+            borderRadius: '0.5rem',
+            border: '1px dashed var(--border)',
+            fontSize: '0.875rem',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          No webhooks configured. Agents can register one with{' '}
+          <code>POST /api/webhooks</code>.
+        </div>
+      ) : (
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '0.5rem',
+            overflow: 'hidden',
+            fontSize: '0.875rem',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                <th style={TH}>Pattern</th>
+                <th style={TH}>Destination</th>
+                <th style={TH}>Label</th>
+                <th style={TH}>Status</th>
+                <th style={TH}>Counts</th>
+                <th style={TH}>Created by</th>
+                <th style={TH}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {subs.map(sub => {
+                const isRevoked = Boolean(sub.revoked_at)
+                const statusColor =
+                  sub.last_status === 'ok'
+                    ? 'rgb(22, 163, 74)'
+                    : sub.last_status === 'dead_lettered'
+                    ? 'var(--error)'
+                    : sub.last_status === 'retrying'
+                    ? '#d97706'
+                    : 'var(--text-secondary)'
+                return (
+                  <tr
+                    key={sub.id}
+                    style={{
+                      borderTop: '1px solid var(--border)',
+                      opacity: isRevoked ? 0.55 : 1,
+                    }}
+                  >
+                    <td style={TD}>
+                      <code>{sub.event_pattern}</code>
+                    </td>
+                    <td style={{ ...TD, color: 'var(--text-secondary)', wordBreak: 'break-all' }}>
+                      {sub.destination_url}
+                    </td>
+                    <td style={{ ...TD, color: 'var(--text-secondary)' }}>
+                      {sub.label || <em style={{ opacity: 0.6 }}>—</em>}
+                    </td>
+                    <td style={{ ...TD, color: statusColor, fontWeight: 500 }}>
+                      {isRevoked ? 'revoked' : sub.last_status}
+                      {sub.last_status_code ? ` (${sub.last_status_code})` : ''}
+                    </td>
+                    <td style={TD}>
+                      <span style={{ color: 'rgb(22, 163, 74)' }}>✓ {sub.success_count}</span>
+                      {' · '}
+                      <span style={{ color: 'var(--error)' }}>✗ {sub.failure_count}</span>
+                    </td>
+                    <td style={TD}>@{sub.created_by}</td>
+                    <td style={{ ...TD, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {!isRevoked && (
+                        <>
+                          <button
+                            type="button"
+                            disabled={busyID === sub.id}
+                            onClick={() => void test(sub.id)}
+                            style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '0.375rem',
+                              border: '1px solid var(--border)',
+                              background: 'transparent',
+                              color: 'var(--text)',
+                              cursor: busyID === sub.id ? 'not-allowed' : 'pointer',
+                              marginRight: 4,
+                            }}
+                          >
+                            Test
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyID === sub.id}
+                            onClick={() => void revoke(sub.id)}
+                            style={{
+                              fontSize: '0.75rem',
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '0.375rem',
+                              border: '1px solid var(--border)',
+                              background: 'transparent',
+                              color: 'var(--error)',
+                              cursor: busyID === sub.id ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            Revoke
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+interface AdminShare {
+  id: string
+  path: string
+  created_by: string
+  created_at: string
+  expires_at?: string
+  last_used_at?: string
+  use_count: number
+  label?: string
+  max_uses?: number
+  expired?: boolean
+}
+
+function SharesSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [shares, setShares] = useState<AdminShare[] | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/admin/shares')
+      if (!res.ok) throw new Error(`GET /api/admin/shares → ${res.status}`)
+      setShares((await res.json()) as AdminShare[])
+      onError(null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onError])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const revoke = useCallback(
+    async (id: string) => {
+      if (!confirm('Revoke this share? Anyone holding the link will be locked out immediately.')) return
+      setBusy(true)
+      try {
+        const res = await apiFetch(`/api/share/${id}`, { method: 'DELETE' })
+        if (!res.ok) throw new Error(`revoke → ${res.status}`)
+        await refresh()
+      } catch (err) {
+        onError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [refresh, onError],
+  )
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={LABEL}>Active share links</div>
+
+      {shares === null ? (
+        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Loading…</div>
+      ) : shares.length === 0 ? (
+        <div
+          style={{
+            padding: '1rem',
+            borderRadius: '0.5rem',
+            border: '1px dashed var(--border)',
+            fontSize: '0.875rem',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          No active shares. Use the &quot;Share publicly…&quot; action on any page to create one.
+        </div>
+      ) : (
+        <div
+          style={{
+            border: '1px solid var(--border)',
+            borderRadius: '0.5rem',
+            overflow: 'hidden',
+            fontSize: '0.875rem',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', textAlign: 'left' }}>
+                <th style={TH}>Page</th>
+                <th style={TH}>Label</th>
+                <th style={TH}>Created by</th>
+                <th style={TH}>Uses</th>
+                <th style={TH}>Expires</th>
+                <th style={TH}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {shares.map(s => (
+                <tr key={s.id} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td style={TD}>
+                    <a href={s.path} style={{ color: 'var(--accent)' }}>
+                      {s.path}
+                    </a>
+                  </td>
+                  <td style={{ ...TD, color: 'var(--text-secondary)' }}>
+                    {s.label || <em style={{ opacity: 0.6 }}>—</em>}
+                  </td>
+                  <td style={TD}>@{s.created_by}</td>
+                  <td style={TD}>
+                    {s.use_count}
+                    {s.max_uses ? ` / ${s.max_uses}` : ''}
+                  </td>
+                  <td style={{ ...TD, color: s.expired ? 'var(--error)' : 'var(--text)' }}>
+                    {s.expires_at ? new Date(s.expires_at).toLocaleString() : 'never'}
+                    {s.expired ? ' (expired)' : ''}
+                  </td>
+                  <td style={{ ...TD, textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void revoke(s.id)}
+                      style={{
+                        fontSize: '0.75rem',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '0.375rem',
+                        border: '1px solid var(--border)',
+                        background: 'transparent',
+                        color: 'var(--error)',
+                        cursor: busy ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const TH: React.CSSProperties = {
+  padding: '0.5rem 0.75rem',
+  fontSize: '0.7rem',
+  fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.04em',
+  color: 'var(--text-secondary)',
+}
+const TD: React.CSSProperties = { padding: '0.5rem 0.75rem', verticalAlign: 'top' }
 
 // ---------- user rows ----------
 
@@ -397,7 +760,7 @@ function UserCard({
                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                   <button onClick={() => setEditing(true)} style={BTN_GHOST}>Edit</button>
                   <button onClick={onAddToken} style={BTN_GHOST}>
-                    <Plus size={13} style={{ verticalAlign: '-2px', marginRight: '0.25rem' }} />
+                    <Plus size={14} />
                     Add token
                   </button>
                   {!isSelf && (
@@ -500,11 +863,11 @@ function TokenRow({
       </div>
       {!revoked && (
         <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
-          <button onClick={onRotate} style={BTN_GHOST} title="Rotate">
-            <RotateCw size={12} style={{ verticalAlign: '-1px' }} />
+          <button onClick={onRotate} style={BTN_GHOST} title="Rotate" aria-label="Rotate token">
+            <RotateCw size={13} />
           </button>
-          <button onClick={onRevoke} style={BTN_DANGER} title="Revoke">
-            <Trash2 size={12} style={{ verticalAlign: '-1px' }} />
+          <button onClick={onRevoke} style={BTN_DANGER} title="Revoke" aria-label="Revoke token">
+            <Trash2 size={13} />
           </button>
         </div>
       )}
@@ -738,7 +1101,7 @@ function NewUserCard({
 
       <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
         <button type="submit" disabled={busy} style={BTN_PRIMARY}>
-          <KeyRound size={14} style={{ verticalAlign: '-2px', marginRight: '0.375rem' }} />
+          <KeyRound size={14} />
           {busy ? 'Creating…' : 'Create + show token'}
         </button>
       </div>
@@ -877,11 +1240,7 @@ function RevealBanner({
           {created.token}
         </code>
         <button onClick={copy} style={BTN_GHOST}>
-          {copied ? (
-            <><Check size={13} style={{ verticalAlign: '-1px', marginRight: '0.25rem' }} /> Copied</>
-          ) : (
-            <><Copy size={13} style={{ verticalAlign: '-1px', marginRight: '0.25rem' }} /> Copy</>
-          )}
+          {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
         </button>
       </div>
     </div>
@@ -899,4 +1258,333 @@ function relativeTime(iso: string): string {
   if (h < 24) return `${h}h ago`
   const d = Math.round(h / 24)
   return `${d}d ago`
+}
+
+// ---------- teams ----------
+
+interface AdminTeam {
+  slug: string
+  display_name?: string
+  description?: string
+  created_at: string
+  created_by?: string
+  members?: { username: string; role?: string; added_at: string }[]
+}
+
+function TeamsSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [teams, setTeams] = useState<AdminTeam[] | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [busySlug, setBusySlug] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/teams')
+      if (!res.ok) throw new Error(`list teams: ${res.status}`)
+      const body = (await res.json()) as { teams?: AdminTeam[] }
+      setTeams(body.teams ?? [])
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onError])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const createTeam = async (slug: string, displayName: string, description: string) => {
+    setBusySlug(slug)
+    try {
+      const res = await apiFetch('/api/admin/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug, display_name: displayName, description }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error ?? `create: ${res.status}`)
+      }
+      setCreating(false)
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySlug(null)
+    }
+  }
+
+  const deleteTeam = async (slug: string) => {
+    if (!confirm(`Delete team @${slug}?`)) return
+    setBusySlug(slug)
+    try {
+      const res = await apiFetch(`/api/admin/teams/${slug}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`delete: ${res.status}`)
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySlug(null)
+    }
+  }
+
+  const addMember = async (slug: string, username: string, role: string) => {
+    setBusySlug(slug)
+    try {
+      const res = await apiFetch(`/api/admin/teams/${slug}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, role }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(body.error ?? `add member: ${res.status}`)
+      }
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySlug(null)
+    }
+  }
+
+  const removeMember = async (slug: string, username: string) => {
+    setBusySlug(slug)
+    try {
+      const res = await apiFetch(`/api/admin/teams/${slug}/members/${username}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(`remove member: ${res.status}`)
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySlug(null)
+    }
+  }
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={LABEL}>Teams</div>
+        {!creating && (
+          <button onClick={() => setCreating(true)} style={BTN_GHOST}>
+            <Plus size={14} />
+            New team
+          </button>
+        )}
+      </div>
+      {creating && (
+        <NewTeamCard
+          busy={busySlug !== null}
+          onCreate={createTeam}
+          onCancel={() => setCreating(false)}
+        />
+      )}
+      {teams === null && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          Loading teams…
+        </div>
+      )}
+      {teams && teams.length === 0 && !creating && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          No teams yet. @mentions of a team name expand to every member's inbox.
+        </div>
+      )}
+      {teams?.map(t => (
+        <TeamCard
+          key={t.slug}
+          team={t}
+          busy={busySlug === t.slug}
+          onDelete={() => deleteTeam(t.slug)}
+          onAddMember={(u, r) => addMember(t.slug, u, r)}
+          onRemoveMember={u => removeMember(t.slug, u)}
+        />
+      ))}
+    </section>
+  )
+}
+
+function NewTeamCard({
+  busy,
+  onCreate,
+  onCancel,
+}: {
+  busy: boolean
+  onCreate: (slug: string, displayName: string, description: string) => void
+  onCancel: () => void
+}) {
+  const [slug, setSlug] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [description, setDescription] = useState('')
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    if (!slug) return
+    onCreate(slug.trim().toLowerCase(), displayName.trim(), description.trim())
+  }
+
+  return (
+    <form onSubmit={submit} style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+        <div>
+          <div style={LABEL}>Slug</div>
+          <input
+            autoFocus
+            value={slug}
+            onChange={e => setSlug(e.target.value)}
+            placeholder="marketing"
+            style={INPUT}
+            required
+            pattern="[a-z][a-z0-9_\-]*"
+            maxLength={32}
+          />
+        </div>
+        <div>
+          <div style={LABEL}>Display name</div>
+          <input
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+            placeholder="Marketing"
+            style={INPUT}
+          />
+        </div>
+      </div>
+      <div>
+        <div style={LABEL}>Description</div>
+        <input
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="Optional — one-line summary"
+          style={INPUT}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} style={BTN_GHOST} disabled={busy}>
+          Cancel
+        </button>
+        <button type="submit" style={BTN_PRIMARY} disabled={busy || !slug}>
+          Create team
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function TeamCard({
+  team,
+  busy,
+  onDelete,
+  onAddMember,
+  onRemoveMember,
+}: {
+  team: AdminTeam
+  busy: boolean
+  onDelete: () => void
+  onAddMember: (username: string, role: string) => void
+  onRemoveMember: (username: string) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [addUser, setAddUser] = useState('')
+  const [addRole, setAddRole] = useState('')
+
+  const memberCount = team.members?.length ?? 0
+
+  return (
+    <div style={CARD}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <button
+          onClick={() => setExpanded(v => !v)}
+          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text)' }}
+          aria-label={expanded ? 'Collapse' : 'Expand'}
+        >
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </button>
+        <div style={{ fontWeight: 600 }}>@{team.slug}</div>
+        {team.display_name && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+            · {team.display_name}
+          </div>
+        )}
+        <div style={{ marginLeft: 'auto', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+          {memberCount} member{memberCount === 1 ? '' : 's'}
+        </div>
+        <button
+          onClick={onDelete}
+          disabled={busy}
+          style={{ ...BTN_GHOST, color: 'var(--error)', borderColor: 'var(--error)' }}
+          aria-label="Delete team"
+          title="Delete team"
+        >
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {team.description && (
+        <div style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+          {team.description}
+        </div>
+      )}
+      {expanded && (
+        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {(team.members ?? []).map(m => (
+            <div
+              key={m.username}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.375rem 0.625rem',
+                background: 'var(--bg-secondary)',
+                borderRadius: '0.375rem',
+              }}
+            >
+              <span style={{ fontSize: '0.875rem' }}>@{m.username}</span>
+              {m.role && (
+                <span
+                  style={{
+                    fontSize: '0.6875rem',
+                    color: 'var(--text-secondary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  {m.role}
+                </span>
+              )}
+              <button
+                onClick={() => onRemoveMember(m.username)}
+                style={{ ...BTN_GHOST, marginLeft: 'auto' }}
+                disabled={busy}
+                aria-label={`Remove ${m.username}`}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', paddingTop: '0.25rem' }}>
+            <input
+              value={addUser}
+              onChange={e => setAddUser(e.target.value)}
+              placeholder="username"
+              style={{ ...INPUT, flex: 1 }}
+            />
+            <input
+              value={addRole}
+              onChange={e => setAddRole(e.target.value)}
+              placeholder="role (optional)"
+              style={{ ...INPUT, width: '12rem' }}
+            />
+            <button
+              onClick={() => {
+                if (!addUser) return
+                onAddMember(addUser.trim().toLowerCase(), addRole.trim())
+                setAddUser('')
+                setAddRole('')
+              }}
+              style={BTN_PRIMARY}
+              disabled={busy || !addUser}
+            >
+              <Plus size={13} />
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }

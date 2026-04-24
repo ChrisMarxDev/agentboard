@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { BookOpen } from 'lucide-react'
 import type { TreeNode } from '../../lib/pageTree'
 
 interface NavTreeProps {
@@ -13,6 +14,25 @@ interface NavTreeProps {
 const ROW_PADDING_X = 12
 const INDENT_STEP = 12
 const CHEVRON_WIDTH = 20
+
+// Any folder or page whose own path segment is literally "skills" gets a
+// book icon. Skills are a first-class agent-install surface in AgentBoard,
+// so the convention is enforced visually across every board.
+function isSkillsNode(path: string): boolean {
+  const seg = path.split('/').filter(Boolean).pop() ?? ''
+  return seg.toLowerCase() === 'skills'
+}
+
+function SkillsIcon() {
+  return (
+    <BookOpen
+      size={14}
+      aria-hidden
+      className="shrink-0"
+      style={{ marginRight: 6, opacity: 0.85 }}
+    />
+  )
+}
 
 export default function NavTree({
   nodes,
@@ -30,6 +50,7 @@ export default function NavTree({
         if (node.kind === 'page') {
           const page = node.page
           const isActive = activePath === page.path
+          const showSkillsIcon = isSkillsNode(page.path)
           return (
             <Link
               key={page.path}
@@ -42,6 +63,7 @@ export default function NavTree({
                 color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
               }}
             >
+              {showSkillsIcon && <SkillsIcon />}
               <span className="truncate">{page.title}</span>
             </Link>
           )
@@ -111,6 +133,7 @@ export default function NavTree({
                   className="flex-1 flex items-center truncate py-2"
                   style={{ color: 'inherit', paddingLeft: 4 }}
                 >
+                  {isSkillsNode(node.path) && <SkillsIcon />}
                   <span className="truncate">{node.name}</span>
                 </Link>
               ) : (
@@ -127,6 +150,7 @@ export default function NavTree({
                     paddingLeft: 4,
                   }}
                 >
+                  {isSkillsNode(node.path) && <SkillsIcon />}
                   <span className="truncate">{node.name}</span>
                 </button>
               )}

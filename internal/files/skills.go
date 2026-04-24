@@ -13,10 +13,12 @@ import (
 	"time"
 )
 
-// skillsSubdir is the conventional folder under files/ where Anthropic-style
-// skills live. Each direct child of this folder is one skill; each skill folder
-// contains a SKILL.md with YAML frontmatter (name + description) plus any
-// supporting files. Matches the Anthropic skill format so skills are portable.
+// skillsSubdir is the conventional folder under the content tree (see
+// Project.FilesDir → ContentDir per CORE_GUIDELINES §9) where Anthropic-style
+// skills live. Each direct child of this folder is one skill; each skill
+// folder contains a SKILL.md with YAML frontmatter (name + description) plus
+// any supporting files. Matches the Anthropic skill format so skills are
+// portable.
 const skillsSubdir = "skills"
 
 // skillManifest is the canonical filename inside a skill folder.
@@ -61,7 +63,7 @@ func (m *Manager) SkillsDir() string {
 	return filepath.Join(m.FilesDir(), skillsSubdir)
 }
 
-// ListSkills walks files/skills/ one level deep and returns each folder that
+// ListSkills walks content/skills/ one level deep and returns each folder that
 // contains a valid SKILL.md with name + description frontmatter. Folders
 // without a manifest or with malformed frontmatter are silently skipped —
 // storage stays ignorant of skill semantics.
@@ -102,7 +104,7 @@ func (m *Manager) GetSkill(slug string) (*SkillBundle, error) {
 	if _, err := ValidateName(slug); err != nil {
 		return nil, ErrInvalidName
 	}
-	// Reject slugs with separators — skills are direct children of files/skills/.
+	// Reject slugs with separators — skills are direct children of content/skills/.
 	if strings.Contains(slug, "/") {
 		return nil, ErrInvalidName
 	}

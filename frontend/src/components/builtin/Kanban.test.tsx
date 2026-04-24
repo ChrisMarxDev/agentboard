@@ -6,6 +6,18 @@ vi.mock('../../hooks/useData', () => ({
   useData: vi.fn(),
 }))
 
+// Kanban renders <AssigneeStrip> which pulls useUsers → /api/users and
+// useTeams → /api/teams on mount. Those fetches pollute the spy in the
+// drag-drop tests below, so we stub both.
+vi.mock('../../hooks/useUsers', () => ({
+  useUsers: () => [],
+  findUser: () => undefined,
+}))
+vi.mock('../../hooks/useTeams', () => ({
+  useTeams: () => [],
+  findTeam: () => undefined,
+}))
+
 import { useData } from '../../hooks/useData'
 const mockUseData = vi.mocked(useData)
 
@@ -171,6 +183,141 @@ describe('Kanban', () => {
 
       await Promise.resolve()
       expect(globalThis.fetch).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('ordering', () => {
+    it('sorts cards within a column by numeric order field', () => {
+      mockUseData.mockReturnValue({
+        data: [
+          { id: '1', title: 'Gamma', status: 'todo', order: 3 },
+          { id: '2', title: 'Alpha', status: 'todo', order: 1 },
+          { id: '3', title: 'Beta', status: 'todo', order: 2 },
+        ],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      const cards = screen.getAllByRole('button').filter(el => el.getAttribute('draggable') === 'true')
+      expect(cards.map(c => c.textContent)).toEqual(['Alpha', 'Beta', 'Gamma'])
+    })
+
+    it('keeps array order when no order fields are present', () => {
+      mockUseData.mockReturnValue({
+        data: [
+          { id: '1', title: 'First', status: 'todo' },
+          { id: '2', title: 'Second', status: 'todo' },
+          { id: '3', title: 'Third', status: 'todo' },
+        ],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      const cards = screen.getAllByRole('button').filter(el => el.getAttribute('draggable') === 'true')
+      expect(cards.map(c => c.textContent)).toEqual(['First', 'Second', 'Third'])
+    })
+  })
+
+  describe('delete', () => {
+    const originalFetch = globalThis.fetch
+
+    beforeEach(() => {
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch
+    })
+    afterEach(() => {
+      globalThis.fetch = originalFetch
+    })
+
+    it('opens a confirm dialog when the trash icon is clicked', () => {
+      mockUseData.mockReturnValue({
+        data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      fireEvent.click(screen.getByLabelText('Delete card'))
+
+      const dialog = screen.getByRole('dialog', { name: /confirm delete card/i })
+      expect(dialog).toBeInTheDocument()
+      expect(dialog).toHaveTextContent('Fix bug')
+    })
+
+    it('does not open the card modal when the trash icon is clicked', () => {
+      mockUseData.mockReturnValue({
+        data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      fireEvent.click(screen.getByLabelText('Delete card'))
+
+      // The details modal ("Card details") must not appear — only the confirm dialog.
+      const dialogs = screen.getAllByRole('dialog')
+      expect(dialogs).toHaveLength(1)
+      expect(dialogs[0]).toHaveAccessibleName(/confirm delete card/i)
+    })
+
+    it('DELETEs /api/data/{source}/{id} when confirmed', async () => {
+      mockUseData.mockReturnValue({
+        data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="sprint.tasks" groupBy="status" columns={['todo']} />)
+
+      fireEvent.click(screen.getByLabelText('Delete card'))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
+      const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
+      expect(url).toBe('/api/data/sprint.tasks/1')
+      expect(init.method).toBe('DELETE')
+    })
+
+    it('does nothing on Cancel', async () => {
+      mockUseData.mockReturnValue({
+        data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="sprint.tasks" groupBy="status" columns={['todo']} />)
+
+      fireEvent.click(screen.getByLabelText('Delete card'))
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+      await Promise.resolve()
+      expect(globalThis.fetch).not.toHaveBeenCalled()
+      expect(screen.queryByRole('dialog', { name: /confirm delete card/i })).not.toBeInTheDocument()
+    })
+
+    it('closes the confirm dialog on Escape', () => {
+      mockUseData.mockReturnValue({
+        data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      fireEvent.click(screen.getByLabelText('Delete card'))
+      expect(screen.getByRole('dialog', { name: /confirm delete card/i })).toBeInTheDocument()
+
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.queryByRole('dialog', { name: /confirm delete card/i })).not.toBeInTheDocument()
+    })
+
+    it('does not render a trash icon on cards without an id', () => {
+      mockUseData.mockReturnValue({
+        data: [{ title: 'Anonymous', status: 'todo' }],
+        loading: false,
+        error: null,
+      })
+      render(<Kanban source="tasks" groupBy="status" columns={['todo']} />)
+
+      expect(screen.queryByLabelText('Delete card')).not.toBeInTheDocument()
     })
   })
 })

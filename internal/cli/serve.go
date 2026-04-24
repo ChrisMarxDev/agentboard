@@ -150,7 +150,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")
 	}
-	log.Printf("Auth: identity-backed. Paste the admin token printed above into /admin to manage tokens. Agents use their tokens via Bearer/Basic/?token=.")
+	hasUser, _ := authStore.HasAnyUser()
+	if hasUser {
+		log.Printf("Auth: identity-backed. Sign in at /login; admins manage users + tokens at /admin. Agents use Bearer/Basic/?token=.")
+	} else {
+		log.Printf("Auth: board is UNCLAIMED. First visitor at /login picks an admin username and gets the token. Alternatively run `agentboard admin mint-admin <username>` on the host.")
+	}
 
 	// Start page watcher
 	if err := srv.Pages.StartWatcher(func(pagePath string) {

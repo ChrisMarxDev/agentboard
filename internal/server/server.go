@@ -1,11 +1,14 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/components"
@@ -13,9 +16,15 @@ import (
 	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
+	"github.com/christophermarx/agentboard/internal/inbox"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/project"
+	"github.com/christophermarx/agentboard/internal/publicroutes"
+	"github.com/christophermarx/agentboard/internal/share"
+	"github.com/christophermarx/agentboard/internal/teams"
+	"github.com/christophermarx/agentboard/internal/view"
+	"github.com/christophermarx/agentboard/internal/webhooks"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -28,12 +37,23 @@ type Server struct {
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
 	PageMeta             *mdx.MetaStore
+	PageApproval         *mdx.ApprovalStore
+	PageRefs             *mdx.RefStore
 	Search               *mdx.SearchStore
 	Components           *components.Manager
 	Files                *files.Manager
 	Errors               *interrors.Buffer
 	Grab                 *grab.Materializer
 	MCP                  *mcp.Server
+	Share                *share.Store
+	ViewSessions         *view.SessionStore
+	ViewScope            *view.ScopeBuilder
+	ViewPublic           *publicroutes.Matcher
+	Webhooks             *webhooks.Store
+	WebhookDispatcher    *webhooks.Dispatcher
+	webhookSecrets       sync.Map // id → plaintext secret, set at Create
+	Inbox                *inbox.Store
+	Teams                *teams.Store
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -81,6 +101,37 @@ func New(cfg ServerConfig) *Server {
 		}
 	}
 
+	// Approval store — same best-effort pattern as MetaStore. Nil-safe
+	// at every read/write site so a DB without SQL backing just
+	// degrades to "no approvals", not a boot error.
+	var approvalStore *mdx.ApprovalStore
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if a, err := mdx.NewApprovalStore(dber.DB()); err == nil {
+			approvalStore = a
+		}
+	}
+
+	// Ref store — the page-dependency graph the view broker uses to
+	// decide what a page touches. Best-effort like the others.
+	var refStore *mdx.RefStore
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if rs, err := mdx.NewRefStore(dber.DB()); err == nil {
+			refStore = rs
+			// Backfill: walk every page on boot and record its refs.
+			// PageInfo.Path has a leading slash; the ref store uses the
+			// map key (no slash). Normalise before recording.
+			for _, p := range pageManager.ListPages() {
+				key := strings.TrimPrefix(p.Path, "/")
+				if key == "" {
+					key = "index"
+				}
+				_ = refStore.Record(key, mdx.ExtractRefs(p.Source))
+			}
+		} else {
+			log.Printf("agentboard: page_refs unavailable (continuing without): %v", err)
+		}
+	}
+
 	// Full-text search index (SQLite FTS5). Bootstrapped from the page
 	// manager's initial scan; kept in sync by the page handlers. Same
 	// best-effort posture as MetaStore — if the DB can't be addressed or
@@ -100,6 +151,72 @@ func New(cfg ServerConfig) *Server {
 		}
 	}
 
+	// Share-token store — needed for per-page public share links. Same
+	// best-effort posture as the other *sql.DB-backed stores: if the
+	// underlying data store doesn't expose a DB, share stays nil and
+	// the middleware becomes a no-op.
+	var shareStore *share.Store
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if ss, err := share.NewStore(dber.DB()); err == nil {
+			shareStore = ss
+		} else {
+			log.Printf("agentboard: share tokens unavailable (continuing without): %v", err)
+		}
+	}
+
+	// Inbox store — per-user reminders.
+	var inboxStore *inbox.Store
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if is, err := inbox.NewStore(dber.DB()); err == nil {
+			inboxStore = is
+		} else {
+			log.Printf("agentboard: inbox unavailable (continuing without): %v", err)
+		}
+	}
+
+	// Teams store — role groups that expand mentions to members.
+	var teamStore *teams.Store
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if ts, err := teams.NewStore(dber.DB()); err == nil {
+			teamStore = ts
+		} else {
+			log.Printf("agentboard: teams unavailable (continuing without): %v", err)
+		}
+	}
+
+	// Webhook subscription store. Same best-effort posture.
+	var webhookStore *webhooks.Store
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if ws, err := webhooks.NewStore(dber.DB()); err == nil {
+			webhookStore = ws
+		} else {
+			log.Printf("agentboard: webhooks unavailable (continuing without): %v", err)
+		}
+	}
+
+	// View session store — cookie-backed redeemed share sessions.
+	var viewSessions *view.SessionStore
+	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+		if vs, err := view.NewSessionStore(dber.DB()); err == nil {
+			viewSessions = vs
+		} else {
+			log.Printf("agentboard: view sessions unavailable (continuing without): %v", err)
+		}
+	}
+
+	// Public-routes matcher reused by the view broker for anonymous
+	// reads. Empty config means anonymous gets nothing.
+	var publicMatcher *publicroutes.Matcher
+	if cfg.Project != nil && cfg.Project.Config != nil {
+		publicMatcher = publicroutes.New(cfg.Project.Config.Public.Paths)
+	}
+
+	// ScopeBuilder is the per-request scope factory.
+	var viewScope *view.ScopeBuilder
+	if refStore != nil {
+		viewScope = &view.ScopeBuilder{Refs: refStore, PublicMatcher: publicMatcher}
+	}
+
 	compManager := components.NewManager(cfg.Project)
 	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
 	errorBuffer := interrors.NewBuffer()
@@ -113,6 +230,9 @@ func New(cfg ServerConfig) *Server {
 		Files:                fileManager,
 		Errors:               errorBuffer,
 		Grab:                 grabber,
+		Webhooks:             webhookStore,
+		Teams:                teamStore,
+		// WebhookDispatcher is set below after the dispatcher is built.
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
 
@@ -123,18 +243,147 @@ func New(cfg ServerConfig) *Server {
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
 		PageMeta:             metaStore,
+		PageApproval:         approvalStore,
+		PageRefs:             refStore,
 		Search:               searchStore,
 		Components:           compManager,
 		Files:                fileManager,
 		Errors:               errorBuffer,
+		Inbox:                inboxStore,
+		Teams:                teamStore,
 		Grab:                 grabber,
 		MCP:                  mcpServer,
+		Share:                shareStore,
+		Webhooks:             webhookStore,
+		ViewSessions:         viewSessions,
+		ViewScope:            viewScope,
+		ViewPublic:           publicMatcher,
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
 
+	// Start the webhook dispatcher once the server struct is fully
+	// populated. Runs in the background — we use context.Background()
+	// here because the lifetime of the dispatcher is the lifetime of
+	// the process; graceful-stop support would swap this for a Server
+	// context if we ever add one.
+	if webhookStore != nil {
+		s.WebhookDispatcher = webhooks.NewDispatcher(webhookStore, webhooks.DispatcherOptions{
+			SecretResolver: s.webhookSecretFor,
+		})
+		// Back-reference so the MCP tools can emit events too.
+		mcpServer.WebhookDispatcher = s.WebhookDispatcher
+		go s.WebhookDispatcher.Start(context.Background())
+	}
+
+	// Wire the broadcaster's events into the webhook dispatcher. We
+	// subscribe as just another SSE listener and re-shape events into
+	// the webhook vocabulary ("data.set.<key>", "content.<path>.updated",
+	// etc.) before emitting.
+	if s.WebhookDispatcher != nil {
+		go s.bridgeBroadcastToWebhooks()
+	}
+
 	s.Router = s.buildRouter(cfg)
 	return s
+}
+
+// bridgeBroadcastToWebhooks subscribes to the broadcaster and
+// translates internal SSE events into the outbound webhook event
+// vocabulary. Non-data events pass through with a short-name mapping;
+// `heartbeat` is dropped (nothing observable happened).
+func (s *Server) bridgeBroadcastToWebhooks() {
+	id, ch := s.Broadcaster.Subscribe()
+	defer s.Broadcaster.Unsubscribe(id)
+	for evt := range ch {
+		name, payload, keep := webhookEventName(evt)
+		if !keep {
+			continue
+		}
+		s.WebhookDispatcher.Emit(webhooks.Event{
+			Name: name,
+			Data: payload,
+		})
+	}
+}
+
+// webhookEventName maps an internal SSEEvent to the outbound webhook
+// event name + structured payload. Returns keep=false for events that
+// shouldn't fan out (e.g. heartbeat).
+func webhookEventName(evt SSEEvent) (string, map[string]any, bool) {
+	switch evt.Type {
+	case "heartbeat":
+		return "", nil, false
+	case "data":
+		var raw struct {
+			Key    string `json:"key"`
+			Action string `json:"action"`
+			Value  any    `json:"value"`
+			ID     string `json:"id,omitempty"`
+			Source string `json:"source,omitempty"`
+		}
+		_ = json.Unmarshal(evt.Data, &raw)
+		action := raw.Action
+		if action == "" {
+			action = "updated"
+		}
+		name := "data." + action
+		if raw.Key != "" {
+			name = name + "." + raw.Key
+		}
+		payload := map[string]any{"key": raw.Key, "action": raw.Action, "value": raw.Value}
+		if raw.ID != "" {
+			payload["id"] = raw.ID
+		}
+		if raw.Source != "" {
+			payload["source"] = raw.Source
+		}
+		return name, payload, true
+	case "page-updated":
+		var raw struct {
+			Path string `json:"path"`
+		}
+		_ = json.Unmarshal(evt.Data, &raw)
+		name := "content.updated"
+		if raw.Path != "" {
+			name = name + "." + strings.TrimPrefix(raw.Path, "/")
+		}
+		return name, map[string]any{"path": raw.Path}, true
+	case "file-updated":
+		var raw struct {
+			Name    string `json:"name"`
+			Deleted bool   `json:"deleted"`
+		}
+		_ = json.Unmarshal(evt.Data, &raw)
+		suffix := "updated"
+		if raw.Deleted {
+			suffix = "deleted"
+		}
+		name := "file." + suffix
+		if raw.Name != "" {
+			name = name + "." + raw.Name
+		}
+		return name, map[string]any{"name": raw.Name, "deleted": raw.Deleted}, true
+	case "page-approval":
+		var raw struct {
+			Path     string `json:"path"`
+			Approved bool   `json:"approved"`
+		}
+		_ = json.Unmarshal(evt.Data, &raw)
+		suffix := "approved"
+		if !raw.Approved {
+			suffix = "unapproved"
+		}
+		name := "approval." + suffix
+		if raw.Path != "" {
+			name = name + "." + strings.TrimPrefix(raw.Path, "/")
+		}
+		return name, map[string]any{"path": raw.Path, "approved": raw.Approved}, true
+	}
+	// Everything else (components-updated, error-*, page-approval
+	// fallbacks) forwards with the raw type as event name. Coarse but
+	// predictable.
+	return evt.Type, map[string]any{"raw": string(evt.Data)}, true
 }
 
 func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
@@ -149,12 +398,44 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	// token so the browser can reach /login and sign the user in. The
 	// SPA has its own client-side gate (SessionGate + apiFetch's 401
 	// redirect).
+	//
+	// Public matcher wraps auth — if the request path matches a configured
+	// read-rule, auth is skipped and the request proceeds with
+	// IsPublicRequest(ctx)=true. Writes and /api/admin/* always route
+	// through auth, no matter what the config says. The matcher was
+	// built in New(); we reuse it here via s.ViewPublic to keep a single
+	// source of truth.
+	tokenMw := auth.TokenMiddleware(cfg.Auth, auth.MiddlewareConfig{
+		// /api/config is always anonymous: the SPA reads it before it
+		// knows whether the current URL is supposed to render as public
+		// or gated. The response contains no user data, only the
+		// operator-authored config — including public.paths — which the
+		// SPA uses to decide whether to skip the login redirect.
+		//
+		// /api/introduction is always anonymous too: it's the
+		// paste-one-URL-to-teach-an-agent entry point. Under /api/ so a
+		// user page at "/introduction" can't collide.
+		OpenPaths: []string{"/api/setup", "/api/setup/status", "/api/config", "/api/introduction", "/api/share/redeem"},
+	})
+	gatedAuth := publicroutes.Gate(s.ViewPublic, tokenMw, publicroutes.GateOptions{})
+	// Old share.Middleware was deleted — shares now redeem into a
+	// cookie (handleRedeemShare) and carry that cookie on every
+	// /api/view/* request. The view broker does its own authority
+	// resolution; this gated chain only covers bearer/public auth.
 	gated := func(r chi.Router) {
-		r.Use(auth.TokenMiddleware(cfg.Auth, auth.MiddlewareConfig{
-			OpenPaths: []string{"/api/setup", "/api/setup/status"},
-		}))
+		r.Use(gatedAuth)
 		r.Use(auth.AuthorizeMiddleware())
 	}
+
+
+	// /api/view/* is OUTSIDE the gated group: the broker does its own
+	// authority resolution (bearer | share cookie | public). Mounting
+	// it here means the auth middleware never gets a chance to 401 a
+	// cookie-only share visitor before the broker can inspect the
+	// cookie.
+	r.Post("/api/view/open", s.handleViewOpen)
+	r.Get("/api/view/events", s.handleViewEvents)
+	r.Get("/api/view/files/*", s.handleViewFile)
 
 	// API routes
 	r.Group(func(r chi.Router) {
@@ -204,6 +485,10 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Get("/users", s.handleListUsersPublic)
 		r.Post("/users/resolve", s.handleResolveUsernames)
 
+		// Teams — readable by any authenticated token. Writes sit
+		// under /api/admin/teams (registerAdminTeamRoutes).
+		s.registerTeamRoutes(r)
+
 		// Setup endpoints — open until the board is claimed, then 409 forever.
 		r.Get("/setup/status", s.handleSetupStatus)
 		r.Post("/setup", s.handleSetup)
@@ -236,6 +521,53 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Put("/content/*", s.handleWritePage)
 		r.Delete("/content/*", s.handleDeletePage)
 
+		// Share tokens — per-page public links. Lives under /api/share
+		// (not nested under /content/) so chi's content wildcard doesn't
+		// swallow the sub-route.
+		r.Post("/share", s.handleCreateShare)
+		r.Get("/share", s.handleListShares)
+		r.Delete("/share/{id}", s.handleRevokeShare)
+		// Fragment → cookie handshake. Anonymous callers hit this with
+		// the plaintext token extracted from the URL fragment; the
+		// server mints a scoped cookie. No auth required.
+		r.Post("/share/redeem", s.handleRedeemShare)
+
+		// Per-page approval — "a human read this version and said it's
+		// correct". Lives under /api/approval for the same reason as
+		// /api/share (avoid chi's /content/* wildcard).
+		r.Get("/approval", s.handleGetApproval)
+		r.Post("/approval", s.handleCreateApproval)
+		r.Delete("/approval", s.handleRevokeApproval)
+
+		// Webhook subscriptions — outbound event delivery. Owners see
+		// their own; admins see all (handler branches on auth).
+		r.Post("/webhooks", s.handleCreateWebhook)
+		r.Get("/webhooks", s.handleListWebhooks)
+		r.Get("/webhooks/{id}", s.handleGetWebhook)
+		r.Patch("/webhooks/{id}", s.handleUpdateWebhook)
+		r.Delete("/webhooks/{id}", s.handleRevokeWebhook)
+		r.Post("/webhooks/{id}/test", s.handleTestWebhook)
+		// Ad-hoc fire — used by the <Button fires="..."> component and
+		// by any agent that wants to produce a user-triggered event.
+		r.Post("/webhooks/fire", s.handleFireWebhook)
+
+		// Inbox — per-user reminder queue. Every endpoint reads the
+		// recipient from the request context (bearer's user), never
+		// from a query param, so cross-user reads are impossible even
+		// for admins. Strong privacy boundary.
+		r.Get("/inbox", s.handleListInbox)
+		r.Get("/inbox/count", s.handleInboxCount)
+		r.Post("/inbox/read-all", s.handleInboxMarkAllRead)
+		r.Post("/inbox/{id}/read", s.handleInboxItem)
+		r.Post("/inbox/{id}/archive", s.handleInboxItem)
+		r.Delete("/inbox/{id}", s.handleInboxItem)
+
+		// /api/view/* is registered OUTSIDE this gated group — the
+		// broker does its own authority resolution (bearer | cookie |
+		// anonymous-public). Registering here would kick share-cookie
+		// visitors out with 401 before the handler can inspect the
+		// cookie.
+
 		// Component endpoints
 		r.Get("/components", s.handleListComponents)
 		r.Get("/components.js", s.handleComponentsBundle)
@@ -251,7 +583,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Put("/files/*", s.handleWriteFile)
 		r.Delete("/files/*", s.handleDeleteFile)
 
-		// Skills — a read view on top of files/skills/<slug>/SKILL.md
+		// Skills — a read view on top of content/skills/<slug>/SKILL.md
 		r.Get("/skills", s.handleListSkills)
 		r.Get("/skills/{slug}", s.handleGetSkill)
 
@@ -275,6 +607,12 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// Meta
 		r.Get("/health", s.handleHealth)
 		r.Get("/config", s.handleConfig)
+
+		// Public agent primer. Registered inside /api but the auth
+		// middleware short-circuits on its path (see OpenPaths above).
+		// Namespaced under /api so a user-authored page at /introduction
+		// doesn't collide with the discovery endpoint.
+		r.Get("/introduction", s.handleIntroduction)
 	}
 }
 

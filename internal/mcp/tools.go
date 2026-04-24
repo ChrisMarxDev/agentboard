@@ -182,7 +182,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 		},
 		{
 			Name:        "agentboard_list_skills",
-			Description: "List skills hosted by this project. A skill is any folder under files/skills/<slug>/ containing a SKILL.md with `name` and `description` in YAML frontmatter (Anthropic skill format). Returns slug, name, description, path, and updated_at per skill. Use this to discover what skills are available before fetching one with agentboard_get_skill.",
+			Description: "List skills hosted by this project. A skill is any folder under content/skills/<slug>/ containing a SKILL.md with `name` and `description` in YAML frontmatter (Anthropic skill format). Returns slug, name, description, path, and updated_at per skill. Use this to discover what skills are available before fetching one with agentboard_get_skill.",
 			InputSchema: map[string]interface{}{
 				"type":       "object",
 				"properties": map[string]interface{}{},
@@ -194,7 +194,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"slug": map[string]string{"type": "string", "description": "Folder name under files/skills/ (no path separators)."},
+					"slug": map[string]string{"type": "string", "description": "Folder name under content/skills/ (no path separators)."},
 				},
 				"required": []string{"slug"},
 			},
@@ -254,6 +254,58 @@ func (s *Server) toolDefinitions() []ToolDef {
 		},
 	}
 
+	// Webhook tools — only advertised when the webhook store is live.
+	// Agents use these to subscribe (for themselves or for downstream
+	// systems) and to fire user-triggered events.
+	if s.Webhooks != nil {
+		tools = append(tools,
+			ToolDef{
+				Name:        "agentboard_list_webhooks",
+				Description: "List every unrevoked webhook subscription on this instance. Returns id, event_pattern, destination_url, label, status, and success/failure counts. Use to audit what's being observed before adding a new subscription.",
+				InputSchema: map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_create_webhook",
+				Description: "Subscribe to outbound events matching `event_pattern`. Every matching event POSTs a signed JSON body to `destination_url`. Returns the subscription record plus a plaintext `secret` shown ONCE — save it or rotate via revoke+create. Patterns: `*` = everything, `data.*` = any key write, `content.updated.*` = any page update, etc.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"event_pattern":   map[string]string{"type": "string", "description": "Match pattern, e.g. 'data.*' or 'content.updated.handbook'"},
+						"destination_url": map[string]string{"type": "string", "description": "Absolute URL the matching events are POSTed to"},
+						"label":           map[string]string{"type": "string", "description": "Optional human-readable description"},
+					},
+					"required": []string{"event_pattern", "destination_url"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_revoke_webhook",
+				Description: "Revoke a webhook subscription by id. Deliveries stop immediately. Idempotent — revoking an already-revoked subscription is a no-op.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"id": map[string]string{"type": "string", "description": "Subscription id from agentboard_list_webhooks or the create response"},
+					},
+					"required": []string{"id"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_fire_event",
+				Description: "Emit a user-triggered event onto the webhook bus. Every subscription whose pattern matches `event` receives a signed POST. Use for agent-triggered signals (\"deploy started\", \"runbook completed\") when data writes don't capture the intent. Returns the number of subscribers the event reached.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"event":   map[string]string{"type": "string", "description": "Event name, e.g. 'deploy.prod' or 'alert.pager'"},
+						"payload": map[string]interface{}{"type": "object", "description": "Structured payload carried as event.data"},
+					},
+					"required": []string{"event"},
+				},
+			},
+		)
+	}
+
 	// Component upload tools are only advertised when the server was started
 	// with --allow-component-upload. See CORE_GUIDELINES and spec §7.6 —
 	// user component source runs as arbitrary JS in every visitor's browser.
@@ -280,6 +332,87 @@ func (s *Server) toolDefinitions() []ToolDef {
 						"name": map[string]string{"type": "string", "description": "Component name to delete"},
 					},
 					"required": []string{"name"},
+				},
+			},
+		)
+	}
+
+	// Team tools — role groups that expand @mentions to members. Admin-
+	// gated writes are enforced at the HTTP layer; the MCP surface
+	// advertises them unconditionally so tool discovery works.
+	if s.Teams != nil {
+		tools = append(tools,
+			ToolDef{
+				Name:        "agentboard_list_teams",
+				Description: "List every team with its members. Use this to discover @team mentions that exist on this instance.",
+				InputSchema: map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_get_team",
+				Description: "Get one team by slug, including its members.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"slug": map[string]string{"type": "string", "description": "Team slug (e.g. marketing)"},
+					},
+					"required": []string{"slug"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_create_team",
+				Description: "Create a new team. Requires admin. Reserved slugs (all, admins, agents, here) are refused.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"slug":         map[string]string{"type": "string", "description": "Lowercase slug; same grammar as a username"},
+						"display_name": map[string]string{"type": "string", "description": "Optional pretty name"},
+						"description":  map[string]string{"type": "string", "description": "Optional one-liner"},
+						"members": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Optional initial member usernames",
+						},
+					},
+					"required": []string{"slug"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_delete_team",
+				Description: "Delete a team and its members. Requires admin. Assignees on kanban rows that reference the deleted team will render as unknown.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"slug": map[string]string{"type": "string", "description": "Team slug to delete"},
+					},
+					"required": []string{"slug"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_add_team_member",
+				Description: "Add a user to a team. Requires admin. Idempotent — re-adding updates the role.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"slug":     map[string]string{"type": "string", "description": "Team slug"},
+						"username": map[string]string{"type": "string", "description": "Existing username to add"},
+						"role":     map[string]string{"type": "string", "description": "Optional role tag (lead, rotation, ...)"},
+					},
+					"required": []string{"slug", "username"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_remove_team_member",
+				Description: "Remove a user from a team. Requires admin.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"slug":     map[string]string{"type": "string", "description": "Team slug"},
+						"username": map[string]string{"type": "string", "description": "Username to remove"},
+					},
+					"required": []string{"slug", "username"},
 				},
 			},
 		)
@@ -351,6 +484,26 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolGrab(args)
 	case "agentboard_search":
 		return s.toolSearch(args)
+	case "agentboard_list_webhooks":
+		return s.toolListWebhooks()
+	case "agentboard_create_webhook":
+		return s.toolCreateWebhook(args)
+	case "agentboard_revoke_webhook":
+		return s.toolRevokeWebhook(args)
+	case "agentboard_fire_event":
+		return s.toolFireEvent(args)
+	case "agentboard_list_teams":
+		return s.toolListTeams()
+	case "agentboard_get_team":
+		return s.toolGetTeam(args)
+	case "agentboard_create_team":
+		return s.toolCreateTeam(args)
+	case "agentboard_delete_team":
+		return s.toolDeleteTeam(args)
+	case "agentboard_add_team_member":
+		return s.toolAddTeamMember(args)
+	case "agentboard_remove_team_member":
+		return s.toolRemoveTeamMember(args)
 	default:
 		return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -429,7 +582,7 @@ func (s *Server) toolListSkills() (interface{}, *RPCError) {
 		return nil, &RPCError{Code: -32000, Message: err.Error()}
 	}
 	if len(list) == 0 {
-		return mcpContent("No skills found. Hosts skills by writing SKILL.md (YAML frontmatter with `name` and `description`) into files/skills/<slug>/."), nil
+		return mcpContent("No skills found. Hosts skills by writing SKILL.md (YAML frontmatter with `name` and `description`) into content/skills/<slug>/ via PUT /api/files/skills/<slug>/SKILL.md."), nil
 	}
 	pretty, _ := json.MarshalIndent(list, "", "  ")
 	return mcpContent(string(pretty)), nil

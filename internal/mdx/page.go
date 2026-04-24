@@ -132,6 +132,17 @@ func (pm *PageManager) ScanPages() {
 
 		relPath, _ := filepath.Rel(contentDir, path)
 		pagePath := strings.TrimSuffix(relPath, ".md")
+
+		// Anthropic-style skill manifest: when a folder contains `SKILL.md`,
+		// treat it as the folder's index page. `content/skills/bruno/SKILL.md`
+		// renders at `/skills/bruno` (not `/skills/bruno/SKILL`) — the file
+		// name is a format requirement from the skill zip, not a URL.
+		if filepath.Base(pagePath) == "SKILL" {
+			parent := filepath.ToSlash(filepath.Dir(pagePath))
+			if parent != "." && parent != "" {
+				pagePath = parent
+			}
+		}
 		urlPath := "/" + pagePath
 
 		title, source := parseFrontmatter(string(content))

@@ -2,6 +2,7 @@ package mdx
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,24 +13,26 @@ import (
 // WatchCallback is called when pages change.
 type WatchCallback func(pagePath string)
 
-// StartWatcher watches the project for page file changes.
+// StartWatcher watches the project for page file changes. Pages live under
+// content/ in arbitrary nesting (e.g. content/skills/<slug>/SKILL.md), so
+// every subdirectory is added to the watcher — fsnotify is non-recursive by
+// default. New subdirectories created after startup are picked up on their
+// Create event.
 func (pm *PageManager) StartWatcher(onChange WatchCallback) error {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
 
-	// Watch index.md directory
+	// Watch project root (for index.md).
 	projectDir := pm.project.Path
 	if err := watcher.Add(projectDir); err != nil {
 		log.Printf("Warning: could not watch %s: %v", projectDir, err)
 	}
 
-	// Watch content/ directory
+	// Watch content/ and every subdirectory below it.
 	contentDir := pm.project.ContentDir()
-	if err := watcher.Add(contentDir); err != nil {
-		log.Printf("Warning: could not watch %s: %v", contentDir, err)
-	}
+	addContentTree(watcher, contentDir)
 
 	go func() {
 		defer watcher.Close()
@@ -42,6 +45,14 @@ func (pm *PageManager) StartWatcher(onChange WatchCallback) error {
 			case event, ok := <-watcher.Events:
 				if !ok {
 					return
+				}
+
+				// New directories must be added to the watch set so their
+				// contents generate events too.
+				if event.Has(fsnotify.Create) {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						_ = watcher.Add(event.Name)
+					}
 				}
 
 				// Only care about .md files
@@ -75,4 +86,23 @@ func (pm *PageManager) StartWatcher(onChange WatchCallback) error {
 	}()
 
 	return nil
+}
+
+// addContentTree registers root and every subdirectory below it with the
+// watcher. Walk errors are logged and skipped; a partial watch set is better
+// than no watcher at all.
+func addContentTree(watcher *fsnotify.Watcher, root string) {
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			log.Printf("Warning: could not walk %s: %v", path, err)
+			return nil
+		}
+		if !info.IsDir() {
+			return nil
+		}
+		if err := watcher.Add(path); err != nil {
+			log.Printf("Warning: could not watch %s: %v", path, err)
+		}
+		return nil
+	})
 }

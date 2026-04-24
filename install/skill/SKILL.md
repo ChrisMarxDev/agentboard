@@ -162,12 +162,13 @@ Never silently swallow errors. Always tell the user what went wrong and what you
 ## Hosting team skills on AgentBoard
 
 AgentBoard can host Anthropic-format skills for a team. A skill is a folder
-under `files/skills/<slug>/` containing `SKILL.md` with YAML frontmatter
+under `content/skills/<slug>/` containing `SKILL.md` with YAML frontmatter
 (`name`, `description`) plus any supporting files. When the user asks to
 "share this skill with the team" or "host this on AgentBoard":
 
-1. Write the skill folder using `agentboard_write_file`:
-   - `files/skills/<slug>/SKILL.md` — frontmatter + prose
+1. Write the skill folder using `agentboard_write_file` (the REST path is
+   `/api/files/skills/…` — content/ and files/ are one consolidated tree):
+   - `skills/<slug>/SKILL.md` — frontmatter + prose
    - Any supporting files in the same folder
 2. Confirm it's discoverable with `agentboard_list_skills`.
 3. Share the URL `<server>/api/skills/<slug>` — GET returns a zip of the whole

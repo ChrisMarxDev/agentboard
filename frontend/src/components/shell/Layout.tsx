@@ -46,6 +46,26 @@ export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const kiosk = new URLSearchParams(location.search).get('nochrome') === '1'
+
+  // When the page is embedded (kiosk mode), post height updates to the
+  // parent window so iframe wrappers can auto-resize. The parent
+  // listens for {type: "agentboard:embed:height", height} on the
+  // message channel. No-op when not in kiosk mode.
+  useEffect(() => {
+    if (!kiosk || typeof window === 'undefined') return
+    const post = () => {
+      const h = document.documentElement.scrollHeight
+      try {
+        window.parent?.postMessage({ type: 'agentboard:embed:height', height: h }, '*')
+      } catch {
+        // parent refused — nothing we can do
+      }
+    }
+    post()
+    const ro = new ResizeObserver(post)
+    ro.observe(document.documentElement)
+    return () => ro.disconnect()
+  }, [kiosk])
   const isMobile = useIsMobile()
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -180,15 +200,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         />
       )}
 
-      <main
-        className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full relative"
-        style={{
-          // Expose the live nav width so wide components (Kanban, Table)
-          // can break out of the reading column to fill the viewport.
-          // 0 when the drawer is closed on desktop / always on mobile.
-          ['--ab-nav-width' as never]: `${!kiosk && drawerOpen && !isMobile ? navWidth : 0}px`,
-        }}
-      >
+      <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full relative">
         {!kiosk && (isMobile || collapsed) && !drawerOpen && (
           <button
             onClick={() => setCollapsed(false)}

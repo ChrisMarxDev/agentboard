@@ -408,12 +408,22 @@ func (m *Manager) StartWatcher(onChange func(name string, deleted bool)) error {
 		return err
 	}
 
-	// Watch the root. Subdirectories would need recursive add; start flat for
-	// simplicity and revisit if nested paths see heavy use.
+	// fsnotify is non-recursive; walk the tree and add each subdirectory.
+	// Nested paths are common (content/skills/<slug>/...), so a flat watch
+	// would silently miss those writes.
 	if err := watcher.Add(root); err != nil {
 		log.Printf("files: could not watch %s: %v", root, err)
 		return nil
 	}
+	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil || !info.IsDir() || path == root {
+			return nil
+		}
+		if err := watcher.Add(path); err != nil {
+			log.Printf("files: could not watch %s: %v", path, err)
+		}
+		return nil
+	})
 
 	go func() {
 		defer watcher.Close()
@@ -431,6 +441,13 @@ func (m *Manager) StartWatcher(onChange func(name string, deleted bool)) error {
 			case event, ok := <-watcher.Events:
 				if !ok {
 					return
+				}
+				// Directories created after startup must be added to the
+				// watch set so writes inside them fire events.
+				if event.Has(fsnotify.Create) {
+					if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
+						_ = watcher.Add(event.Name)
+					}
 				}
 				base := filepath.Base(event.Name)
 				if strings.HasPrefix(base, ".upload-") && strings.HasSuffix(base, ".tmp") {

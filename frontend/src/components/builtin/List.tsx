@@ -1,4 +1,5 @@
 import { useData } from '../../hooks/useData'
+import { RichText } from './RichText'
 
 interface ListProps {
   source: string
@@ -37,7 +38,7 @@ export function List({ source, variant = 'unordered' }: ListProps) {
           return (
             <li key={i} className="flex items-center gap-2 px-3 py-1.5 rounded" style={{ color: 'var(--text)' }}>
               {variant === 'ordered' && <span style={{ color: 'var(--text-secondary)' }}>{i + 1}.</span>}
-              <span>{item}</span>
+              <span><RichText text={item} /></span>
             </li>
           )
         }
@@ -58,7 +59,7 @@ export function List({ source, variant = 'unordered' }: ListProps) {
             {url ? (
               <a href={url} target="_blank" rel="noopener" style={{ color: 'var(--accent)' }}>{text}</a>
             ) : (
-              <span>{text}</span>
+              <span><RichText text={text} /></span>
             )}
           </li>
         )

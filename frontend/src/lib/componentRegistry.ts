@@ -20,6 +20,13 @@ import { Image } from '../components/builtin/Image'
 import { File as FileComponent } from '../components/builtin/File'
 import { Errors } from '../components/builtin/Errors'
 import { ApiList } from '../components/builtin/ApiList'
+import { Mention } from '../components/builtin/Mention'
+import { TeamRoster } from '../components/builtin/TeamRoster'
+import { RichText } from '../components/builtin/RichText'
+import { SkillInstall } from '../components/builtin/SkillInstall'
+import { Button } from '../components/builtin/Button'
+import { Sheet } from '../components/builtin/Sheet'
+import { Inbox } from '../components/builtin/Inbox'
 
 type AnyComponent = ComponentType<any>
 
@@ -47,6 +54,13 @@ registry.set('Image', Image)
 registry.set('File', FileComponent)
 registry.set('Errors', Errors)
 registry.set('ApiList', ApiList)
+registry.set('Mention', Mention)
+registry.set('TeamRoster', TeamRoster)
+registry.set('RichText', RichText)
+registry.set('SkillInstall', SkillInstall)
+registry.set('Button', Button)
+registry.set('Sheet', Sheet)
+registry.set('Inbox', Inbox)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)

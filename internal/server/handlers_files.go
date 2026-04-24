@@ -136,6 +136,14 @@ func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 		Data: []byte(`{"name":"` + info.Name + `","deleted":false}`),
 	})
 
+	// Markdown uploads ARE page writes (FilesDir aliases ContentDir per
+	// CORE_GUIDELINES §9). The mdx watcher only scans content/ one level
+	// deep, so a nested upload like content/skills/<slug>/SKILL.md would
+	// never reach the page index or FTS. Re-scan + re-index inline.
+	if strings.HasSuffix(strings.ToLower(info.Name), ".md") {
+		s.reindexUploadedPage(info.Name)
+	}
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"ok":           true,
 		"name":         info.Name,
@@ -143,6 +151,32 @@ func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 		"content_type": info.ContentType,
 		"etag":         info.ETag,
 		"url":          info.URL,
+	})
+}
+
+// reindexUploadedPage refreshes the page index and FTS row for a .md file that
+// was written through the files API. Mirrors what handleWritePage does after a
+// normal /api/content write, minus optimistic-concurrency (the file API has no
+// ETag contract for pages).
+func (s *Server) reindexUploadedPage(name string) {
+	if s.Pages == nil {
+		return
+	}
+	s.Pages.ScanPages()
+
+	// The page index aliases `<folder>/SKILL.md` to `<folder>` (Anthropic
+	// skill-format convention — see mdx.ScanPages). Apply the same rule so
+	// the FTS lookup finds the aliased page, not the raw file path.
+	pageKey := strings.TrimSuffix(name, ".md")
+	pageKey = strings.TrimSuffix(pageKey, "/SKILL")
+	if s.Search != nil {
+		if p := s.Pages.GetPage(pageKey); p != nil {
+			_ = s.Search.IndexPage(p.Path, p.Title, p.Source)
+		}
+	}
+	s.Broadcaster.Broadcast(SSEEvent{
+		Type: "page-updated",
+		Data: []byte(`{"path":"` + name + `"}`),
 	})
 }
 
