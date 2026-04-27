@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/christophermarx/agentboard/internal/invitations"
 	_ "modernc.org/sqlite"
 )
 
@@ -63,7 +64,7 @@ func TestValidateUsername(t *testing.T) {
 func TestUserTokenCRUD(t *testing.T) {
 	s, _ := newTestStore(t)
 
-	alice, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindAgent})
+	alice, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindMember})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,7 @@ func TestUserTokenCRUD(t *testing.T) {
 	}
 
 	// Case-insensitive duplicate.
-	if _, err := s.CreateUser(CreateUserParams{Username: "ALICE", Kind: KindAgent}); !errors.Is(err, ErrUsernameTaken) {
+	if _, err := s.CreateUser(CreateUserParams{Username: "ALICE", Kind: KindMember}); !errors.Is(err, ErrUsernameTaken) {
 		t.Errorf("case-insensitive dup = %v, want ErrUsernameTaken", err)
 	}
 
@@ -148,14 +149,14 @@ func TestUserTokenCRUD(t *testing.T) {
 	}
 
 	// Username reserved forever — can't re-create.
-	if _, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindAgent}); !errors.Is(err, ErrUsernameTaken) {
+	if _, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindMember}); !errors.Is(err, ErrUsernameTaken) {
 		t.Errorf("re-create deactivated username = %v, want ErrUsernameTaken", err)
 	}
 }
 
 func TestRenameUser(t *testing.T) {
 	s, _ := newTestStore(t)
-	u, _ := s.CreateUser(CreateUserParams{Username: "alicee", Kind: KindAgent})
+	u, _ := s.CreateUser(CreateUserParams{Username: "alicee", Kind: KindMember})
 	raw, _ := GenerateToken()
 	tok, _ := s.CreateToken(CreateTokenParams{Username: u.Username, TokenHash: HashToken(raw)})
 
@@ -182,7 +183,7 @@ func TestRenameUser(t *testing.T) {
 	}
 
 	// Renaming to a taken username fails.
-	if _, err := s.CreateUser(CreateUserParams{Username: "bob", Kind: KindAgent}); err != nil {
+	if _, err := s.CreateUser(CreateUserParams{Username: "bob", Kind: KindMember}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.RenameUser("alice", "bob"); !errors.Is(err, ErrUsernameTaken) {
@@ -195,47 +196,91 @@ func TestRenameUser(t *testing.T) {
 	}
 }
 
-func TestBootstrapOnEmpty_NoLegacyToken_Noop(t *testing.T) {
-	// Without a legacy env var and with an empty DB, BootstrapOnEmpty
-	// should do nothing — admin creation now happens through /api/setup.
-	s, _ := newTestStore(t)
-	if err := s.BootstrapOnEmpty("", log.New(&captureWriter{}, "", 0)); err != nil {
-		t.Fatal(err)
-	}
-	users, err := s.ListUsers(false)
+func TestBootstrapFirstAdmin_MintsInvite(t *testing.T) {
+	// With no legacy token and an empty DB, BootstrapFirstAdmin mints
+	// a role=admin invitation so the operator can claim the first
+	// admin via /invite/<id>.
+	s, db := newTestStore(t)
+	invStore, err := invitations.NewStore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
+	inv, err := s.BootstrapFirstAdmin(invStore, "", 0, log.New(&captureWriter{}, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv == nil || inv.Role != invitations.RoleAdmin {
+		t.Errorf("expected admin invite, got %+v", inv)
+	}
+	if inv.CreatedBy != invitations.BootstrapCreator {
+		t.Errorf("created_by = %q", inv.CreatedBy)
+	}
+	users, _ := s.ListUsers(false)
 	if len(users) != 0 {
-		t.Errorf("want 0 users after no-op bootstrap, got %d", len(users))
+		t.Errorf("no users should exist yet, got %d", len(users))
 	}
 }
 
-func TestBootstrapOnEmpty_WithLegacyToken(t *testing.T) {
-	s, _ := newTestStore(t)
-	if err := s.BootstrapOnEmpty("legacy-secret", log.New(&captureWriter{}, "", 0)); err != nil {
+func TestBootstrapFirstAdmin_Idempotent(t *testing.T) {
+	s, db := newTestStore(t)
+	invStore, _ := invitations.NewStore(db)
+	first, err := s.BootstrapFirstAdmin(invStore, "", 0, nil)
+	if err != nil || first == nil {
 		t.Fatal(err)
+	}
+	second, err := s.BootstrapFirstAdmin(invStore, "", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ID != first.ID {
+		t.Errorf("second bootstrap should reuse: first=%q second=%q", first.ID, second.ID)
+	}
+}
+
+func TestBootstrapFirstAdmin_WithLegacyToken(t *testing.T) {
+	s, db := newTestStore(t)
+	invStore, _ := invitations.NewStore(db)
+	// Legacy token path short-circuits — seeds @legacy-agent and
+	// skips the bootstrap invite (an identity already exists).
+	inv, err := s.BootstrapFirstAdmin(invStore, "legacy-secret", 0, log.New(&captureWriter{}, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv != nil {
+		t.Errorf("expected nil invite with legacy token; got %+v", inv)
 	}
 	legacy, err := s.GetUser("legacy-agent")
 	if err != nil {
 		t.Fatalf("legacy-agent should exist: %v", err)
 	}
-	if legacy.Kind != KindAgent {
+	if legacy.Kind != KindMember {
 		t.Errorf("kind = %s", legacy.Kind)
 	}
 	if u, _, err := s.ResolveToken(HashToken("legacy-secret")); err != nil || u.Username != legacy.Username {
 		t.Errorf("legacy token resolve: u=%v err=%v", u, err)
 	}
-	// No admin is auto-minted anymore; that's now the /api/setup flow's job.
-	if _, err := s.GetUser("admin"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("admin should NOT be created alongside legacy: %v", err)
+}
+
+func TestBootstrapFirstAdmin_ExistingUserSkips(t *testing.T) {
+	s, db := newTestStore(t)
+	invStore, _ := invitations.NewStore(db)
+	// Seed a user first.
+	if _, err := s.CreateUser(CreateUserParams{Username: "alice", Kind: KindAdmin}); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := s.BootstrapFirstAdmin(invStore, "", 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv != nil {
+		t.Errorf("bootstrap should be no-op when users exist; got %+v", inv)
 	}
 }
 
 func TestResolveUsernames(t *testing.T) {
 	s, _ := newTestStore(t)
 	for _, name := range []string{"alice", "bob", "charlie"} {
-		if _, err := s.CreateUser(CreateUserParams{Username: name, Kind: KindAgent}); err != nil {
+		if _, err := s.CreateUser(CreateUserParams{Username: name, Kind: KindMember}); err != nil {
 			t.Fatal(err)
 		}
 	}

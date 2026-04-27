@@ -5,6 +5,8 @@ import Layout from './components/shell/Layout'
 import PageRenderer from './components/shell/PageRenderer'
 import Admin from './routes/Admin'
 import Login from './routes/Login'
+import InviteRedeem from './routes/InviteRedeem'
+import Tokens from './routes/Tokens'
 import { getToken, redirectToLogin, setPublicMode } from './lib/session'
 import { matchPublic } from './lib/publicMatcher'
 
@@ -12,9 +14,10 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* /login renders outside the shell — must work without a token
-            and without the data context. */}
+        {/* /login + /invite/:id render outside the shell — both must
+            work without a token and without the data context. */}
         <Route path="/login" element={<Login />} />
+        <Route path="/invite/:id" element={<InviteRedeem />} />
         <Route
           path="*"
           element={
@@ -36,12 +39,22 @@ function ViewRouter() {
   const location = useLocation()
   const pagePath =
     location.pathname === '/' ? 'index' : location.pathname.replace(/^\//, '')
-  // Admin route has no page behind it — bypass the view broker entirely.
+  // Admin and Tokens routes have no page behind them — bypass the view
+  // broker entirely.
   if (location.pathname === '/admin') {
     return (
       <DataProvider path={null}>
         <Layout>
           <Admin />
+        </Layout>
+      </DataProvider>
+    )
+  }
+  if (location.pathname === '/tokens') {
+    return (
+      <DataProvider path={null}>
+        <Layout>
+          <Tokens />
         </Layout>
       </DataProvider>
     )

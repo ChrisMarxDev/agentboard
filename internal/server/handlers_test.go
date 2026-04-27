@@ -65,7 +65,7 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	// keep working without threading tokens through every call.
 	if _, err := authStore.CreateUser(auth.CreateUserParams{
 		Username: "test-agent",
-		Kind:     auth.KindAgent,
+		Kind:     auth.KindMember,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -526,9 +526,9 @@ func TestMCPToolsList(t *testing.T) {
 	// tools + 1 grab tool + 1 search tool + 4 webhook tools = 26.
 	// (Component-upload write/delete are gated on --allow-component-upload
 	//  and aren't advertised in the default test config.)
-	// 26 base tools + 6 team tools (agentboard_{list,get,create,delete,add_member,remove_member}_team).
-	if len(tools) != 32 {
-		t.Errorf("expected 32 MCP tools, got %d", len(tools))
+	// 26 base + 6 team + 2 lock (agentboard_{lock,unlock}_page).
+	if len(tools) != 34 {
+		t.Errorf("expected 34 MCP tools, got %d", len(tools))
 	}
 }
 
@@ -599,6 +599,14 @@ func post(t *testing.T, ts *httptest.Server, path, body string) {
 }
 
 func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
+	_, ts := newAuthedTestServerWithSrv(t, token)
+	return ts
+}
+
+// newAuthedTestServerWithSrv is the same thing as newAuthedTestServer
+// but also hands back the *Server so tests can poke at its stores
+// (e.g. mint a bootstrap invite directly).
+func newAuthedTestServerWithSrv(t *testing.T, token string) (*Server, *httptest.Server) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -628,7 +636,7 @@ func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
 	if token != "" {
 		if _, err := authStore.CreateUser(auth.CreateUserParams{
 			Username: "test-agent",
-			Kind:     auth.KindAgent,
+			Kind:     auth.KindMember,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -650,7 +658,7 @@ func newAuthedTestServer(t *testing.T, token string) *httptest.Server {
 
 	ts := httptest.NewServer(srv.Router)
 	t.Cleanup(ts.Close)
-	return ts
+	return srv, ts
 }
 
 func TestAuthMiddleware(t *testing.T) {

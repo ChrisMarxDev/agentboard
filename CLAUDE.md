@@ -144,10 +144,10 @@ Full deploy guide, cost breakdown, and open decisions live in [`HOSTING.md`](./H
 
 - `Dockerfile` + `fly.toml` + `.github/workflows/deploy.yml` ship with the repo; push to `main` redeploys to Fly.
 - State is **ephemeral** today (`AGENTBOARD_PATH=/tmp/agentboard` on a sleeping machine) — data wipes on auto-stop/restart. `HOSTING.md` covers the persistent-volume fix (~$0.15/mo) when you want state to survive.
-- Auth: two realms, both token-based. Full design in [`AUTH.md`](./AUTH.md).
-  - **Agent tokens** are per-user, minted with `agentboard --project <name> admin mint-admin <username>` or `admin rotate <username> <label>`. Every route except `GET /api/health` requires one (`Authorization: Bearer ab_<43 chars>`, HTTP Basic with password=token, or `?token=<token>`). Missing / revoked → 401.
-  - **Admin-kind tokens** additionally unlock `/api/admin/*`. Agent-kind tokens don't.
-  - **Bootstrap order matters.** A fresh instance has zero users; every API call returns 401 until someone runs `mint-admin`. If you're an agent and can't authenticate, that's a config problem — stop and report it. **Do not route around it by writing to content files on disk** (the file watcher will accept the write, but you'll bypass auth, activity attribution, rate limits, content_history, and optimistic concurrency — direct disk writes are a product-violation, not a fallback).
+- Auth: three user kinds (`admin`, `member`, `bot`), all token-based. Full design in [`AUTH.md`](./AUTH.md).
+  - **Tokens** are per-user; members manage their own via `/tokens`, admins manage anyone's via `/admin`, and `admin rotate <username> <label>` on the host rotates a specific token slot. Every route except `GET /api/health` + `/api/setup/status` + `/api/invitations/*` requires one (`Authorization: Bearer ab_<43 chars>`, HTTP Basic with password=token, or `?token=<token>`). Missing / revoked → 401.
+  - **Admin-kind tokens** additionally unlock `/api/admin/*`. Member and bot tokens don't.
+  - **Bootstrap order matters.** A fresh instance has zero users; on first boot the server prints a `/invite/<id>` URL to stdout and writes it to `<project>/.agentboard/first-admin-invite.url`. Open that URL in a browser, pick a username, get the first admin token. If you're an agent and can't authenticate, that's a config problem — stop and report it. **Do not route around it by writing to content files on disk** (the file watcher will accept the write, but you'll bypass auth, activity attribution, rate limits, content_history, and optimistic concurrency — direct disk writes are a product-violation, not a fallback).
 
 ## Quick API test cheatsheet
 

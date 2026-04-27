@@ -127,6 +127,45 @@ func AdminRequired() func(http.Handler) http.Handler {
 	}
 }
 
+// ScopeSelfOrAdmin enforces the "self OR admin" rule for per-user
+// token-management endpoints. Expects a chi URL param named `username`
+// to have been bound by an outer router; reads it via urlParamReader
+// so this package doesn't depend on chi directly.
+//
+// Rule:
+//   - kind(caller) == admin → allowed for any target.
+//   - target == caller.username → allowed (users own themselves).
+//   - Otherwise 403.
+//
+// The bot-vs-member nuance from the roadmap ("admin manages bot
+// tokens") is covered by rule 1; members and bots alike fail rule 2
+// when targeting another user.
+func ScopeSelfOrAdmin(readParam func(r *http.Request, name string) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			caller := UserFromContext(r.Context())
+			if caller == nil {
+				http.Error(w, "authentication required", http.StatusUnauthorized)
+				return
+			}
+			if caller.Kind == KindAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+			target := strings.ToLower(readParam(r, "username"))
+			if target == "" || target != strings.ToLower(caller.Username) {
+				http.Error(w, "forbidden — can only manage own tokens", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // ------------------------------------------------------------------
 // helpers
 // ------------------------------------------------------------------

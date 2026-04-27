@@ -30,7 +30,7 @@ export function isPublicMode(): boolean {
 export interface SessionUser {
   username: string
   display_name?: string
-  kind: 'admin' | 'agent'
+  kind: 'admin' | 'member' | 'bot'
   avatar_color?: string
 }
 
@@ -123,44 +123,22 @@ export function sseURL(path: string): string {
   return `${path}${sep}token=${encodeURIComponent(tok)}`
 }
 
-// fetchSetupStatus asks the server whether the board has been claimed yet.
-// Open endpoint — no token needed. Returns false on network error so the
-// UI falls through to the sign-in form rather than showing "claim" on a
-// flaky connection.
-export async function fetchSetupStatus(): Promise<boolean> {
+export interface SetupStatus {
+  initialized: boolean
+  invite_url?: string
+}
+
+// fetchSetupStatus asks the server whether the board has been claimed
+// and, when unclaimed, whether a bootstrap invitation is active.
+// Open endpoint — no token needed. Returns a permissive default on
+// network error so the UI falls through to the sign-in form rather
+// than showing "first setup" on a flaky connection.
+export async function fetchSetupStatus(): Promise<SetupStatus> {
   try {
     const res = await fetch('/api/setup/status')
-    if (!res.ok) return true
-    const body = (await res.json()) as { initialized?: boolean }
-    return Boolean(body.initialized)
+    if (!res.ok) return { initialized: true }
+    return (await res.json()) as SetupStatus
   } catch {
-    return true
+    return { initialized: true }
   }
-}
-
-export interface ClaimResult {
-  username: string
-  token: string
-}
-
-// claimBoard POSTs /api/setup to create the first admin. 409 means the
-// board was claimed by someone else between our status check and submit.
-export async function claimBoard(username: string, displayName?: string): Promise<ClaimResult> {
-  const res = await fetch('/api/setup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username,
-      display_name: displayName ?? undefined,
-    }),
-  })
-  if (!res.ok) {
-    let msg = `${res.status}`
-    try {
-      const body = (await res.json()) as { error?: string; message?: string }
-      msg = body.error || body.message || msg
-    } catch { /* ignore */ }
-    throw new Error(msg)
-  }
-  return (await res.json()) as ClaimResult
 }

@@ -131,8 +131,11 @@ What's already in the binary and running on the dogfood instance.
 ### Auth (just landed)
 - Username is identity. `@alice` IS the user. Immutable + reserved forever.
 - One credential class: bearer tokens (`ab_...`). No sessions, no passwords.
-- `kind: admin | agent`. Admin unlocks `/api/admin/*`.
-- CLI: `agentboard admin mint-admin / rotate / rename-user / list`.
+- `kind: admin | member | bot`. Admin unlocks `/api/admin/*`; members manage
+  own tokens; bots are shared puppets any admin can rotate.
+- Onboarding via invitation URLs (`/invite/<id>`); first admin is bootstrapped
+  automatically on fresh `serve`. CLI: `agentboard admin list / list-invitations
+  / rotate / rename-user`.
 
 ### Docs
 - `CLAUDE.md`, `CORE_GUIDELINES.md`, `AUTH.md`, `HOSTING.md`, `SCALE.md`, `spec-plugins.md`, `DOGFOOD_NOTES.md` — all in sync with shipped code.

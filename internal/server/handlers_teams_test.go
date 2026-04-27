@@ -67,7 +67,7 @@ func seedUser(t *testing.T, srv *Server, name string) {
 	t.Helper()
 	if _, err := srv.Auth.CreateUser(auth.CreateUserParams{
 		Username: name,
-		Kind:     auth.KindAgent,
+		Kind:     auth.KindMember,
 	}); err != nil {
 		t.Fatalf("seed user %s: %v", name, err)
 	}

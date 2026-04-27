@@ -62,11 +62,6 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 		r.Route("/users/{username}", func(r chi.Router) {
 			r.Patch("/", s.handleUpdateUser)
 			r.Post("/deactivate", s.handleDeactivateUser)
-			r.Post("/tokens", s.handleCreateToken)
-			r.Route("/tokens/{tokenId}", func(r chi.Router) {
-				r.Post("/rotate", s.handleRotateToken)
-				r.Post("/revoke", s.handleRevokeToken)
-			})
 		})
 
 		// Shares — admin view over every unrevoked share token on the
@@ -79,6 +74,10 @@ func (s *Server) registerAdminRoutes(r chi.Router) {
 
 		// Teams — create/update/delete + member ops.
 		s.registerAdminTeamRoutes(r)
+
+		// Invitations — create/list/revoke. Redeeming happens at
+		// /api/invitations/{id}/redeem (public, outside /api/admin).
+		s.registerAdminInvitationRoutes(r)
 	})
 }
 
@@ -116,8 +115,8 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		respondError(w, 400, "bad_request", "invalid JSON body")
 		return
 	}
-	if req.Kind != auth.KindAgent && req.Kind != auth.KindAdmin {
-		respondError(w, 400, "bad_request", "kind must be 'agent' or 'admin'")
+	if req.Kind != auth.KindMember && req.Kind != auth.KindAdmin && req.Kind != auth.KindBot {
+		respondError(w, 400, "bad_request", "kind must be 'admin', 'member', or 'bot'")
 		return
 	}
 	if req.AccessMode == "" {
@@ -202,7 +201,7 @@ func (s *Server) handleDeactivateUser(w http.ResponseWriter, r *http.Request) {
 	caller := auth.UserFromContext(r.Context())
 	if caller != nil && strings.EqualFold(caller.Username, username) {
 		respondError(w, 400, "self_deactivate",
-			"cannot deactivate yourself; create another admin first with `agentboard admin mint-admin`")
+			"cannot deactivate yourself; promote or invite another admin first")
 		return
 	}
 	if err := s.Auth.Deactivate(username); err != nil {
@@ -216,78 +215,6 @@ func (s *Server) handleDeactivateUser(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, 200, map[string]string{"status": "deactivated"})
 }
 
-// -------------------- tokens --------------------
-
-func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
-	username := strings.ToLower(chi.URLParam(r, "username"))
-	if _, err := s.Auth.GetUser(username); err != nil {
-		respondError(w, 404, "not_found", "user not found")
-		return
-	}
-	var req createTokenRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	token, err := auth.GenerateToken()
-	if err != nil {
-		respondError(w, 500, "internal", "token gen failed")
-		return
-	}
-	tok, err := s.Auth.CreateToken(auth.CreateTokenParams{
-		Username:  username,
-		TokenHash: auth.HashToken(token),
-		Label:     req.Label,
-	})
-	if err != nil {
-		respondError(w, 500, "internal", "token persist failed")
-		return
-	}
-	respondJSON(w, 201, tokenResponse{
-		Username: username,
-		TokenID:  tok.ID,
-		Label:    tok.Label,
-		Token:    token,
-	})
-}
-
-func (s *Server) handleRotateToken(w http.ResponseWriter, r *http.Request) {
-	username := strings.ToLower(chi.URLParam(r, "username"))
-	tokenID := chi.URLParam(r, "tokenId")
-	tok, err := s.Auth.GetToken(tokenID)
-	if err != nil || !strings.EqualFold(tok.Username, username) {
-		respondError(w, 404, "not_found", "token not found on this user")
-		return
-	}
-	newToken, err := auth.GenerateToken()
-	if err != nil {
-		respondError(w, 500, "internal", "token gen failed")
-		return
-	}
-	if err := s.Auth.RotateToken(tokenID, auth.HashToken(newToken)); err != nil {
-		respondError(w, 500, "internal", "rotate failed")
-		return
-	}
-	respondJSON(w, 200, tokenResponse{
-		Username: tok.Username,
-		TokenID:  tok.ID,
-		Label:    tok.Label,
-		Token:    newToken,
-	})
-}
-
-func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
-	tokenID := chi.URLParam(r, "tokenId")
-	callerToken := auth.TokenFromContext(r.Context())
-	if callerToken != nil && callerToken.ID == tokenID {
-		respondError(w, 400, "self_revoke_token",
-			"cannot revoke the token you're using; rotate it instead, or create another admin token first")
-		return
-	}
-	if err := s.Auth.RevokeToken(tokenID); err != nil {
-		if errors.Is(err, auth.ErrNotFound) {
-			respondError(w, 404, "not_found", "token not found or already revoked")
-			return
-		}
-		respondError(w, 500, "internal", "revoke failed")
-		return
-	}
-	respondJSON(w, 200, map[string]string{"status": "revoked"})
-}
+// Token CRUD moved to handlers_tokens.go under /api/users/{username}/tokens.
+// The admin surface no longer owns token ops — scoped self-or-admin
+// access lives there instead.

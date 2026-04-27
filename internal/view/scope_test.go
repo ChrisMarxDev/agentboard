@@ -95,7 +95,7 @@ func TestScope_AgentRespectsRules(t *testing.T) {
 	b := seedScope(t)
 	agent := &auth.User{
 		Username:   "alice",
-		Kind:       auth.KindAgent,
+		Kind:       auth.KindMember,
 		AccessMode: auth.ModeRestrictToList,
 		Rules: []auth.Rule{
 			auth.Allow("/api/data/hb.main", "GET"),

@@ -11,11 +11,15 @@ import (
 // endpoints without a pre-seeded bearer.
 func bareClient() *http.Client { return &http.Client{} }
 
-func TestSetup_StatusAndClaim(t *testing.T) {
-	// Build an unauthenticated test server — no seeded user, no transport.
+// /api/setup/status is the only survivor of the v0 setup flow. Auth v1
+// replaced POST /api/setup with the invitation-redeem path. These tests
+// exercise the status endpoint's new shape — initialized + invite_url.
+
+func TestSetupStatus_Uninitialized_NoBootstrapInvite(t *testing.T) {
+	// Fresh board, no bootstrap invite minted yet (newAuthedTestServer
+	// doesn't run the serve-path bootstrap).
 	ts := newAuthedTestServer(t, "")
 
-	// Status is open and reports not initialized.
 	r, err := bareClient().Get(ts.URL + "/api/setup/status")
 	if err != nil {
 		t.Fatal(err)
@@ -24,113 +28,64 @@ func TestSetup_StatusAndClaim(t *testing.T) {
 	if r.StatusCode != 200 {
 		t.Fatalf("status = %d", r.StatusCode)
 	}
-	var status struct{ Initialized bool }
-	json.NewDecoder(r.Body).Decode(&status)
-	if status.Initialized {
+	var body struct {
+		Initialized bool   `json:"initialized"`
+		InviteURL   string `json:"invite_url"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body.Initialized {
 		t.Error("freshly-made board reports initialized=true")
 	}
-
-	// Claim — POST /api/setup with a username.
-	body := strings.NewReader(`{"username":"alice","display_name":"Alice Chen"}`)
-	resp, err := bareClient().Post(ts.URL+"/api/setup", "application/json", body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 201 {
-		t.Fatalf("claim = %d", resp.StatusCode)
-	}
-	var claim struct {
-		Username string `json:"username"`
-		Token    string `json:"token"`
-	}
-	json.NewDecoder(resp.Body).Decode(&claim)
-	if claim.Username != "alice" {
-		t.Errorf("claim.username = %q", claim.Username)
-	}
-	if !strings.HasPrefix(claim.Token, "ab_") {
-		t.Errorf("token shape: %s", claim.Token)
-	}
-
-	// Status now reports initialized.
-	r2, _ := bareClient().Get(ts.URL + "/api/setup/status")
-	var s2 struct{ Initialized bool }
-	json.NewDecoder(r2.Body).Decode(&s2)
-	r2.Body.Close()
-	if !s2.Initialized {
-		t.Error("post-claim initialized=false")
-	}
-
-	// Second claim must 409.
-	body2 := strings.NewReader(`{"username":"bob"}`)
-	resp2, err := bareClient().Post(ts.URL+"/api/setup", "application/json", body2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp2.Body.Close()
-	if resp2.StatusCode != 409 {
-		t.Errorf("second claim = %d, want 409", resp2.StatusCode)
-	}
-
-	// The returned token works as admin.
-	req, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
-	req.Header.Set("Authorization", "Bearer "+claim.Token)
-	meResp, err := bareClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer meResp.Body.Close()
-	if meResp.StatusCode != 200 {
-		t.Errorf("claim token /api/admin/me = %d", meResp.StatusCode)
-	}
-	var me struct {
-		Username string `json:"username"`
-		Kind     string `json:"kind"`
-	}
-	json.NewDecoder(meResp.Body).Decode(&me)
-	if me.Username != "alice" || me.Kind != "admin" {
-		t.Errorf("me = %+v, want alice/admin", me)
+	if body.InviteURL != "" {
+		t.Errorf("invite_url should be empty with no bootstrap invite; got %q", body.InviteURL)
 	}
 }
 
-func TestSetup_InvalidUsername(t *testing.T) {
-	ts := newAuthedTestServer(t, "")
-	body := strings.NewReader(`{"username":"0bad"}`)
-	resp, err := bareClient().Post(ts.URL+"/api/setup", "application/json", body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 400 {
-		t.Errorf("invalid username = %d, want 400", resp.StatusCode)
-	}
-}
+func TestSetupStatus_Uninitialized_WithBootstrapInvite(t *testing.T) {
+	srv, ts := newAuthedTestServerWithSrv(t, "")
 
-func TestSetup_LockedAfterLegacyMigration(t *testing.T) {
-	// When AGENTBOARD_AUTH_TOKEN is set on first boot it produces a
-	// legacy-agent user — which counts as "initialized" even though no
-	// admin exists. Setup must refuse so the operator uses the CLI to
-	// mint an admin (rather than a stranger claiming via /setup).
-	ts := newAuthedTestServer(t, "legacy-secret")
+	// Mint a bootstrap invite directly — the same thing serve.go does.
+	inv, err := srv.Auth.BootstrapFirstAdmin(srv.Invitations, "", 0, nil)
+	if err != nil || inv == nil {
+		t.Fatalf("mint bootstrap: inv=%v err=%v", inv, err)
+	}
 
 	r, err := bareClient().Get(ts.URL + "/api/setup/status")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Body.Close()
-	var s struct{ Initialized bool }
-	json.NewDecoder(r.Body).Decode(&s)
-	if !s.Initialized {
-		t.Error("legacy-migrated board reports initialized=false")
+	var body struct {
+		Initialized bool   `json:"initialized"`
+		InviteURL   string `json:"invite_url"`
 	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if body.Initialized {
+		t.Error("should be unclaimed")
+	}
+	if !strings.Contains(body.InviteURL, "/invite/"+inv.ID) {
+		t.Errorf("invite_url = %q, want to include /invite/%s", body.InviteURL, inv.ID)
+	}
+}
 
-	body := strings.NewReader(`{"username":"alice"}`)
-	resp, err := bareClient().Post(ts.URL+"/api/setup", "application/json", body)
+func TestSetupStatus_Initialized(t *testing.T) {
+	// Seed a user via the token param — that flips the board into the
+	// initialized state.
+	ts := newAuthedTestServer(t, "s3cret")
+	r, err := bareClient().Get(ts.URL + "/api/setup/status")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 409 {
-		t.Errorf("claim after legacy migration = %d, want 409", resp.StatusCode)
+	defer r.Body.Close()
+	var body struct {
+		Initialized bool   `json:"initialized"`
+		InviteURL   string `json:"invite_url"`
+	}
+	json.NewDecoder(r.Body).Decode(&body)
+	if !body.Initialized {
+		t.Error("post-seed board reports initialized=false")
+	}
+	if body.InviteURL != "" {
+		t.Errorf("initialized board should have no invite_url; got %q", body.InviteURL)
 	}
 }

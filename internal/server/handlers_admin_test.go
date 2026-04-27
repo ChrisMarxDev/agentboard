@@ -33,7 +33,7 @@ func seedAgent(t *testing.T, srv *Server, username string) string {
 	t.Helper()
 	if _, err := srv.Auth.CreateUser(auth.CreateUserParams{
 		Username: username,
-		Kind:     auth.KindAgent,
+		Kind:     auth.KindMember,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	body := `{"username":"viewer","kind":"agent","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
+	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
 	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users", body, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -143,14 +143,14 @@ func TestAdmin_UsernameTaken_AndReservedAfterDeactivate(t *testing.T) {
 
 	// Create and deactivate a user.
 	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
-		`{"username":"alice","kind":"agent"}`, adminToken))
+		`{"username":"alice","kind":"member"}`, adminToken))
 	resp.Body.Close()
 	deact, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users/alice/deactivate", "", adminToken))
 	deact.Body.Close()
 
 	// Re-creating "alice" must 409 even though she's deactivated.
 	again, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
-		`{"username":"alice","kind":"agent"}`, adminToken))
+		`{"username":"alice","kind":"member"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestAdmin_InvalidUsername(t *testing.T) {
 	adminToken := seedAdmin(t, srv)
 
 	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
-		`{"username":"0bad","kind":"agent"}`, adminToken))
+		`{"username":"0bad","kind":"member"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +208,14 @@ func TestAdmin_RotateToken(t *testing.T) {
 	adminToken := seedAdmin(t, srv)
 
 	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
-		`{"username":"rotator","kind":"agent"}`, adminToken))
+		`{"username":"rotator","kind":"member"}`, adminToken))
 	var created tokenResponse
 	json.NewDecoder(resp.Body).Decode(&created)
 	resp.Body.Close()
 	oldToken := created.Token
 
 	resp2, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/users/"+created.Username+"/tokens/"+created.TokenID+"/rotate",
+		ts.URL+"/api/users/"+created.Username+"/tokens/"+created.TokenID+"/rotate",
 		"", adminToken))
 	var rotated tokenResponse
 	json.NewDecoder(resp2.Body).Decode(&rotated)
@@ -265,13 +265,13 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	adminToken := seedAdmin(t, srv)
 
 	r, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
-		`{"username":"multi","kind":"agent"}`, adminToken))
+		`{"username":"multi","kind":"member"}`, adminToken))
 	var first tokenResponse
 	json.NewDecoder(r.Body).Decode(&first)
 	r.Body.Close()
 
 	r2, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/users/"+first.Username+"/tokens",
+		ts.URL+"/api/users/"+first.Username+"/tokens",
 		`{"label":"ci"}`, adminToken))
 	var second tokenResponse
 	json.NewDecoder(r2.Body).Decode(&second)
@@ -291,7 +291,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	}
 
 	rv, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/users/"+first.Username+"/tokens/"+first.TokenID+"/revoke",
+		ts.URL+"/api/users/"+first.Username+"/tokens/"+first.TokenID+"/revoke",
 		"", adminToken))
 	rv.Body.Close()
 

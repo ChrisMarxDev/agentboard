@@ -12,7 +12,7 @@ import { apiFetch } from '../lib/session'
 export interface PublicUser {
   username: string
   display_name?: string
-  kind: 'admin' | 'agent'
+  kind: 'admin' | 'member' | 'bot'
   avatar_color?: string
   deactivated?: boolean
 }

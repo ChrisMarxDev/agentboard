@@ -54,19 +54,25 @@ curl -H "Authorization: Bearer $AB_TOKEN" http://localhost:3000/api/content | jq
 
 The file is outside the repo tree (in `/tmp`), so it will never be committed. If a session's permission policy blocks reading it directly, ask the user to paste the token — don't try to bypass.
 
-If `/tmp/agentboard-token` is missing or the token is 401'ing (rotated, revoked), recover with the admin CLI — ask the user before minting, since each mint-admin call creates a new identity:
+If `/tmp/agentboard-token` is missing or the token is 401'ing (rotated, revoked), recover without minting a new identity:
 
 ```bash
 ./agentboard --project agentboard-dev admin list                    # verify state
 ./agentboard --project agentboard-dev admin rotate chris <label>    # rotate existing token
-./agentboard --project agentboard-dev admin mint-admin <username>   # last resort — creates new user
+
+# If all admins are locked out entirely, wipe the DB so boot re-mints
+# a first-admin invitation URL to stdout. Destructive — only for the
+# dogfood project; ask the user first.
+./agentboard --project agentboard-dev admin list-invitations        # shows active invite URLs
 ```
+
+There is **no `mint-admin` CLI** in Auth v1. The first-admin path is an invitation URL printed at server boot when the users table is empty; additional users are added by admins creating invitations at `/admin`, not by CLI token minting.
 
 Whichever path, write the fresh token back to `/tmp/agentboard-token` (mode `600`) so the next session picks it up.
 
 **Never fall back to writing `content/…md` files directly on disk.** The file watcher accepts it, but direct disk writes bypass auth, activity attribution, rate limits, `content_history`, and optimistic concurrency. It's a product-invariant violation — if you can't authenticate, that's a config problem worth stopping to report, not routing around.
 
-The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'll mint in `~/.agentboard/default/` instead of agentboard-dev. Always pass `--project agentboard-dev` (or `AGENTBOARD_PROJECT=agentboard-dev` in the env).
+The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'll operate on `~/.agentboard/default/` instead of agentboard-dev. Always pass `--project agentboard-dev` (or `AGENTBOARD_PROJECT=agentboard-dev` in the env).
 
 ---
 
@@ -250,6 +256,15 @@ The dashboard should exercise a broad set of components — it's our own visual 
 - **ApiList** for surfacing any `/api/*` endpoint that returns an array of objects (skills, errors, pages…) — prefer this over a bespoke React route when you want a listing page. See `content/skills.md` for the canonical example. Per CORE_GUIDELINES §9.
 - **Mention** for `@username` and `@team` pills. Resolution order: user → stored team → reserved (`@all`, `@admins`, `@agents`, `@here`) → plain text.
 - **TeamRoster** (`<TeamRoster slug="marketing" />`) for a roster card on MDX pages — header pill + description + member chips with optional role labels.
+
+### MDX parse pitfalls
+
+Two patterns break MDX silently — the page compiles, but a Card body comes out empty. Avoid both:
+
+1. **`<...>` placeholders inside JSX attribute strings.** `<Markdown text="run agentboard rotate <user> <label>" />` will fail because MDX parses `<user>` as a JSX element start tag. Either escape the angle brackets, drop them (`USER LABEL`), or move the content into the Card's body and use native markdown.
+2. **Multi-line JSX expressions with template literals + URLs inside Card children.** `<Card><Code>{`git clone https://...`}</Code></Card>` is flaky — the URL's `://` interacts badly with the JSX expression boundary. For multi-line code in a Card, prefer a plain fenced code block (```` ```bash ```` ... ```` ``` ````) at the page level. The standalone `<Code source="dev.foo">` pattern (sourced from a data key) is also safe because the value isn't inline.
+
+Rule of thumb: if you put MDX-active syntax (`<…>`, JSX expressions, template literals with special chars) inside an attribute string OR inside `<Card>` children, you're in flaky territory. Native markdown text inside `<Card>...</Card>` body is reliable; JSX attribute strings are not.
 
 One rule: each feature page must use at least **three distinct components** plus a Mermaid diagram. If a feature has nothing diagrammable, it's probably not interesting enough to have its own page — roll it into a sibling.
 

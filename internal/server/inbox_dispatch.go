@@ -219,7 +219,7 @@ func (s *Server) expandMention(raw string) []string {
 	case "admins":
 		return s.allActiveUsernames(string(auth.KindAdmin))
 	case "agents":
-		return s.allActiveUsernames(string(auth.KindAgent))
+		return s.allActiveUsernames(string(auth.KindMember))
 	case "here":
 		// Presence isn't tracked in v0; treated as unknown.
 		return nil

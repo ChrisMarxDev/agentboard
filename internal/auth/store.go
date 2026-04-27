@@ -20,14 +20,29 @@ var (
 	ErrImmutableField  = errors.New("username is immutable; use `agentboard admin rename-user` on the host")
 )
 
-// Kind enumerates the two realms. Both auth via tokens; admin additionally
-// unlocks /api/admin/*.
+// Kind enumerates the three user kinds. All auth via tokens.
+//
+//   - admin: manages users, invitations, teams, webhooks, page locks,
+//     and any content. Unlocks /api/admin/*.
+//   - member: normal human user. Reads/writes content. Manages *own*
+//     tokens. Cannot manage other users or lock pages.
+//   - bot: shared puppet. Any admin can mint/rotate/revoke its tokens.
+//     Behaves like a member otherwise. Cannot create invitations or
+//     page locks.
 type Kind string
 
 const (
-	KindAdmin Kind = "admin"
-	KindAgent Kind = "agent"
+	KindAdmin  Kind = "admin"
+	KindMember Kind = "member"
+	KindBot    Kind = "bot"
 )
+
+// ValidKinds returns the set of kind values that CreateUser accepts.
+// Callers validating JSON input use this to reject unknown roles
+// early (before the DB CHECK constraint does).
+func ValidKinds() []Kind {
+	return []Kind{KindAdmin, KindMember, KindBot}
+}
 
 // AccessMode controls rule evaluation for a user's tokens.
 type AccessMode string
@@ -57,11 +72,16 @@ type User struct {
 
 // UserToken is one row in user_tokens. Tokens rotate and a user can hold
 // several, so tokens have their own uuid. The FK is users.username.
+//
+// CreatedBy captures the username that minted the token — matters for
+// bot-kind users where multiple admins may share mint/rotate rights.
+// Backfilled rows carry an empty string.
 type UserToken struct {
 	ID         string     `json:"id"`
 	Username   string     `json:"username"`
 	Label      string     `json:"label,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
+	CreatedBy  string     `json:"created_by,omitempty"`
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
 	RevokedAt  *time.Time `json:"revoked_at,omitempty"`
 }
@@ -329,6 +349,7 @@ type CreateTokenParams struct {
 	Username  string
 	TokenHash string
 	Label     string
+	CreatedBy string // optional — the username that minted (for audit)
 }
 
 // CreateToken inserts a token for a user. Returns metadata; the plaintext
@@ -342,9 +363,9 @@ func (s *Store) CreateToken(p CreateTokenParams) (*UserToken, error) {
 	now := time.Now().UTC()
 	tokenID := uuid.NewString()
 	_, err := s.db.Exec(
-		`INSERT INTO user_tokens (id, username, token_hash, label, created_at)
-		 VALUES (?, ?, ?, NULLIF(?, ''), ?)`,
-		tokenID, p.Username, p.TokenHash, p.Label, now.Unix(),
+		`INSERT INTO user_tokens (id, username, token_hash, label, created_at, created_by)
+		 VALUES (?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, ''))`,
+		tokenID, p.Username, p.TokenHash, p.Label, now.Unix(), p.CreatedBy,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert token: %w", err)
@@ -355,7 +376,7 @@ func (s *Store) CreateToken(p CreateTokenParams) (*UserToken, error) {
 // GetToken returns one token row by its uuid.
 func (s *Store) GetToken(id string) (*UserToken, error) {
 	row := s.db.QueryRow(
-		`SELECT id, username, label, created_at, last_used_at, revoked_at
+		`SELECT id, username, label, created_at, created_by, last_used_at, revoked_at
 		 FROM user_tokens WHERE id = ?`, id,
 	)
 	return scanToken(row)
@@ -364,7 +385,7 @@ func (s *Store) GetToken(id string) (*UserToken, error) {
 // ListTokensForUser returns every token owned by a user (active + revoked).
 func (s *Store) ListTokensForUser(username string) ([]UserToken, error) {
 	rows, err := s.db.Query(
-		`SELECT id, username, label, created_at, last_used_at, revoked_at
+		`SELECT id, username, label, created_at, created_by, last_used_at, revoked_at
 		 FROM user_tokens WHERE username = ? COLLATE NOCASE ORDER BY created_at ASC`,
 		strings.ToLower(username),
 	)
@@ -426,7 +447,7 @@ func (s *Store) ResolveToken(tokenHash string) (*User, *UserToken, error) {
 	row := s.db.QueryRow(
 		`SELECT u.username, u.display_name, u.kind, u.avatar_color,
 		        u.access_mode, u.rules_json, u.created_at, u.created_by, u.deactivated_at,
-		        t.id, t.username, t.label, t.created_at, t.last_used_at, t.revoked_at
+		        t.id, t.username, t.label, t.created_at, t.created_by, t.last_used_at, t.revoked_at
 		 FROM user_tokens t JOIN users u ON u.username = t.username COLLATE NOCASE
 		 WHERE t.token_hash = ?`, tokenHash,
 	)
@@ -441,15 +462,16 @@ func (s *Store) ResolveToken(tokenHash string) (*User, *UserToken, error) {
 		deactivated sql.NullInt64
 		rulesJSON   string
 
-		tokenLabel    sql.NullString
-		tokenCreated  int64
-		tokenLastUsed sql.NullInt64
-		tokenRevoked  sql.NullInt64
+		tokenLabel       sql.NullString
+		tokenCreated     int64
+		tokenCreatedBy   sql.NullString
+		tokenLastUsed    sql.NullInt64
+		tokenRevoked     sql.NullInt64
 	)
 	err := row.Scan(
 		&u.Username, &displayName, &u.Kind, &avatarColor,
 		&u.AccessMode, &rulesJSON, &userCreated, &createdBy, &deactivated,
-		&t.ID, &t.Username, &tokenLabel, &tokenCreated, &tokenLastUsed, &tokenRevoked,
+		&t.ID, &t.Username, &tokenLabel, &tokenCreated, &tokenCreatedBy, &tokenLastUsed, &tokenRevoked,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrNotFound
@@ -473,6 +495,7 @@ func (s *Store) ResolveToken(tokenHash string) (*User, *UserToken, error) {
 	}
 	t.Label = tokenLabel.String
 	t.CreatedAt = time.Unix(tokenCreated, 0).UTC()
+	t.CreatedBy = tokenCreatedBy.String
 	if tokenLastUsed.Valid {
 		tt := time.Unix(tokenLastUsed.Int64, 0).UTC()
 		t.LastUsedAt = &tt
@@ -532,10 +555,10 @@ func scanUser(r rowScanner) (*User, error) {
 
 func scanToken(r rowScanner) (*UserToken, error) {
 	var t UserToken
-	var label sql.NullString
+	var label, createdBy sql.NullString
 	var created int64
 	var lastUsed, revoked sql.NullInt64
-	err := r.Scan(&t.ID, &t.Username, &label, &created, &lastUsed, &revoked)
+	err := r.Scan(&t.ID, &t.Username, &label, &created, &createdBy, &lastUsed, &revoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -544,6 +567,7 @@ func scanToken(r rowScanner) (*UserToken, error) {
 	}
 	t.Label = label.String
 	t.CreatedAt = time.Unix(created, 0).UTC()
+	t.CreatedBy = createdBy.String
 	if lastUsed.Valid {
 		tt := time.Unix(lastUsed.Int64, 0).UTC()
 		t.LastUsedAt = &tt

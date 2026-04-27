@@ -13,18 +13,26 @@ import {
   X,
 } from 'lucide-react'
 import {
+  createInvitation,
+  createLock,
   createTokenForUser,
   createUser,
   deactivateUser,
+  deleteLock,
   fetchMe,
+  listInvitations,
+  listLocks,
   listUsers,
+  revokeInvitation,
   revokeToken,
   rotateToken,
   updateUser,
   type AccessMode,
   type CreatedToken,
+  type Invitation,
   type Kind,
   type Me,
+  type PageLock,
   type Rule,
   type User,
   type UserToken,
@@ -154,9 +162,8 @@ function NotAdmin() {
           <h1 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Admin-only area</h1>
         </div>
         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-          The token you're signed in with is an agent token. User and token
-          management requires an admin token. Ask your admin for one, or
-          mint one on the host:
+          The token you're signed in with is not an admin token. User,
+          invitation, and lock management requires an admin role. Options:
         </p>
         <pre
           style={{
@@ -167,7 +174,9 @@ function NotAdmin() {
             overflowX: 'auto',
           }}
         >
-          agentboard admin mint-admin &lt;username&gt;
+          Ask an admin to send you an invite link, or (operator path){'\n'}
+          rm ~/.agentboard/&lt;project&gt;/agentboard.sqlite &amp;&amp; agentboard serve{'\n'}
+          # fresh boot re-mints a first-admin /invite URL to stdout
         </pre>
         <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
           <button
@@ -276,6 +285,10 @@ function AdminPanel({ me }: { me: Me }) {
         <WebhooksSection onError={setError} />
 
         <TeamsSection onError={setError} />
+
+        <InvitationsSection onError={setError} />
+
+        <LocksSection onError={setError} />
       </div>
     </Shell>
   )
@@ -969,7 +982,7 @@ function NewUserCard({
 }) {
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [kind, setKind] = useState<Kind>('agent')
+  const [kind, setKind] = useState<Kind>('member')
   const [template, setTemplate] = useState<'full' | 'viewer' | 'custom'>('full')
   const [mode, setMode] = useState<AccessMode>('allow_all')
   const [rulesText, setRulesText] = useState('[]')
@@ -1049,15 +1062,16 @@ function NewUserCard({
           />
         </div>
         <div>
-          <div style={LABEL}>Kind</div>
+          <div style={LABEL}>Role</div>
           <select value={kind} onChange={(e) => setKind(e.target.value as Kind)} style={INPUT}>
-            <option value="agent">agent</option>
+            <option value="member">member</option>
+            <option value="bot">bot</option>
             <option value="admin">admin</option>
           </select>
         </div>
       </div>
 
-      {kind === 'agent' && (
+      {kind !== 'admin' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
             <div>
@@ -1586,5 +1600,356 @@ function TeamCard({
         </div>
       )}
     </div>
+  )
+}
+
+// ---------- invitations ----------
+
+function InvitationsSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [invites, setInvites] = useState<Invitation[] | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [reveal, setReveal] = useState<Invitation | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setInvites(await listInvitations())
+      onError(null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onError])
+  useEffect(() => { void refresh() }, [refresh])
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={LABEL}>Invitations</div>
+        {!creating && (
+          <button onClick={() => setCreating(true)} style={BTN_GHOST}>
+            <Plus size={14} />
+            New invite
+          </button>
+        )}
+      </div>
+      {creating && (
+        <NewInviteCard
+          onCreated={(inv) => {
+            setReveal(inv)
+            setCreating(false)
+            void refresh()
+          }}
+          onCancel={() => setCreating(false)}
+          onError={onError}
+        />
+      )}
+      {reveal && <InviteReveal invite={reveal} onDismiss={() => setReveal(null)} />}
+      {invites === null && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          Loading invitations…
+        </div>
+      )}
+      {invites && invites.length === 0 && !creating && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          No invitations. Create one to onboard a new user without CLI access.
+        </div>
+      )}
+      {invites?.map((inv) => (
+        <InvitationRow
+          key={inv.id}
+          invite={inv}
+          onRevoke={async () => {
+            if (!confirm(`Revoke invitation ${inv.id}?`)) return
+            try {
+              await revokeInvitation(inv.id)
+              await refresh()
+            } catch (err) {
+              onError(err instanceof Error ? err.message : String(err))
+            }
+          }}
+        />
+      ))}
+    </section>
+  )
+}
+
+function NewInviteCard({
+  onCreated,
+  onCancel,
+  onError,
+}: {
+  onCreated: (inv: Invitation) => void
+  onCancel: () => void
+  onError: (msg: string) => void
+}) {
+  const [role, setRole] = useState<Kind>('member')
+  const [label, setLabel] = useState('')
+  const [expiresInDays, setExpiresInDays] = useState(7)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    setBusy(true)
+    try {
+      const inv = await createInvitation({ role, label: label.trim() || undefined, expires_in_days: expiresInDays })
+      onCreated(inv)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: '0.75rem' }}>
+        <div>
+          <div style={LABEL}>Role</div>
+          <select value={role} onChange={(e) => setRole(e.target.value as Kind)} style={INPUT}>
+            <option value="member">member</option>
+            <option value="bot">bot</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div>
+          <div style={LABEL}>Label</div>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder="Design team onboard"
+            style={INPUT}
+          />
+        </div>
+        <div>
+          <div style={LABEL}>Expires in</div>
+          <select value={expiresInDays} onChange={(e) => setExpiresInDays(Number(e.target.value))} style={INPUT}>
+            <option value={1}>1 day</option>
+            <option value={7}>7 days</option>
+            <option value={14}>14 days</option>
+            <option value={30}>30 days</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} style={BTN_GHOST} disabled={busy}>Cancel</button>
+        <button type="submit" style={BTN_PRIMARY} disabled={busy}>
+          Create invitation
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function InviteReveal({ invite, onDismiss }: { invite: Invitation; onDismiss: () => void }) {
+  const url = `${window.location.origin}/invite/${invite.id}`
+  const [copied, setCopied] = useState(false)
+  const copy = () => {
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }
+  return (
+    <div
+      style={{
+        ...CARD,
+        background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>Invite created — share this URL</div>
+      <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0.625rem' }}>
+        Role: <b>{invite.role}</b> · Expires {new Date(invite.expires_at).toLocaleDateString()}
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <code
+          style={{
+            flex: 1,
+            padding: '0.4rem 0.65rem',
+            borderRadius: '0.375rem',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            fontSize: '0.8125rem',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {url}
+        </code>
+        <button style={BTN_GHOST} onClick={copy}>
+          {copied ? <><Check size={13} /> Copied</> : <><Copy size={13} /> Copy</>}
+        </button>
+        <button style={BTN_GHOST} onClick={onDismiss}>Dismiss</button>
+      </div>
+    </div>
+  )
+}
+
+function InvitationRow({ invite, onRevoke }: { invite: Invitation; onRevoke: () => void }) {
+  const status = invite.status
+  const color = status === 'active'
+    ? 'var(--success)'
+    : status === 'expired' || status === 'redeemed'
+      ? 'var(--text-secondary)'
+      : 'var(--error)'
+  return (
+    <div style={{ ...CARD, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+          <code style={{ fontSize: '0.8125rem' }}>{invite.id}</code>
+          <span style={{ color, textTransform: 'uppercase', fontSize: '0.6875rem', letterSpacing: '0.04em', fontWeight: 600 }}>
+            {status}
+          </span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+            {invite.role}
+            {invite.label && ` · ${invite.label}`}
+          </span>
+        </div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+          by @{invite.created_by} · expires {new Date(invite.expires_at).toLocaleDateString()}
+          {invite.redeemed_by && ` · claimed by @${invite.redeemed_by}`}
+        </div>
+      </div>
+      {status === 'active' && (
+        <button onClick={onRevoke} style={{ ...BTN_GHOST, color: 'var(--error)', borderColor: 'var(--error)' }}>
+          <X size={12} />
+          Revoke
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------- page locks ----------
+
+function LocksSection({ onError }: { onError: (msg: string | null) => void }) {
+  const [locks, setLocks] = useState<PageLock[] | null>(null)
+  const [creating, setCreating] = useState(false)
+
+  const refresh = useCallback(async () => {
+    try {
+      setLocks(await listLocks())
+      onError(null)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }, [onError])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const remove = async (path: string) => {
+    if (!confirm(`Unlock ${path}? Members will be able to edit it again.`)) return
+    try {
+      await deleteLock(path)
+      await refresh()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={LABEL}>Locked pages</div>
+        {!creating && (
+          <button onClick={() => setCreating(true)} style={BTN_GHOST}>
+            <Plus size={14} />
+            Lock a page
+          </button>
+        )}
+      </div>
+      {creating && (
+        <NewLockCard
+          onCreated={() => {
+            setCreating(false)
+            void refresh()
+          }}
+          onCancel={() => setCreating(false)}
+          onError={onError}
+        />
+      )}
+      {locks === null && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>Loading locks…</div>
+      )}
+      {locks && locks.length === 0 && !creating && (
+        <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+          No locked pages. Admins can also lock any page from the page actions menu.
+        </div>
+      )}
+      {locks?.map((l) => (
+        <div key={l.path} style={{ ...CARD, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>
+              <Link to={'/' + l.path} style={{ color: 'var(--text)', textDecoration: 'none' }}>/{l.path}</Link>
+            </div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+              by @{l.locked_by} · {new Date(l.locked_at).toLocaleString()}
+              {l.reason && ` · ${l.reason}`}
+            </div>
+          </div>
+          <button onClick={() => remove(l.path)} style={{ ...BTN_GHOST, color: 'var(--error)', borderColor: 'var(--error)' }}>
+            <X size={12} />
+            Unlock
+          </button>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function NewLockCard({
+  onCreated,
+  onCancel,
+  onError,
+}: {
+  onCreated: () => void
+  onCancel: () => void
+  onError: (msg: string) => void
+}) {
+  const [path, setPath] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!path.trim()) return
+    setBusy(true)
+    try {
+      await createLock(path.trim(), reason.trim() || undefined)
+      onCreated()
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+      <div>
+        <div style={LABEL}>Page path</div>
+        <input
+          autoFocus
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder="handbook/onboarding"
+          style={INPUT}
+          required
+        />
+      </div>
+      <div>
+        <div style={LABEL}>Reason (optional)</div>
+        <input
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="canonical doc — contact Alice for changes"
+          style={INPUT}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={onCancel} style={BTN_GHOST} disabled={busy}>Cancel</button>
+        <button type="submit" style={BTN_PRIMARY} disabled={busy || !path.trim()}>
+          Lock page
+        </button>
+      </div>
+    </form>
   )
 }

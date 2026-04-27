@@ -15,9 +15,12 @@ import (
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/data"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
+	"github.com/christophermarx/agentboard/internal/invitations"
+	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/server"
 	"github.com/spf13/cobra"
+	"path/filepath"
 )
 
 var serveCmd = &cobra.Command{
@@ -93,6 +96,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("open auth store: %w", err)
 	}
 
+	// Open invitations + locks stores ahead of server construction so
+	// BootstrapFirstAdmin has something to write into. These same stores
+	// get handed to server.New() below so there's one instance per
+	// process — no duplicate schema migrations, no surprises.
+	invStore, err := invitations.NewStore(store.DB())
+	if err != nil {
+		return fmt.Errorf("open invitations store: %w", err)
+	}
+	lockStore, err := locks.NewStore(store.DB())
+	if err != nil {
+		return fmt.Errorf("open locks store: %w", err)
+	}
+
 	// Seed sample data if this is a fresh database
 	keys, _ := store.ListKeys()
 	if len(keys) == 0 {
@@ -123,15 +139,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Flag overrides config (off by default in both).
 	uploadEnabled := proj.Config.AllowComponentUpload || allowComponentUpload
 
-	// Mint the initial admin token on first run (and fold AGENTBOARD_AUTH_TOKEN
-	// into a legacy-agent identity if it's set). Idempotent: no-op if any
-	// identity already exists. See AUTH.md §"Bootstrap".
+	// First-admin bootstrap. If no users exist, mint (or reuse) an
+	// admin-role invitation so the operator can claim the first admin
+	// via /invite/<id>. Also folds AGENTBOARD_AUTH_TOKEN into a
+	// @legacy-agent identity when the env var is set — that path
+	// suppresses the invite mint because an identity already exists.
+	// See AUTH.md §"Bootstrap".
 	legacyToken := authToken
 	if legacyToken == "" {
 		legacyToken = os.Getenv("AGENTBOARD_AUTH_TOKEN")
 	}
-	if err := authStore.BootstrapOnEmpty(legacyToken, log.Default()); err != nil {
+	bootstrapInv, err := authStore.BootstrapFirstAdmin(invStore, legacyToken, 0, log.Default())
+	if err != nil {
 		return fmt.Errorf("auth bootstrap: %w", err)
+	}
+	if bootstrapInv != nil {
+		inviteURL := fmt.Sprintf("http://localhost:%d/invite/%s", p, bootstrapInv.ID)
+		inviteFile := filepath.Join(proj.Path, ".agentboard", "first-admin-invite.url")
+		_ = os.WriteFile(inviteFile, []byte(inviteURL+"\n"), 0600)
+		log.Printf("")
+		log.Printf("  ==> Board is unclaimed. Open this URL to create the first admin:")
+		log.Printf("      %s", inviteURL)
+		log.Printf("      (also written to %s)", inviteFile)
+		log.Printf("")
 	}
 
 	// Create server
@@ -139,6 +169,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Project:              proj,
 		Store:                store,
 		Auth:                 authStore,
+		Invitations:          invStore,
+		Locks:                lockStore,
 		SkillFile:            embedpkg.SkillFile(),
 		FrontendFS:           frontendHTTPFS,
 		DevMode:              devMode,
@@ -152,9 +184,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	hasUser, _ := authStore.HasAnyUser()
 	if hasUser {
-		log.Printf("Auth: identity-backed. Sign in at /login; admins manage users + tokens at /admin. Agents use Bearer/Basic/?token=.")
-	} else {
-		log.Printf("Auth: board is UNCLAIMED. First visitor at /login picks an admin username and gets the token. Alternatively run `agentboard admin mint-admin <username>` on the host.")
+		log.Printf("Auth: identity-backed. Sign in at /login; admins manage users + invitations + tokens at /admin.")
 	}
 
 	// Start page watcher

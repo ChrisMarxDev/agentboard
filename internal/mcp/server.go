@@ -11,6 +11,7 @@ import (
 	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
+	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/teams"
 	"github.com/christophermarx/agentboard/internal/webhooks"
@@ -28,6 +29,11 @@ type Server struct {
 	Webhooks             *webhooks.Store
 	WebhookDispatcher    *webhooks.Dispatcher
 	Teams                *teams.Store
+	Locks                *locks.Store
+	// IsAdmin reads the admin-ness of the current caller off an
+	// HTTP request's context. Wired by the server that owns the auth
+	// middleware. Nil → non-admin (defense in depth).
+	IsAdmin              func(*http.Request) bool
 	ActorResolver        func() string // returns current actor for attribution; optional
 	AllowComponentUpload bool
 }
@@ -110,7 +116,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "tools/call":
-		result, rpcErr := s.handleToolCall(req.Params)
+		result, rpcErr := s.handleToolCall(r, req.Params)
 		if rpcErr != nil {
 			resp.Error = rpcErr
 		} else {

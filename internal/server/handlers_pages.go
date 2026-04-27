@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/christophermarx/agentboard/internal/auth"
+	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
@@ -147,6 +149,23 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	// Page lock, if any. Surfaced via headers + inline into the JSON
+	// payload so the frontend Edit-button gate doesn't need a second
+	// round trip.
+	var lockRow = func() *locks.Lock {
+		if s.Locks == nil {
+			return nil
+		}
+		l, _ := s.Locks.Get(strings.TrimSuffix(pagePath, ".md"))
+		return l
+	}()
+	if lockRow != nil {
+		w.Header().Set("X-Locked-By", lockRow.LockedBy)
+		w.Header().Set("X-Locked-At", lockRow.LockedAt.Format(time.RFC3339))
+		if lockRow.Reason != "" {
+			w.Header().Set("X-Locked-Reason", lockRow.Reason)
+		}
+	}
 
 	// Check Accept header to determine response format
 	accept := r.Header.Get("Accept")
@@ -180,6 +199,13 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 			"stale":         approvalStale,
 		}
 	}
+	if lockRow != nil {
+		payload["lock"] = map[string]any{
+			"locked_by": lockRow.LockedBy,
+			"locked_at": lockRow.LockedAt,
+			"reason":    lockRow.Reason,
+		}
+	}
 	respondJSON(w, http.StatusOK, payload)
 }
 
@@ -187,6 +213,11 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	pagePath := strings.TrimPrefix(r.URL.Path, "/api/content/")
 	if pagePath == "" {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "page path required")
+		return
+	}
+
+	if e := s.enforcePageLock(r, strings.TrimSuffix(pagePath, ".md")); e != nil {
+		respondPageLocked(w, e)
 		return
 	}
 
@@ -267,6 +298,11 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if e := s.enforcePageLock(r, strings.TrimSuffix(pagePath, ".md")); e != nil {
+		respondPageLocked(w, e)
+		return
+	}
+
 	expected := ifMatch(r)
 	delErr := s.Pages.DeletePageIfMatch(pagePath, expected)
 	if delErr != nil {
@@ -337,6 +373,18 @@ func (s *Server) handleMovePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lock gate applies if EITHER end of the move is a locked page —
+	// the lock travels with the path on admin-authored moves, and a
+	// non-admin shouldn't be able to unlock-by-rename.
+	if e := s.enforcePageLock(r, from); e != nil {
+		respondPageLocked(w, e)
+		return
+	}
+	if e := s.enforcePageLock(r, to); e != nil {
+		respondPageLocked(w, e)
+		return
+	}
+
 	if err := s.Pages.MovePage(from, to); err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
@@ -347,6 +395,12 @@ func (s *Server) handleMovePage(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		}
 		return
+	}
+
+	// If the source was locked, move the lock row to the new path so
+	// the lock semantic travels with the page.
+	if s.Locks != nil {
+		_ = s.Locks.Rename(from, to)
 	}
 
 	s.Broadcaster.Broadcast(SSEEvent{

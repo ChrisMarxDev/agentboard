@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/files"
@@ -337,6 +338,37 @@ func (s *Server) toolDefinitions() []ToolDef {
 		)
 	}
 
+	// Page-lock tools — admin-only. Non-admins will get a structured
+	// error from the handler before the store is touched. The HTTP
+	// handler at /api/locks applies the same gate as belt + suspenders.
+	if s.Locks != nil {
+		tools = append(tools,
+			ToolDef{
+				Name:        "agentboard_lock_page",
+				Description: "Lock a page so non-admins cannot edit it. Requires admin. Locked pages render normally but reject PUT/DELETE from members/bots.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"path":   map[string]string{"type": "string", "description": "Page path (with or without leading slash, with or without .md)"},
+						"reason": map[string]string{"type": "string", "description": "Optional — shown to non-admins trying to edit"},
+					},
+					"required": []string{"path"},
+				},
+			},
+			ToolDef{
+				Name:        "agentboard_unlock_page",
+				Description: "Remove a page's lock. Requires admin.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"path": map[string]string{"type": "string", "description": "Page path"},
+					},
+					"required": []string{"path"},
+				},
+			},
+		)
+	}
+
 	// Team tools — role groups that expand @mentions to members. Admin-
 	// gated writes are enforced at the HTTP layer; the MCP surface
 	// advertises them unconditionally so tool discovery works.
@@ -421,7 +453,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 	return tools
 }
 
-func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError) {
+func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interface{}, *RPCError) {
 	var call struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
@@ -504,6 +536,10 @@ func (s *Server) handleToolCall(params json.RawMessage) (interface{}, *RPCError)
 		return s.toolAddTeamMember(args)
 	case "agentboard_remove_team_member":
 		return s.toolRemoveTeamMember(args)
+	case "agentboard_lock_page":
+		return s.toolLockPage(r, args)
+	case "agentboard_unlock_page":
+		return s.toolUnlockPage(r, args)
 	default:
 		return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
 	}
@@ -816,7 +852,36 @@ func (s *Server) toolListKeys() (interface{}, *RPCError) {
 
 func (s *Server) toolListPages() (interface{}, *RPCError) {
 	pages := s.Pages.ListPages()
-	pretty, _ := json.MarshalIndent(pages, "", "  ")
+	// Decorate with lock metadata if the locks store is wired. Keeps
+	// pages that are normal undecorated so the output stays small.
+	type pageWithLock struct {
+		Path      string `json:"path"`
+		File      string `json:"file"`
+		Title     string `json:"title,omitempty"`
+		Order     int    `json:"order,omitempty"`
+		Locked    bool   `json:"locked,omitempty"`
+		LockedBy  string `json:"locked_by,omitempty"`
+		LockedAt  string `json:"locked_at,omitempty"`
+		LockReason string `json:"lock_reason,omitempty"`
+	}
+	out := make([]pageWithLock, 0, len(pages))
+	for _, p := range pages {
+		row := pageWithLock{Path: p.Path, File: p.File, Title: p.Title, Order: p.Order}
+		if s.Locks != nil {
+			normalized := p.Path
+			if len(normalized) > 0 && normalized[0] == '/' {
+				normalized = normalized[1:]
+			}
+			if l, err := s.Locks.Get(normalized); err == nil && l != nil {
+				row.Locked = true
+				row.LockedBy = l.LockedBy
+				row.LockedAt = l.LockedAt.Format("2006-01-02T15:04:05Z07:00")
+				row.LockReason = l.Reason
+			}
+		}
+		out = append(out, row)
+	}
+	pretty, _ := json.MarshalIndent(out, "", "  ")
 	return mcpContent(string(pretty)), nil
 }
 

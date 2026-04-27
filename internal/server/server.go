@@ -17,6 +17,8 @@ import (
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/inbox"
+	"github.com/christophermarx/agentboard/internal/invitations"
+	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -54,6 +56,8 @@ type Server struct {
 	webhookSecrets       sync.Map // id → plaintext secret, set at Create
 	Inbox                *inbox.Store
 	Teams                *teams.Store
+	Invitations          *invitations.Store
+	Locks                *locks.Store
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -63,7 +67,9 @@ type Server struct {
 type ServerConfig struct {
 	Project              *project.Project
 	Store                data.DataStore
-	Auth                 *auth.Store // identity-backed auth (agents + admins); required
+	Auth                 *auth.Store // identity-backed auth; required
+	Invitations          *invitations.Store
+	Locks                *locks.Store
 	SkillFile            string
 	FrontendFS           http.FileSystem // embedded frontend
 	DevMode              bool
@@ -184,6 +190,34 @@ func New(cfg ServerConfig) *Server {
 		}
 	}
 
+	// Invitations store — one-time codes that let new users claim
+	// their account and first token without admin-CLI hand-delivery.
+	// Caller (cli/serve.go) pre-opens this so BootstrapFirstAdmin can
+	// run before server.New(); fall back to creating one locally for
+	// any caller that didn't.
+	invStore := cfg.Invitations
+	if invStore == nil {
+		if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+			if is, err := invitations.NewStore(dber.DB()); err == nil {
+				invStore = is
+			} else {
+				log.Printf("agentboard: invitations unavailable (continuing without): %v", err)
+			}
+		}
+	}
+
+	// Page-locks store — admin-gated freeze on individual pages.
+	lockStore := cfg.Locks
+	if lockStore == nil {
+		if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
+			if ls, err := locks.NewStore(dber.DB()); err == nil {
+				lockStore = ls
+			} else {
+				log.Printf("agentboard: page locks unavailable (continuing without): %v", err)
+			}
+		}
+	}
+
 	// Webhook subscription store. Same best-effort posture.
 	var webhookStore *webhooks.Store
 	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
@@ -232,6 +266,11 @@ func New(cfg ServerConfig) *Server {
 		Grab:                 grabber,
 		Webhooks:             webhookStore,
 		Teams:                teamStore,
+		Locks:                lockStore,
+		IsAdmin: func(r *http.Request) bool {
+			u := auth.UserFromContext(r.Context())
+			return u != nil && u.Kind == auth.KindAdmin
+		},
 		// WebhookDispatcher is set below after the dispatcher is built.
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
@@ -251,6 +290,8 @@ func New(cfg ServerConfig) *Server {
 		Errors:               errorBuffer,
 		Inbox:                inboxStore,
 		Teams:                teamStore,
+		Invitations:          invStore,
+		Locks:                lockStore,
 		Grab:                 grabber,
 		MCP:                  mcpServer,
 		Share:                shareStore,
@@ -415,7 +456,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// /api/introduction is always anonymous too: it's the
 		// paste-one-URL-to-teach-an-agent entry point. Under /api/ so a
 		// user page at "/introduction" can't collide.
-		OpenPaths: []string{"/api/setup", "/api/setup/status", "/api/config", "/api/introduction", "/api/share/redeem"},
+		OpenPaths: []string{"/api/setup/status", "/api/config", "/api/introduction", "/api/share/redeem"},
 	})
 	gatedAuth := publicroutes.Gate(s.ViewPublic, tokenMw, publicroutes.GateOptions{})
 	// Old share.Middleware was deleted — shares now redeem into a
@@ -436,6 +477,13 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Post("/api/view/open", s.handleViewOpen)
 	r.Get("/api/view/events", s.handleViewEvents)
 	r.Get("/api/view/files/*", s.handleViewFile)
+
+	// /api/invitations/{id}[/redeem] are public — anyone with the URL
+	// can hit them to see the invite metadata and redeem it. Mounted
+	// OUTSIDE the gated group so no 401 slips in; the invite ID is
+	// the credential.
+	r.Get("/api/invitations/{id}", s.handleGetInvitationPublic)
+	r.Post("/api/invitations/{id}/redeem", s.handleRedeemInvitation)
 
 	// API routes
 	r.Group(func(r chi.Router) {
@@ -485,13 +533,19 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Get("/users", s.handleListUsersPublic)
 		r.Post("/users/resolve", s.handleResolveUsernames)
 
+		// Per-user token management — self-or-admin scope.
+		s.registerUserTokenRoutes(r)
+
 		// Teams — readable by any authenticated token. Writes sit
 		// under /api/admin/teams (registerAdminTeamRoutes).
 		s.registerTeamRoutes(r)
 
-		// Setup endpoints — open until the board is claimed, then 409 forever.
+		// /api/me — the shell's "who am I signed in as" hook.
+		r.Get("/me", s.handleAdminMe)
+
+		// Setup status — open. POST /api/setup was removed in Auth v1;
+		// board claim now happens via /invite/<id>.
 		r.Get("/setup/status", s.handleSetupStatus)
-		r.Post("/setup", s.handleSetup)
 
 		// Data endpoints
 		r.Get("/data", s.handleGetAllData)
@@ -538,6 +592,9 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Get("/approval", s.handleGetApproval)
 		r.Post("/approval", s.handleCreateApproval)
 		r.Delete("/approval", s.handleRevokeApproval)
+
+		// Page locks — admin-only "freeze" on individual pages.
+		s.registerLockRoutes(r)
 
 		// Webhook subscriptions — outbound event delivery. Owners see
 		// their own; admins see all (handler branches on auth).

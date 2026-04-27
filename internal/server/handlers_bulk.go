@@ -57,6 +57,19 @@ func (s *Server) handleBulkDeleteContent(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// All-or-nothing lock check for non-admins: if ANY target in this
+	// batch is locked, reject the whole request. Prevents a partial
+	// delete that leaves the batch in a mixed state.
+	if s.Locks != nil {
+		for _, p := range targets {
+			normalized := strings.TrimPrefix(strings.TrimSuffix(p, ".md"), "/")
+			if e := s.enforcePageLock(r, normalized); e != nil {
+				respondPageLocked(w, e)
+				return
+			}
+		}
+	}
+
 	out := bulkResponse{Deleted: []string{}, Skipped: []string{}, DryRun: req.DryRun}
 	actor := resolveActor(r)
 	for _, p := range targets {

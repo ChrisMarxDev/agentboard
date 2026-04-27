@@ -9,6 +9,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/data"
+	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/spf13/cobra"
 )
@@ -31,11 +32,10 @@ var adminListCmd = &cobra.Command{
 	RunE:  runAdminList,
 }
 
-var adminMintAdminCmd = &cobra.Command{
-	Use:   "mint-admin <username>",
-	Short: "Create a new admin user with one token (recovery)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runAdminMintAdmin,
+var adminListInvitationsCmd = &cobra.Command{
+	Use:   "list-invitations",
+	Short: "List active invitation URLs (useful if the first-admin URL was lost)",
+	RunE:  runAdminListInvitations,
 }
 
 var adminRotateCmd = &cobra.Command{
@@ -67,7 +67,7 @@ func init() {
 	adminRenameUserCmd.Flags().BoolVar(&adminRenameUserYes, "yes", false, "Skip the confirmation prompt")
 
 	adminCmd.AddCommand(adminListCmd)
-	adminCmd.AddCommand(adminMintAdminCmd)
+	adminCmd.AddCommand(adminListInvitationsCmd)
 	adminCmd.AddCommand(adminRotateCmd)
 	adminCmd.AddCommand(adminRenameUserCmd)
 	rootCmd.AddCommand(adminCmd)
@@ -139,39 +139,50 @@ func runAdminList(cmd *cobra.Command, _ []string) error {
 	return tw.Flush()
 }
 
-func runAdminMintAdmin(cmd *cobra.Command, args []string) error {
-	a, closer, err := openAuthStore()
+// runAdminListInvitations prints every active invitation with its
+// redeem URL. Primary use-case: the operator lost the first-admin URL
+// that `serve` printed at boot. Also useful for auditing who's been
+// invited and when the codes expire.
+func runAdminListInvitations(cmd *cobra.Command, _ []string) error {
+	projPath := resolveProjectPath()
+	proj, err := project.Load(projPath)
+	if err != nil {
+		return fmt.Errorf("load project: %w", err)
+	}
+	store, err := data.NewSQLiteStore(proj.DatabasePath())
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer store.Close()
+	invStore, err := invitations.NewStore(store.DB())
+	if err != nil {
+		return fmt.Errorf("open invitations store: %w", err)
+	}
+	list, err := invStore.List(false)
 	if err != nil {
 		return err
 	}
-	defer closer()
-
-	username := args[0]
-	if _, err := a.CreateUser(auth.CreateUserParams{
-		Username:  username,
-		Kind:      auth.KindAdmin,
-		CreatedBy: "cli",
-	}); err != nil {
-		return fmt.Errorf("create admin: %w", err)
+	if len(list) == 0 {
+		fmt.Println("No active invitations. Mint a new one via the admin UI, or restart `serve` on an empty DB to get a first-admin invite.")
+		return nil
 	}
-	token, err := auth.GenerateToken()
-	if err != nil {
-		return err
+	port := proj.Config.Port
+	if port == 0 {
+		port = 3000
 	}
-	if _, err := a.CreateToken(auth.CreateTokenParams{
-		Username:  username,
-		TokenHash: auth.HashToken(token),
-		Label:     "cli",
-	}); err != nil {
-		return fmt.Errorf("create token: %w", err)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tROLE\tCREATED BY\tEXPIRES\tLABEL\tREDEEM URL")
+	for _, inv := range list {
+		label := inv.Label
+		if label == "" {
+			label = "-"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t@%s\t%s\t%s\thttp://localhost:%d/invite/%s\n",
+			inv.ID, inv.Role, inv.CreatedBy,
+			humanDuration(time.Until(inv.ExpiresAt)),
+			label, port, inv.ID)
 	}
-	fmt.Printf(`Admin @%s created. Copy this token and paste it into /admin:
-
-  %s
-
-It won't be shown again. Rotate with: `+"`"+`agentboard admin rotate %s`+"`"+`.
-`, username, token, username)
-	return nil
+	return tw.Flush()
 }
 
 func runAdminRotate(cmd *cobra.Command, args []string) error {
@@ -211,7 +222,7 @@ func runAdminRotate(cmd *cobra.Command, args []string) error {
 			}
 		}
 		if target == nil {
-			return fmt.Errorf("@%s has no active tokens; use `admin mint-admin` or add one via the UI", user.Username)
+			return fmt.Errorf("@%s has no active tokens; issue an invitation from /admin or create a token in the UI", user.Username)
 		}
 	}
 

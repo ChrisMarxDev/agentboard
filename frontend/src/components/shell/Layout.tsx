@@ -8,6 +8,7 @@ import { usePages } from '../../hooks/usePages'
 import { useFiles } from '../../hooks/useFiles'
 import { buildContentTree, flattenContentTreePageHrefs } from '../../lib/contentTree'
 import { GrabTray } from './GrabTray'
+import { UserMenu } from './UserMenu'
 import CopyToast from './CopyToast'
 import { copyPageSource, pagePathFromLocation } from '../../lib/copyPage'
 
@@ -224,6 +225,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       </main>
       <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
       {!kiosk && <GrabTray />}
+      {!kiosk && <UserMenu />}
       <CopyToast />
     </div>
   )

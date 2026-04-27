@@ -14,9 +14,10 @@
    and individually rotatable. Rotating a token never changes attribution
    because writes record the username, not the token.
 5. **Hard door on who can manage users.** Only admin-kind tokens can hit
-   `/api/admin/*`. Stealing an agent token never grants user-management.
+   `/api/admin/*`. A member or bot token never grants user-management.
 6. **Emailless, filesystem-recoverable.** No SMTP, no recovery by email.
-   Lockout recovery is `agentboard admin mint-admin <name>` on the host.
+   Lockout recovery is `agentboard admin rotate` on the host, or wiping
+   the DB so boot re-mints a first-admin invitation URL.
 7. **Per-user access scoping.** A user has an `access_mode` + `rules[]` that
    apply to every token they own.
 
@@ -150,15 +151,21 @@ Ergonomic shortcut: `foo/**` also matches `foo` exactly, so
 
 ## Bootstrap + recovery
 
-- **First run**: `serve` notices no users exist, creates `@admin` + one
-  token, prints the token to the server log. The operator copies it into
-  `/admin`.
+- **First run (Auth v1 flow)**: `serve` notices no users exist, mints a
+  role=admin invitation, prints its `/invite/<id>` URL to stdout AND
+  writes it to `<project>/.agentboard/first-admin-invite.url`. Operator
+  opens the URL in a browser, picks a username, and receives the first
+  admin token. Idempotent across restarts; if the existing bootstrap
+  invite expires, a fresh one is minted automatically.
 - **Legacy `AGENTBOARD_AUTH_TOKEN`**: if set on first boot, a
-  `@legacy-agent` user is created with that token as their "legacy" token.
-  Existing curl clients keep working.
-- **Lockout recovery**: `agentboard admin mint-admin <name>` on the host
-  creates another admin and prints its token. Revoke the stale one
-  afterwards via the UI if you want.
+  `@legacy-agent` user is created (kind=member) with that token as their
+  "legacy" token. Existing curl clients keep working. In that case the
+  bootstrap invitation is NOT minted because an identity already exists.
+- **Lockout recovery**: run `agentboard admin list-invitations` on the
+  host to re-reveal any active invite URL, or `agentboard admin rotate
+  <user> <label>` to mint a fresh token value for an existing slot.
+  If every admin is lost, delete the DB so the next `serve` re-emits a
+  fresh first-admin invitation URL.
 - **Rotation**: `agentboard admin rotate <username> [label]` on the host,
   or the "Rotate" button per-token in the UI. Old token stops working
   immediately.
@@ -220,7 +227,7 @@ token and continues.
 
 ```
 agentboard admin list                    # users + token counts
-agentboard admin mint-admin <username>   # create a new admin (recovery)
+agentboard admin list-invitations        # active invite URLs (incl. the first-admin one)
 agentboard admin rotate <username> [label]  # rotate a token
 agentboard admin rename-user <old> <new> [--yes]  # escape hatch
 ```
@@ -253,10 +260,12 @@ Nothing about the auth schema needs to change to support these.
 
 | Threat | Outcome |
 |---|---|
-| Leaked agent token | What their rules allow. Can't reach admin paths. Admin revokes → done. |
+| Leaked member token | What their rules allow. Can't reach admin paths. Admin revokes → done. |
 | Leaked viewer token | Read-only within allowlist. |
 | Leaked admin token | Full management access until revoked. Rotate regularly; keep admin tokens out of CI logs. |
-| SSH / filesystem access | Total. Intended recovery layer — `admin mint-admin` routes through it. |
+| Leaked bot token | Shared puppet; any admin rotates. |
+| Leaked invitation URL | One-time use. Once redeemed it's dead; admins can revoke unredeemed invites from `/admin`. |
+| SSH / filesystem access | Total. Intended recovery layer — `admin rotate` + DB wipe-for-first-admin-reinvite both route through it. |
 | Malicious MCP tool added | Blocked by the privilege test in CI. |
 | CSRF | N/A — no cookies, no auto-attached credentials. |
 | Token brute force | `sha256(32 bytes random)`. 2^256 attempts. |
@@ -280,16 +289,24 @@ internal/auth/
   rules.go        — glob matcher + Authorize
   rules_test.go
   store_test.go
-  middleware.go   — TokenMiddleware, AuthorizeMiddleware, AdminRequired
-  migrate.go      — BootstrapOnEmpty
+  middleware.go   — TokenMiddleware, AuthorizeMiddleware, AdminRequired, ScopeSelfOrAdmin
+  migrate.go      — BootstrapFirstAdmin
+
+internal/invitations/
+  invitations.go  — Create/Get/List/Revoke/Redeem + BootstrapActive
+
+internal/locks/
+  locks.go        — Lock/Unlock/IsLocked/Rename (page-level admin freeze)
 
 internal/server/
-  handlers_admin.go      — /api/admin/users/* routes
-  handlers_admin_test.go
-  handlers_users.go      — /api/users + /api/users/resolve (agent-readable directory)
+  handlers_admin.go        — /api/admin/users/* routes
+  handlers_tokens.go       — /api/users/{u}/tokens/* (self-or-admin)
+  handlers_invitations.go  — /api/admin/invitations + public /api/invitations/{id}[/redeem]
+  handlers_locks.go        — /api/locks CRUD + enforcePageLock helper
+  handlers_users.go        — /api/users + /api/users/resolve (authed-read directory)
 
 internal/cli/
-  admin.go        — list / mint-admin / rotate / rename-user
+  admin.go        — list / list-invitations / rotate / rename-user
 
 internal/mcp/
   privilege_test.go
