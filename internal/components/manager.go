@@ -330,6 +330,17 @@ func (m *Manager) registerBuiltins() {
 			},
 		},
 		{
+			Name: "V2Display", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "V2Display",
+				Description: "Live read-only mirror of one /api/v2/data/{key} envelope. Re-renders on every SSE 'data-v2' event for the key. Read-only by design — write paths go through curl, MCP, or other components.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Dotted v2 key (e.g. 'showcase.demo')."},
+					"label":  {Type: "string", Description: "Optional caption rendered above the envelope."},
+				},
+			},
+		},
+		{
 			Name: "ApiList", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "ApiList",
