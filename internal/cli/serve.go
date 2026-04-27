@@ -19,6 +19,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/server"
+	storepkg "github.com/christophermarx/agentboard/internal/store"
 	"github.com/spf13/cobra"
 	"path/filepath"
 )
@@ -83,12 +84,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		p = 3000
 	}
 
-	// Open data store
+	// Open data store (SQLite — legacy KV path, still authoritative
+	// while Phase 4 migrates the dashboard to the files-first store).
 	store, err := data.NewSQLiteStore(proj.DatabasePath())
 	if err != nil {
 		return fmt.Errorf("open data store: %w", err)
 	}
 	defer store.Close()
+
+	// Open files-first store (spec-file-storage.md). Lives parallel to
+	// the SQLite store; mounted at /api/v2 in handlers_v2.go.
+	fileStore, err := storepkg.NewStore(storepkg.Config{ProjectRoot: proj.Path})
+	if err != nil {
+		return fmt.Errorf("open files-first store: %w", err)
+	}
+	defer fileStore.Close()
 
 	// Open auth store on the same SQLite connection pool.
 	authStore, err := auth.NewStore(store.DB())
@@ -168,6 +178,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
 		Store:                store,
+		FileStore:            fileStore,
 		Auth:                 authStore,
 		Invitations:          invStore,
 		Locks:                lockStore,

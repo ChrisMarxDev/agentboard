@@ -24,6 +24,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/publicroutes"
 	"github.com/christophermarx/agentboard/internal/share"
+	"github.com/christophermarx/agentboard/internal/store"
 	"github.com/christophermarx/agentboard/internal/teams"
 	"github.com/christophermarx/agentboard/internal/view"
 	"github.com/christophermarx/agentboard/internal/webhooks"
@@ -35,6 +36,7 @@ import (
 type Server struct {
 	Project              *project.Project
 	Store                data.DataStore
+	FileStore            *store.Store // files-first store (spec-file-storage.md), parallel to Store while we migrate
 	Auth                 *auth.Store
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
@@ -67,6 +69,7 @@ type Server struct {
 type ServerConfig struct {
 	Project              *project.Project
 	Store                data.DataStore
+	FileStore            *store.Store // files-first store
 	Auth                 *auth.Store // identity-backed auth; required
 	Invitations          *invitations.Store
 	Locks                *locks.Store
@@ -94,6 +97,21 @@ func New(cfg ServerConfig) *Server {
 			})
 		}
 	}()
+
+	// Wire FileStore events to the same SSE broadcaster so dashboards
+	// re-render on writes regardless of which store they came through.
+	if cfg.FileStore != nil {
+		go func() {
+			ch := cfg.FileStore.Subscribe()
+			for evt := range ch {
+				eventData, _ := json.Marshal(evt)
+				broadcaster.Broadcast(SSEEvent{
+					Type: "data-v2",
+					Data: eventData,
+				})
+			}
+		}()
+	}
 
 	pageManager := mdx.NewPageManager(cfg.Project)
 	// Best-effort: if the store exposes a *sql.DB (SQLiteStore does), build
@@ -278,6 +296,7 @@ func New(cfg ServerConfig) *Server {
 	s := &Server{
 		Project:              cfg.Project,
 		Store:                cfg.Store,
+		FileStore:            cfg.FileStore,
 		Auth:                 cfg.Auth,
 		Broadcaster:          broadcaster,
 		Pages:                pageManager,
@@ -624,6 +643,10 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// anonymous-public). Registering here would kick share-cookie
 		// visitors out with 401 before the handler can inspect the
 		// cookie.
+
+		// /api/v2 — files-first store routes (spec-file-storage.md).
+		// Mounted parallel to /api/data/* during the migration window.
+		s.registerV2Routes(r)
 
 		// Component endpoints
 		r.Get("/components", s.handleListComponents)
