@@ -450,6 +450,8 @@ func (s *Server) toolDefinitions() []ToolDef {
 		)
 	}
 
+	tools = append(tools, s.v2ToolDefs()...)
+
 	return tools
 }
 
@@ -465,6 +467,10 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 	var args map[string]json.RawMessage
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return nil, &RPCError{Code: -32602, Message: "Invalid arguments"}
+	}
+
+	if result, err, ok := s.dispatchV2(call.Name, args); ok {
+		return result, err
 	}
 
 	switch call.Name {

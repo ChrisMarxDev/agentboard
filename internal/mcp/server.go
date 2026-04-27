@@ -13,6 +13,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mdx"
+	"github.com/christophermarx/agentboard/internal/store"
 	"github.com/christophermarx/agentboard/internal/teams"
 	"github.com/christophermarx/agentboard/internal/webhooks"
 )
@@ -20,6 +21,7 @@ import (
 // Server implements the MCP Streamable HTTP transport.
 type Server struct {
 	Store                data.DataStore
+	FileStore            *store.Store // files-first store; powers the agentboard_v2_* tools
 	Pages                *mdx.PageManager
 	Search               *mdx.SearchStore
 	Components           *components.Manager
