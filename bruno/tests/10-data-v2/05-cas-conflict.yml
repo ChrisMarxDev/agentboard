@@ -1,0 +1,36 @@
+info:
+  name: PUT with stale version — 412 with embedded current
+  type: http
+  seq: 5
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/v2/data/test.v2.singleton"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"_meta": {"version": "1999-01-01T00:00:00Z"}, "value": 999}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 412 Precondition Failed", function() {
+          expect(res.status).to.equal(412);
+        });
+        test("error code is version_mismatch", function() {
+          expect(res.body.error).to.equal("version_mismatch");
+        });
+        test("response embeds current envelope (no follow-up GET needed)", function() {
+          expect(res.body).to.have.nested.property("current.value");
+          expect(res.body.current.value).to.equal(100);
+        });
+        test("response carries current_version", function() {
+          expect(res.body).to.have.property("current_version");
+        });
+        test("response echoes your_version for debugging", function() {
+          expect(res.body.your_version).to.equal("1999-01-01T00:00:00Z");
+        });

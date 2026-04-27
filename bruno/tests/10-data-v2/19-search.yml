@@ -1,0 +1,27 @@
+info:
+  name: GET search — finds value bytes across keys
+  type: http
+  seq: 19
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/v2/search"
+  params:
+    - name: q
+      value: "Build"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("query echoed", function() { expect(res.body.query).to.equal("Build"); });
+        test("found at least one result", function() {
+          expect(res.body.results.length).to.be.at.least(1);
+        });
+        test("result includes our kanban item", function() {
+          const found = res.body.results.find(r => r.key === "test.v2.kanban" && r.id === "task-1");
+          expect(found).to.exist;
+          expect(found.shape).to.equal("collection");
+          expect(found.snippet).to.contain("Build");
+        });

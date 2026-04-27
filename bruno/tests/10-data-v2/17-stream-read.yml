@@ -1,0 +1,25 @@
+info:
+  name: GET stream — returns recent lines, newest last
+  type: http
+  seq: 17
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/v2/data/test.v2.events"
+  params:
+    - name: limit
+      value: "10"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("shape stream", function() { expect(res.body._meta.shape).to.equal("stream"); });
+        test("lines present", function() {
+          expect(res.body.lines.length).to.be.at.least(4);
+        });
+        test("newest line is logout", function() {
+          const last = res.body.lines[res.body.lines.length - 1];
+          expect(last.value.event).to.equal("user.logout");
+        });

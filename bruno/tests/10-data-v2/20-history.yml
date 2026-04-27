@@ -1,0 +1,23 @@
+info:
+  name: GET history — every prior value is recorded
+  type: http
+  seq: 20
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/v2/data/test.v2.singleton/history"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("at least one history entry", function() {
+          expect(res.body.entries.length).to.be.at.least(1);
+        });
+        test("entries carry actor + op", function() {
+          const e = res.body.entries[0];
+          expect(e).to.have.property("actor");
+          expect(e).to.have.property("op");
+          expect(e).to.have.property("ts");
+        });

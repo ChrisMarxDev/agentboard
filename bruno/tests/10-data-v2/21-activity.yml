@@ -1,0 +1,28 @@
+info:
+  name: GET activity — global ledger of writes
+  type: http
+  seq: 21
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/v2/activity"
+  params:
+    - name: path_prefix
+      value: "test.v2"
+    - name: limit
+      value: "50"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("entries returned", function() {
+          expect(res.body.entries.length).to.be.at.least(5);
+        });
+        test("every entry has actor + op + path", function() {
+          const e = res.body.entries[0];
+          expect(e).to.have.property("actor");
+          expect(e).to.have.property("op");
+          expect(e).to.have.property("path");
+        });

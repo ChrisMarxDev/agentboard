@@ -1,0 +1,26 @@
+info:
+  name: PUT with matching version — succeeds, version advances
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/v2/data/test.v2.singleton"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"_meta": {"version": "{{v2_version}}"}, "value": 100}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("value advanced", function() { expect(res.body.value).to.equal(100); });
+        test("version advanced", function() {
+          expect(res.body._meta.version).to.not.equal(bru.getVar("v2_version"));
+        });
+        bru.setVar("v2_version", res.body._meta.version);

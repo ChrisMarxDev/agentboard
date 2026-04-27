@@ -1,0 +1,24 @@
+info:
+  name: PUT another collection item — second ID, same collection
+  type: http
+  seq: 12
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/v2/data/test.v2.kanban/task-2"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": {"title": "Write docs", "column": "todo"}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("isolated from sibling — own version", function() {
+          expect(res.body._meta.version).to.be.a("string");
+        });

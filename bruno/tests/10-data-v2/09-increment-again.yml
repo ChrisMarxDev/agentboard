@@ -1,0 +1,22 @@
+info:
+  name: POST :op=increment — second call adds to existing
+  type: http
+  seq: 9
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/data/test.v2.counter?op=increment"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"by": 37}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("counter now 42", function() { expect(res.body.value).to.equal(42); });

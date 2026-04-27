@@ -1,0 +1,30 @@
+info:
+  name: POST :op=append batch — items array, one HTTP call
+  type: http
+  seq: 16
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/data/test.v2.events?op=append"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"items": [
+        {"event": "user.login", "user": "alice"},
+        {"event": "page.view", "user": "alice", "page": "/dash"},
+        {"event": "user.logout", "user": "alice"}
+      ]}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("appended count is 3", function() { expect(res.body.appended).to.equal(3); });
+        test("each line has its own ts", function() {
+          expect(res.body.lines.length).to.equal(3);
+          expect(res.body.lines[0].ts).to.not.equal(res.body.lines[2].ts);
+        });

@@ -1,0 +1,35 @@
+info:
+  name: PUT singleton — fresh write returns envelope with version
+  type: http
+  seq: 2
+
+http:
+  method: PUT
+  url: "{{baseUrl}}/api/v2/data/test.v2.singleton"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": 42}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("envelope has _meta.version", function() {
+          expect(res.body).to.have.nested.property("_meta.version");
+          expect(res.body._meta.version).to.be.a("string").and.have.lengthOf.above(0);
+        });
+        test("envelope has shape singleton", function() {
+          expect(res.body._meta.shape).to.equal("singleton");
+        });
+        test("value preserved", function() {
+          expect(res.body.value).to.equal(42);
+        });
+        test("ETag header matches version", function() {
+          expect(res.headers).to.have.property("etag");
+        });
+        bru.setVar("v2_version", res.body._meta.version);

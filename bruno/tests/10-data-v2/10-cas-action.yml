@@ -1,0 +1,28 @@
+info:
+  name: POST :op=cas — mismatch returns 409 with current
+  type: http
+  seq: 10
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/data/test.v2.counter?op=cas"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"expected": 999, "new": 0}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 409 cas_mismatch", function() {
+          expect(res.status).to.equal(409);
+          expect(res.body.error).to.equal("cas_mismatch");
+        });
+        test("current value embedded", function() {
+          expect(res.body).to.have.nested.property("current.value");
+          expect(res.body.current.value).to.equal(42);
+        });

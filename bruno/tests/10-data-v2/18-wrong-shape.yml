@@ -1,0 +1,28 @@
+info:
+  name: APPEND on a singleton — 409 wrong_shape with corrective hint
+  type: http
+  seq: 18
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/data/test.v2.singleton?op=append"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": "should not work"}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 409 wrong_shape", function() {
+          expect(res.status).to.equal(409);
+          expect(res.body.error).to.equal("wrong_shape");
+        });
+        test("response names actual + expected shape (poka-yoke)", function() {
+          expect(res.body.actual_shape).to.equal("singleton");
+          expect(res.body.expected_shape).to.equal("stream");
+        });

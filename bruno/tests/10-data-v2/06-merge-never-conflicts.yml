@@ -1,0 +1,25 @@
+info:
+  name: PATCH merge — never conflicts, deep-merges
+  type: http
+  seq: 6
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/api/v2/data/test.v2.merge-target"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": {"a": 1, "b": 2}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("first patch creates the key", function() {
+          expect(res.status).to.equal(200);
+          expect(res.body.value.a).to.equal(1);
+          expect(res.body.value.b).to.equal(2);
+        });

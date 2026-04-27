@@ -1,0 +1,23 @@
+info:
+  name: PATCH item — merge_by_id, conflict-free, preserves siblings
+  type: http
+  seq: 14
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/api/v2/data/test.v2.kanban/task-1"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": {"column": "in-progress"}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("column updated", function() { expect(res.body.value.column).to.equal("in-progress"); });
+        test("title preserved by merge", function() { expect(res.body.value.title).to.equal("Build dashboard"); });

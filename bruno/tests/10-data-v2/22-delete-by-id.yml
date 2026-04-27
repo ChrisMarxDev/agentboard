@@ -1,0 +1,14 @@
+info:
+  name: DELETE collection item — idempotent, leaves siblings
+  type: http
+  seq: 22
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/v2/data/test.v2.kanban/task-1"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 204", function() { expect(res.status).to.equal(204); });

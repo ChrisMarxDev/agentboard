@@ -1,0 +1,28 @@
+info:
+  name: POST :op=append — first event, creates stream
+  type: http
+  seq: 15
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/data/test.v2.events?op=append"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": {"event": "user.signup", "user": "alice"}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("response carries server timestamp", function() {
+          expect(res.body).to.have.property("ts");
+          expect(res.body.ts).to.be.a("string");
+        });
+        test("value round-trips", function() {
+          expect(res.body.value.event).to.equal("user.signup");
+        });

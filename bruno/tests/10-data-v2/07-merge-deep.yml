@@ -1,0 +1,24 @@
+info:
+  name: PATCH merge — RFC 7396 deep merge, no version needed
+  type: http
+  seq: 7
+
+http:
+  method: PATCH
+  url: "{{baseUrl}}/api/v2/data/test.v2.merge-target"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"value": {"a": 99, "c": 3}}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("a was updated", function() { expect(res.body.value.a).to.equal(99); });
+        test("b was preserved", function() { expect(res.body.value.b).to.equal(2); });
+        test("c was added", function() { expect(res.body.value.c).to.equal(3); });

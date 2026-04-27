@@ -1,0 +1,21 @@
+info:
+  name: GET /api/v2/index returns a catalog
+  type: http
+  seq: 1
+
+http:
+  method: GET
+  url: "{{baseUrl}}/api/v2/index"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("response has data array", function() {
+          expect(res.body).to.have.property("data");
+          expect(res.body.data).to.be.an("array");
+        });
+        test("response has count", function() {
+          expect(res.body).to.have.property("count");
+        });
