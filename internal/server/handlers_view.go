@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/christophermarx/agentboard/internal/mdx"
+	"github.com/christophermarx/agentboard/internal/store"
 	"github.com/christophermarx/agentboard/internal/view"
 )
 
@@ -75,20 +76,28 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 	// Resolve data keys in scope. Anything out-of-scope returns
 	// undefined to the client; not an error. The client was probably
 	// going to render an empty component and that's fine.
+	//
+	// Two backends in flight during the v2 migration:
+	//   1) Legacy SQLite store (s.Store) — every existing project key.
+	//   2) Files-first store (s.FileStore) — keys written via /api/v2.
+	// Legacy wins on collision so existing pages don't drift while we
+	// migrate. The v2 fallback strips the _meta envelope before
+	// emission so component code is unchanged.
 	dataOut := map[string]any{}
 	for key := range scope.DataKeys {
 		if !scope.CanReadData(key) {
 			continue
 		}
-		raw, err := s.Store.Get(key)
-		if err != nil || len(raw) == 0 {
-			continue
+		if raw, err := s.Store.Get(key); err == nil && len(raw) > 0 {
+			var v any
+			if jerr := json.Unmarshal(raw, &v); jerr == nil {
+				dataOut[key] = v
+				continue
+			}
 		}
-		var v any
-		if jerr := json.Unmarshal(raw, &v); jerr != nil {
-			continue
+		if v2, ok := readV2Unwrapped(s.FileStore, key); ok {
+			dataOut[key] = v2
 		}
-		dataOut[key] = v
 	}
 
 	// Filter files.
@@ -243,6 +252,16 @@ func (s *Server) handleViewEvents(w http.ResponseWriter, r *http.Request) {
 			if !forward {
 				continue
 			}
+			// Translate v2 store events into the legacy `data` shape
+			// the SPA already understands: {key, value}. The unwrap
+			// happens here (not in the broker) because the broadcast
+			// payload only carries {key, version, shape, op} — re-read
+			// the file once on emit.
+			if kind == "data" && evt.Type == "data-v2" {
+				if v, ok := unwrapV2ForBroadcast(s.FileStore, payload); ok {
+					payload = v
+				}
+			}
 			// Rebuild scope after page edits so new refs propagate
 			// (scope-changed notice triggers a client re-open).
 			if kind == "page-updated" {
@@ -266,6 +285,18 @@ func shouldForward(evt SSEEvent, scope *view.Scope) (bool, string, []byte) {
 	switch evt.Type {
 	case "data":
 		// evt.Data is the DataEvent JSON. Peek the key to filter.
+		var de struct {
+			Key string `json:"key"`
+		}
+		_ = json.Unmarshal(evt.Data, &de)
+		if de.Key == "" || !scope.CanReadData(de.Key) {
+			return false, "", nil
+		}
+		return true, "data", evt.Data
+	case "data-v2":
+		// store.Event JSON. Same scope filter; the reader on the other
+		// end re-shapes into the legacy `data` event so DataContext
+		// doesn't need to learn a second shape.
 		var de struct {
 			Key string `json:"key"`
 		}
@@ -427,3 +458,108 @@ func contentTypeForName(name string) string {
 
 // Unused alias to keep mdx import honest — referenced via PageRefs.
 var _ = mdx.RefSet{}
+
+// unwrapV2ForBroadcast takes a `data-v2` SSE payload (store.Event
+// JSON) and re-emits it in the legacy `data` shape `{key, value}` by
+// reading the current envelope from the file store. Returns ok=false
+// when the key is gone or unreadable — caller should drop the event
+// (the SPA will pick up the change on next reopen).
+func unwrapV2ForBroadcast(fs *store.Store, payload []byte) ([]byte, bool) {
+	if fs == nil {
+		return nil, false
+	}
+	var evt struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(payload, &evt); err != nil || evt.Key == "" {
+		return nil, false
+	}
+	value, ok := readV2Unwrapped(fs, evt.Key)
+	if !ok {
+		// Key was deleted. Emit value=null so the SPA clears its
+		// cache; this matches the legacy DELETE semantic.
+		out, _ := json.Marshal(map[string]any{"key": evt.Key, "value": nil})
+		return out, true
+	}
+	out, err := json.Marshal(map[string]any{"key": evt.Key, "value": value})
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// readV2Unwrapped pulls a key from the files-first store and returns
+// the unwrapped value (no _meta envelope) so the broker can surface it
+// in the bundle without forcing every component to learn the new shape.
+//
+// Shape handling:
+//   - singleton  → return env.Value
+//   - collection → return []any of values (matches the legacy "array of items" shape)
+//   - stream     → return last 100 lines as []any (matches Log/TimeSeries)
+//
+// Returns ok=false when the key isn't in the file store or has no
+// shape recognised. Any read error is treated as "not present" — a
+// failed v2 read shouldn't poison a page that has its data in legacy.
+func readV2Unwrapped(fs *store.Store, key string) (any, bool) {
+	if fs == nil {
+		return nil, false
+	}
+	cat, ok := fs.CatalogGet(key)
+	if !ok {
+		return nil, false
+	}
+	switch cat.Shape {
+	case store.ShapeSingleton:
+		env, err := fs.ReadSingleton(key)
+		if err != nil || env == nil {
+			return nil, false
+		}
+		var v any
+		if jerr := json.Unmarshal(env.Value, &v); jerr != nil {
+			return nil, false
+		}
+		return v, true
+	case store.ShapeCollection:
+		items, err := fs.ListCollection(key)
+		if err != nil {
+			return nil, false
+		}
+		out := make([]any, 0, len(items))
+		for _, it := range items {
+			if it.Envelope == nil {
+				continue
+			}
+			var v any
+			if jerr := json.Unmarshal(it.Envelope.Value, &v); jerr != nil {
+				continue
+			}
+			// Match the legacy array-of-objects shape: tag the item
+			// with its ID so existing components (Kanban, Table) can
+			// pick the row up unchanged.
+			if obj, isObj := v.(map[string]any); isObj {
+				if _, has := obj["id"]; !has {
+					obj["id"] = it.ID
+				}
+				out = append(out, obj)
+			} else {
+				out = append(out, v)
+			}
+		}
+		return out, true
+	case store.ShapeStream:
+		lines, err := fs.ReadStream(key, store.ReadStreamOpts{Limit: 100})
+		if err != nil {
+			return nil, false
+		}
+		out := make([]any, 0, len(lines))
+		for _, l := range lines {
+			var v any
+			if jerr := json.Unmarshal(l.Value, &v); jerr != nil {
+				continue
+			}
+			out = append(out, v)
+		}
+		return out, true
+	}
+	return nil, false
+}
