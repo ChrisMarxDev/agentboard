@@ -1,14 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Trash2, Users } from 'lucide-react'
 import { useData } from '../../hooks/useData'
+import { useDataContext } from '../../hooks/DataContext'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
-import { apiFetch } from '../../lib/session'
+import {
+  deleteCollectionItem,
+  patchCollectionItem,
+} from '../../lib/collectionWrites'
 import { findUser, useUsers, type PublicUser } from '../../hooks/useUsers'
 import { findTeam, useTeams, type Team } from '../../hooks/useTeams'
 import { RichText } from './RichText'
 
 interface KanbanProps {
-  source: string
+  /** Folder collection path (e.g. "tasks/"). Omit to auto-attach to
+   *  the rendering page's own folder. */
+  source?: string
   groupBy: string
   columns?: string[]
   titleField?: string
@@ -28,7 +34,13 @@ function orderOf(card: Record<string, unknown>, arrayIndex: number): [number, nu
 }
 
 export function Kanban({ source, groupBy, columns, titleField = 'title' }: KanbanProps) {
-  const { data, loading } = useData(source)
+  const ctx = useDataContext()
+  // Auto-attach: if no `source` prop, treat the rendering page's own
+  // folder as the implicit collection. The backend ref-extractor adds
+  // the same key to scope when it sees `<Kanban>` without source, so
+  // the bundle is already populated.
+  const effectiveSource = source ?? (ctx.path ? ctx.path + '/' : '')
+  const { data, loading } = useData(effectiveSource)
   const users = useUsers()
   const teams = useTeams()
   const [openCard, setOpenCard] = useState<Record<string, unknown> | null>(null)
@@ -129,13 +141,9 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     if (Object.keys(patch).length === 0) return
 
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
-      if (!res.ok) throw new Error(`PATCH ${source}/${id} → ${res.status}`)
-      resetBeacon('Kanban', source)
+      const res = await patchCollectionItem(effectiveSource, id, patch)
+      if (!res.ok) throw new Error(`patch ${effectiveSource}/${id} → ${res.status}`)
+      resetBeacon('Kanban', effectiveSource)
     } catch (e) {
       beaconError({
         component: 'Kanban',
@@ -149,11 +157,9 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     const id = card.id != null ? String(card.id) : null
     if (!id) return
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error(`DELETE ${source}/${id} → ${res.status}`)
-      resetBeacon('Kanban', source)
+      const res = await deleteCollectionItem(effectiveSource, id)
+      if (!res.ok) throw new Error(`delete ${effectiveSource}/${id} → ${res.status}`)
+      resetBeacon('Kanban', effectiveSource)
       setConfirmDelete(null)
     } catch (e) {
       beaconError({
@@ -307,7 +313,7 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
       {openCard && (
         <KanbanCardModal
           card={openCard}
-          source={source}
+          source={effectiveSource}
           groupBy={groupBy}
           columns={colOrder}
           titleField={titleField}
@@ -488,15 +494,8 @@ function KanbanCardModal({
     if (!id) return
     setPatched(prev => ({ ...prev, [field]: value }))
     try {
-      const res = await apiFetch(
-        `/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
-        {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ [field]: value }),
-        },
-      )
-      if (!res.ok) throw new Error(`PATCH ${source}/${id} → ${res.status}`)
+      const res = await patchCollectionItem(source, id, { [field]: value })
+      if (!res.ok) throw new Error(`patch ${source}/${id} → ${res.status}`)
       resetBeacon('Kanban', source)
     } catch (e) {
       setPatched(prev => {

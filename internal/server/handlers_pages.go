@@ -260,7 +260,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	// if refs drift.
 	if s.PageRefs != nil {
 		if p := s.Pages.GetPage(normalizedPath); p != nil {
-			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source))
+			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source, normalizedPath))
 		}
 	}
 
@@ -283,6 +283,126 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	page := s.Pages.GetPage(normalizedPath)
 	resp := map[string]any{"ok": true, "compiled": true}
 	if page != nil {
+		resp["etag"] = page.Etag
+		w.Header().Set("ETag", `"`+page.Etag+`"`)
+	}
+	resp["last_actor"] = actor
+	respondJSON(w, http.StatusOK, resp)
+}
+
+// handlePatchPage applies a structured edit to an existing page without
+// requiring callers to round-trip the full MDX source. Body shape:
+//
+//	{ "frontmatter_patch": { "col": "done", "stale": null }, "body": "..." }
+//
+// Patch semantics — shallow merge, RFC-7396-style:
+//   - Top-level keys in `frontmatter_patch` overwrite the corresponding
+//     keys on the existing frontmatter.
+//   - A null value deletes that key (treat as "remove this field").
+//   - Nested objects replace wholesale; no recursive merge. If a caller
+//     wants to mutate a nested field they must read, splice, and PATCH.
+//   - Omitting `frontmatter_patch` leaves frontmatter unchanged.
+//   - `body` is optional. When omitted the existing prose body is preserved
+//     verbatim. When present, even an empty string, it replaces the body.
+//
+// The endpoint honours `If-Match` for optimistic concurrency, identical to
+// PUT. 412 carries the current page so callers can re-base.
+func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
+	pagePath := strings.TrimPrefix(r.URL.Path, "/api/content/")
+	if pagePath == "" {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "page path required")
+		return
+	}
+	normalizedPath := strings.TrimSuffix(pagePath, ".md")
+
+	if e := s.enforcePageLock(r, normalizedPath); e != nil {
+		respondPageLocked(w, e)
+		return
+	}
+
+	current := s.Pages.GetPage(normalizedPath)
+	if current == nil {
+		respondError(w, http.StatusNotFound, "NOT_FOUND", "page not found: "+normalizedPath)
+		return
+	}
+
+	var req struct {
+		FrontmatterPatch map[string]any `json:"frontmatter_patch"`
+		Body             *string        `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "patch body must be JSON: "+err.Error())
+		return
+	}
+	if req.FrontmatterPatch == nil && req.Body == nil {
+		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "patch must set frontmatter_patch and/or body")
+		return
+	}
+
+	// Start from the current frontmatter (already parsed by the page
+	// scanner). Copy so we don't mutate the cached map.
+	merged := map[string]any{}
+	for k, v := range current.Frontmatter {
+		merged[k] = v
+	}
+	for k, v := range req.FrontmatterPatch {
+		if v == nil {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+
+	body := current.Source
+	if req.Body != nil {
+		body = *req.Body
+	}
+
+	newSource, err := mdx.AssemblePageSource(merged, body)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "assemble source: "+err.Error())
+		return
+	}
+
+	expected := ifMatch(r)
+	if writeErr := s.Pages.WritePageIfMatch(pagePath, newSource, expected); writeErr != nil {
+		if errors.Is(writeErr, mdx.ErrStale) || errors.Is(writeErr, mdx.ErrNotFoundForMatch) {
+			respondPageStale(w, s.Pages.GetPage(normalizedPath), pagePath)
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", writeErr.Error())
+		return
+	}
+
+	actor := resolveActor(r)
+	if s.PageMeta != nil {
+		_ = s.PageMeta.Record(normalizedPath, actor)
+	}
+	if s.Search != nil {
+		if p := s.Pages.GetPage(normalizedPath); p != nil {
+			_ = s.Search.IndexPage(p.Path, p.Title, p.Source)
+		}
+	}
+	if s.PageRefs != nil {
+		if p := s.Pages.GetPage(normalizedPath); p != nil {
+			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source, normalizedPath))
+		}
+	}
+
+	subjectPath := "/" + normalizedPath
+	if normalizedPath == "index" {
+		subjectPath = "/"
+	}
+	title := "You were mentioned on " + subjectPath
+	s.emitInboxForMentions(newSource, actor, subjectPath, "", title)
+
+	s.Broadcaster.Broadcast(SSEEvent{
+		Type: "page-updated",
+		Data: []byte(`{"path":"` + pagePath + `"}`),
+	})
+
+	resp := map[string]any{"ok": true, "compiled": true}
+	if page := s.Pages.GetPage(normalizedPath); page != nil {
 		resp["etag"] = page.Etag
 		w.Header().Set("ETag", `"`+page.Etag+`"`)
 	}

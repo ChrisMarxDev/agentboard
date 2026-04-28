@@ -55,7 +55,7 @@ export function clearToken() {
 // window.location.assign rather than react-router Navigate so it works
 // from anywhere (hooks, event handlers, the apiFetch 401 branch) without
 // a component context.
-export function redirectToLogin(reason?: 'expired' | 'missing') {
+export function redirectToLogin(reason?: 'unauthorized' | 'missing') {
   if (typeof window === 'undefined') return
   const cur = window.location.pathname + window.location.search
   const params = new URLSearchParams()
@@ -69,8 +69,9 @@ export function redirectToLogin(reason?: 'expired' | 'missing') {
 //
 //   - If a token is stored, it's attached as Authorization: Bearer.
 //   - On a 401, the token is cleared and the user is redirected to /login
-//     with a `reason=expired` marker. The rejected Promise still carries
-//     the error so callers can short-circuit.
+//     with a `reason=unauthorized` marker. Tokens never expire on their
+//     own — a 401 means revoked, never-valid, or the user was deactivated.
+//   - 403 does NOT redirect — that means "you're signed in but can't touch
 //   - 403 does NOT redirect — that means "you're signed in but can't touch
 //     this". Callers decide how to render.
 //
@@ -108,7 +109,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit & { s
     // non-public data key, but we surface it as a missing-value render
     // rather than kicking them to /login.
     clearToken()
-    redirectToLogin('expired')
+    redirectToLogin('unauthorized')
   }
   return res
 }

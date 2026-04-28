@@ -345,6 +345,133 @@ func (m *Manager) registerBuiltins() {
 				},
 			},
 		},
+		{
+			Name: "Button", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Button",
+				Description: "Fires a webhook event on click. The component does exactly one thing — POST /api/webhooks/fire with `{event, payload}`. Subscribers decide what happens. Use it to wire dashboards to ops actions (deploy, alert, rebuild) without inventing per-button endpoints.",
+				Props: map[string]PropMeta{
+					"fires":    {Type: "string", Description: "Outbound event name (e.g. 'deploy.prod'). Required for the click to do anything."},
+					"payload":  {Type: "object", Description: "Structured payload passed to subscribers as event.data."},
+					"confirm":  {Type: "string", Description: "Confirm-before-firing prompt text. If set, click first opens a window.confirm() dialog."},
+					"variant":  {Type: "string", Description: "default | accent | danger"},
+					"label":    {Type: "string", Description: "Button label. Falls back to children, then to 'Fire {fires}'."},
+					"disabled": {Type: "boolean", Description: "Disable the button."},
+				},
+			},
+		},
+		{
+			Name: "Inbox", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Inbox",
+				Description: "Renders the current user's reminder queue (mentions, assignments, approval requests, webhook failures). Polls /api/inbox every 30s. Click a row to navigate to its subject; per-row mark-read / archive / delete plus a top-level 'mark all read'. No source prop — it always shows the authed user's own inbox.",
+				Props: map[string]PropMeta{
+					"unreadOnly": {Type: "boolean", Description: "Show only unread items. Handy for nav-adjacent widgets."},
+					"limit":      {Type: "number", Description: "Max items to load."},
+				},
+			},
+		},
+		{
+			Name: "Mention", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Mention",
+				Description: "Renders a compact `@username` pill backed by the user's avatar color, or a team pill for stored teams and reserved pseudo-teams (@all, @admins, @agents, @here). Unknown usernames render as plain text so the original intent survives until the user is created.",
+				Props: map[string]PropMeta{
+					"username": {Type: "string", Description: "Username or team slug (without the leading @).", Required: true},
+					"display":  {Type: "string", Description: "Override the visual label; defaults to '@username'."},
+					"plain":    {Type: "boolean", Description: "Drop the colored pill and render plain text with the leading @."},
+				},
+			},
+		},
+		{
+			Name: "RichText", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "RichText",
+				Description: "Renders a plain string with inline `@username` patterns parsed into Mention pills. Used for free-text values from the data store (log entries, task descriptions, comments) where agents write strings and the dashboard wants them rich. Wire format stays 'just a string'.",
+				Props: map[string]PropMeta{
+					"text":       {Type: "string", Description: "Inline string (from MDX prose or another component's data)."},
+					"source":     {Type: "string", Description: "Data store key to subscribe to; overrides `text` when both are given."},
+					"emptyLabel": {Type: "string", Description: "Placeholder rendered when the resolved text is empty or missing."},
+				},
+			},
+		},
+		{
+			Name: "Sheet", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "Sheet",
+				Description: "Renders an array-of-objects data key as an editable grid. Authed users edit cells inline; public/share mode is read-only. Saves go through the standard data API (PATCH/POST/DELETE) so every edit fans out on the webhook bus as data.* events — no new server plumbing.",
+				Props: map[string]PropMeta{
+					"source":  {Type: "string", Description: "Data key resolving to an array of objects. Each row should have an `id` field to be editable.", Required: true},
+					"columns": {Type: "array", Description: "Explicit column order. Inferred from the first row's keys when omitted."},
+					"title":   {Type: "string", Description: "Optional header rendered above the grid."},
+				},
+			},
+		},
+		{
+			Name: "SkillInstall", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "SkillInstall",
+				Description: "Renders a single copy-paste prompt that any coding agent (Claude Code, Cursor, Aider) can follow to safely install the skill hosted on this AgentBoard. Designed as the safer alternative to `curl | bash` — the agent first reads the manifest, judges harm, then installs into its own framework's skill directory.",
+				Props: map[string]PropMeta{
+					"slug":  {Type: "string", Description: "Skill slug — folder name under content/skills/.", Required: true},
+					"label": {Type: "string", Description: "Optional label override for the copy button."},
+				},
+			},
+		},
+		{
+			Name: "TeamRoster", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "TeamRoster",
+				Description: "Renders a card-style roster for one team: the team pill as header, the description line, and a wrapped list of member Mention pills. Renders a subtle inline warning when the slug is unknown.",
+				Props: map[string]PropMeta{
+					"slug": {Type: "string", Description: "Team slug (without the leading @).", Required: true},
+				},
+			},
+		},
+		{
+			Name: "TasksSummary", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "TasksSummary",
+				Description: "Three-up status strip for a task collection. Aggregate counts (open / blocked / due-this-week) — no chronological feed. Designed for the Home page; works on any folder collection of task-shaped rows.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Folder collection path. Default 'tasks/'."},
+					"href":   {Type: "string", Description: "Where each tile links. Default '/tasks'."},
+				},
+			},
+		},
+		{
+			Name: "InboxPreview", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "InboxPreview",
+				Description: "Compact preview of the current user's inbox — top N items + 'view all' link. Polls /api/inbox every 30s. Per-user; nobody else sees these items.",
+				Props: map[string]PropMeta{
+					"limit":      {Type: "number", Description: "Max items to show inline. Default 3."},
+					"unreadOnly": {Type: "boolean", Description: "Only surface unread items. Default true."},
+				},
+			},
+		},
+		{
+			Name: "PinnedPages", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "PinnedPages",
+				Description: "Operator-curated shortcut grid. Reads a `pinned: [{href, title, summary?}]` array from the page's frontmatter; each entry renders as a card linking to its href.",
+				Props: map[string]PropMeta{
+					"source":   {Type: "string", Description: "Frontmatter key holding the pinned array. Default 'pinned'."},
+					"fallback": {Type: "array", Description: "Items rendered when the frontmatter key is empty/missing."},
+				},
+			},
+		},
+		{
+			Name: "SkillsStrip", Type: "builtin",
+			Meta: ComponentMeta{
+				Name:        "SkillsStrip",
+				Description: "Row of skill cards — either curated (frontmatter list of slugs via `source`) or auto (first N skills from /api/skills). Each card links to /skills/<slug>.",
+				Props: map[string]PropMeta{
+					"source": {Type: "string", Description: "Frontmatter key holding a list of skill slugs. Omit to auto-list from /api/skills."},
+					"limit":  {Type: "number", Description: "Max cards to render. Default 6."},
+				},
+			},
+		},
 	}
 
 	for _, b := range builtins {

@@ -140,7 +140,7 @@ func New(cfg ServerConfig) *Server {
 				if key == "" {
 					key = "index"
 				}
-				_ = refStore.Record(key, mdx.ExtractRefs(p.Source))
+				_ = refStore.Record(key, mdx.ExtractRefs(p.Source, key))
 			}
 		} else {
 			log.Printf("agentboard: page_refs unavailable (continuing without): %v", err)
@@ -612,6 +612,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		r.Post("/content/bulk-delete", s.handleBulkDeleteContent)
 		r.Get("/content/*", s.handleGetPage)
 		r.Put("/content/*", s.handleWritePage)
+		r.Patch("/content/*", s.handlePatchPage)
 		r.Delete("/content/*", s.handleDeletePage)
 
 		// Share tokens — per-page public links. Lives under /api/share

@@ -40,9 +40,29 @@ var (
 	reFileSQ = regexp.MustCompile(`\bsrc\s*=\s*'(/api/files/[^'{}<>]+)'`)
 )
 
+// folderAutowireTags lists JSX components that auto-attach to the
+// rendering page's own folder collection when no `source` attribute
+// is given. Any `<Kanban>` / `<List>` without `source=` is treated as
+// `source="<page-path>/"`.
+var folderAutowireTags = []string{"Kanban", "List"}
+
+// reFolderAutowire matches the open tag of an autowire-eligible
+// component. We reconstruct the alternation at package load so adding a
+// new component just means appending to folderAutowireTags. The body
+// captures everything inside the tag up to the closing `>` so the
+// caller can probe for an explicit `source=` and skip auto-attach.
+var reFolderAutowire = regexp.MustCompile(
+	`<(?:` + strings.Join(folderAutowireTags, "|") + `)\b([^>]*)>`,
+)
+var reExplicitSource = regexp.MustCompile(`\bsource\s*=`)
+
 // ExtractRefs walks the MDX source of a page and returns the unique
 // set of data-key and file references.
-func ExtractRefs(source string) RefSet {
+//
+// `pagePath` is the page's normalised path (e.g. "tasks", "roadmap")
+// used to compute auto-attach refs for `<Kanban>` / `<List>` tags
+// without an explicit `source=`. Empty pagePath disables auto-attach.
+func ExtractRefs(source, pagePath string) RefSet {
 	dataSet := map[string]struct{}{}
 	fileSet := map[string]struct{}{}
 	collect := func(re *regexp.Regexp, bag map[string]struct{}) {
@@ -58,6 +78,21 @@ func ExtractRefs(source string) RefSet {
 	collect(reDataSQ, dataSet)
 	collect(reFileDQ, fileSet)
 	collect(reFileSQ, fileSet)
+
+	// Auto-attach: any folder-aware tag without an explicit source=
+	// resolves to the page's own folder. Powers the no-arg
+	// `<Kanban groupBy="col" />` form on a folder-index page.
+	if pagePath != "" {
+		for _, m := range reFolderAutowire.FindAllStringSubmatch(source, -1) {
+			body := m[1]
+			if reExplicitSource.MatchString(body) {
+				continue
+			}
+			dataSet[pagePath+"/"] = struct{}{}
+			break // one auto-attach key is enough; the page is its own folder
+		}
+	}
+
 	out := RefSet{
 		Data:  keysSorted(dataSet),
 		Files: keysSorted(fileSet),

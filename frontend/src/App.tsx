@@ -7,6 +7,7 @@ import Admin from './routes/Admin'
 import Login from './routes/Login'
 import InviteRedeem from './routes/InviteRedeem'
 import Tokens from './routes/Tokens'
+import InboxPage from './routes/Inbox'
 import { getToken, redirectToLogin, setPublicMode } from './lib/session'
 import { matchPublic } from './lib/publicMatcher'
 
@@ -32,9 +33,10 @@ export default function App() {
 }
 
 // ViewRouter wraps the app in a DataProvider scoped to the current
-// location. When the user navigates between pages the provider is
-// re-mounted with a new path, which forces a fresh view/open against
-// the broker — no bleed of one page's data into another's scope.
+// location. The keyed DataProvider sits *inside* Layout so that the
+// shell (sidebar, drawer, keyboard shortcuts, theme switch) survives
+// navigation while the page bundle re-fetches on every path change —
+// the key forces a fresh view/open with no bleed between scopes.
 function ViewRouter() {
   const location = useLocation()
   const pagePath =
@@ -43,28 +45,37 @@ function ViewRouter() {
   // broker entirely.
   if (location.pathname === '/admin') {
     return (
-      <DataProvider path={null}>
-        <Layout>
+      <Layout>
+        <DataProvider path={null}>
           <Admin />
-        </Layout>
-      </DataProvider>
+        </DataProvider>
+      </Layout>
     )
   }
   if (location.pathname === '/tokens') {
     return (
-      <DataProvider path={null}>
-        <Layout>
+      <Layout>
+        <DataProvider path={null}>
           <Tokens />
-        </Layout>
-      </DataProvider>
+        </DataProvider>
+      </Layout>
+    )
+  }
+  if (location.pathname === '/inbox') {
+    return (
+      <Layout>
+        <DataProvider path={null}>
+          <InboxPage />
+        </DataProvider>
+      </Layout>
     )
   }
   return (
-    <DataProvider key={pagePath} path={pagePath}>
-      <Layout>
+    <Layout>
+      <DataProvider key={pagePath} path={pagePath}>
         <PageRenderer />
-      </Layout>
-    </DataProvider>
+      </DataProvider>
+    </Layout>
   )
 }
 

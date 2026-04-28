@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LogOut, Magnet, Search, ShieldCheck, X } from 'lucide-react'
+import { Home as HomeIcon, Inbox as InboxIcon, LogOut, Magnet, Search, ShieldCheck, SquareCheckBig, X } from 'lucide-react'
 import { clearToken, getToken, redirectToLogin } from '../../lib/session'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
@@ -189,6 +189,8 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
           </button>
         )}
       </div>
+
+      <TopNavItems activePath={location.pathname} />
 
       <div
         className="flex items-center mb-2"
@@ -424,6 +426,63 @@ function SignOutButton() {
     >
       <LogOut size={14} />
     </button>
+  )
+}
+
+// TopNavItems are the three "where do I GO right now" destinations:
+// Inbox · Home · Tasks. Sits above the search box; the page tree below
+// the search box answers "where is THAT doc". Skills and the rest of
+// the folder tree live in the page tree, not as separate slots.
+//
+// See `concept.md` §4 and `/concept-rollout` Phase A.
+interface TopSlot {
+  href: string
+  label: string
+  icon: React.ComponentType<{ size?: number; strokeWidth?: number }>
+}
+
+const TOP_SLOTS: TopSlot[] = [
+  { href: '/inbox', label: 'Inbox', icon: InboxIcon },
+  { href: '/',      label: 'Home',  icon: HomeIcon },
+  { href: '/tasks', label: 'Tasks', icon: SquareCheckBig },
+]
+
+function TopNavItems({ activePath }: { activePath: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 mb-3">
+      {TOP_SLOTS.map(slot => {
+        // Exact-match for /inbox and /tasks so /inbox/some-future-subpage
+        // doesn't bleed into Inbox's highlight, AND /tasks/<id> highlights
+        // the Tasks slot since per-task pages are conceptually under it.
+        // / (Home) is exact-only — every other path would otherwise match.
+        const active =
+          slot.href === '/'
+            ? activePath === '/'
+            : activePath === slot.href || activePath.startsWith(slot.href + '/')
+        return (
+          <Link
+            key={slot.href}
+            to={slot.href}
+            className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm"
+            style={{
+              background: active ? 'var(--accent-light)' : 'transparent',
+              color: active ? 'var(--accent)' : 'var(--text)',
+              fontWeight: active ? 600 : 500,
+              textDecoration: 'none',
+            }}
+            onMouseEnter={e => {
+              if (!active) e.currentTarget.style.background = 'var(--bg)'
+            }}
+            onMouseLeave={e => {
+              if (!active) e.currentTarget.style.background = 'transparent'
+            }}
+          >
+            <slot.icon size={14} strokeWidth={2} />
+            <span>{slot.label}</span>
+          </Link>
+        )
+      })}
+    </div>
   )
 }
 

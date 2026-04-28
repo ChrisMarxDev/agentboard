@@ -1,8 +1,11 @@
 import { useData } from '../../hooks/useData'
+import { useDataContext } from '../../hooks/DataContext'
 import { RichText } from './RichText'
 
 interface ListProps {
-  source: string
+  /** Folder collection path or frontmatter array key. Omit to
+   *  auto-attach to the rendering page's own folder. */
+  source?: string
   variant?: 'ordered' | 'unordered'
 }
 
@@ -19,7 +22,9 @@ const statusDots: Record<string, string> = {
 }
 
 export function List({ source, variant = 'unordered' }: ListProps) {
-  const { data, loading } = useData(source)
+  const ctx = useDataContext()
+  const effectiveSource = source ?? (ctx.path ? ctx.path + '/' : '')
+  const { data, loading } = useData(effectiveSource)
 
   if (loading) {
     return <div className="p-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>

@@ -28,7 +28,7 @@ func TestExtractRefs_Literals(t *testing.T) {
 <Image src="/api/files/banner.svg" />
 <File src='/api/files/report.pdf' />
 `
-	got := ExtractRefs(src)
+	got := ExtractRefs(src, "")
 	wantData := []string{"dev.status", "team.tasks", "welcome.users"}
 	wantFiles := []string{"/api/files/banner.svg", "/api/files/report.pdf"}
 	if !reflect.DeepEqual(got.Data, wantData) {
@@ -42,7 +42,7 @@ func TestExtractRefs_Literals(t *testing.T) {
 func TestExtractRefs_IgnoresDynamicExpressions(t *testing.T) {
 	src := `<Metric source={computed} />
 <Metric source="literal.key" />`
-	got := ExtractRefs(src)
+	got := ExtractRefs(src, "")
 	if len(got.Data) != 1 || got.Data[0] != "literal.key" {
 		t.Errorf("expected only literal.key, got %v", got.Data)
 	}
@@ -51,7 +51,7 @@ func TestExtractRefs_IgnoresDynamicExpressions(t *testing.T) {
 func TestExtractRefs_IgnoresNonFileSrc(t *testing.T) {
 	src := `<img src="https://example.com/x.png" />
 <Image src="/api/files/banner.svg" />`
-	got := ExtractRefs(src)
+	got := ExtractRefs(src, "")
 	if len(got.Files) != 1 || got.Files[0] != "/api/files/banner.svg" {
 		t.Errorf("expected only the /api/files/ src, got %v", got.Files)
 	}
@@ -59,9 +59,35 @@ func TestExtractRefs_IgnoresNonFileSrc(t *testing.T) {
 
 func TestExtractRefs_DedupesAndSorts(t *testing.T) {
 	src := `<Metric source="b" /><Metric source="a" /><Metric source="b" />`
-	got := ExtractRefs(src)
+	got := ExtractRefs(src, "")
 	if !reflect.DeepEqual(got.Data, []string{"a", "b"}) {
 		t.Errorf("got %v", got.Data)
+	}
+}
+
+func TestExtractRefs_KanbanAutoAttach(t *testing.T) {
+	// <Kanban> with no source on page "tasks" auto-attaches to "tasks/".
+	got := ExtractRefs(`<Kanban groupBy="col" />`, "tasks")
+	if !reflect.DeepEqual(got.Data, []string{"tasks/"}) {
+		t.Errorf("autowire Data = %v, want [tasks/]", got.Data)
+	}
+
+	// Explicit source disables auto-attach.
+	got2 := ExtractRefs(`<Kanban source="other.tasks" groupBy="col" />`, "tasks")
+	if !reflect.DeepEqual(got2.Data, []string{"other.tasks"}) {
+		t.Errorf("explicit source Data = %v, want [other.tasks]", got2.Data)
+	}
+
+	// Empty pagePath disables auto-attach.
+	got3 := ExtractRefs(`<Kanban groupBy="col" />`, "")
+	if len(got3.Data) != 0 {
+		t.Errorf("empty pagePath should disable autowire; got %v", got3.Data)
+	}
+
+	// <List> is also autowire-eligible.
+	got4 := ExtractRefs(`<List />`, "skills")
+	if !reflect.DeepEqual(got4.Data, []string{"skills/"}) {
+		t.Errorf("List autowire Data = %v, want [skills/]", got4.Data)
 	}
 }
 

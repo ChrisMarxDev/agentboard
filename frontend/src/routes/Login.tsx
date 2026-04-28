@@ -103,7 +103,7 @@ function SignInForm({
   const [token, setTokenInput] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const expired = reason === 'expired'
+  const unauthorized = reason === 'unauthorized'
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -146,7 +146,7 @@ function SignInForm({
         Paste your access token below.
       </p>
 
-      {expired && (
+      {unauthorized && (
         <div
           style={{
             marginBottom: '0.75rem',
@@ -157,7 +157,7 @@ function SignInForm({
             fontSize: '0.8125rem',
           }}
         >
-          Your session ended. Paste your token to continue.
+          That token isn't valid here. Tokens never expire on their own — yours was revoked, never minted on this board, or your account was deactivated. Paste a working token, or ask an admin for an invitation.
         </div>
       )}
 

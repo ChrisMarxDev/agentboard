@@ -27,6 +27,10 @@ import { SkillInstall } from '../components/builtin/SkillInstall'
 import { Button } from '../components/builtin/Button'
 import { Sheet } from '../components/builtin/Sheet'
 import { Inbox } from '../components/builtin/Inbox'
+import { TasksSummary } from '../components/builtin/TasksSummary'
+import { InboxPreview } from '../components/builtin/InboxPreview'
+import { PinnedPages } from '../components/builtin/PinnedPages'
+import { SkillsStrip } from '../components/builtin/SkillsStrip'
 
 type AnyComponent = ComponentType<any>
 
@@ -61,6 +65,10 @@ registry.set('SkillInstall', SkillInstall)
 registry.set('Button', Button)
 registry.set('Sheet', Sheet)
 registry.set('Inbox', Inbox)
+registry.set('TasksSummary', TasksSummary)
+registry.set('InboxPreview', InboxPreview)
+registry.set('PinnedPages', PinnedPages)
+registry.set('SkillsStrip', SkillsStrip)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)
