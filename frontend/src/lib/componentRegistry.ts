@@ -27,7 +27,7 @@ import { SkillInstall } from '../components/builtin/SkillInstall'
 import { Button } from '../components/builtin/Button'
 import { Sheet } from '../components/builtin/Sheet'
 import { Inbox } from '../components/builtin/Inbox'
-import { V2Display } from '../components/builtin/V2Display'
+import { DataView } from '../components/builtin/DataView'
 
 type AnyComponent = ComponentType<any>
 
@@ -62,7 +62,7 @@ registry.set('SkillInstall', SkillInstall)
 registry.set('Button', Button)
 registry.set('Sheet', Sheet)
 registry.set('Inbox', Inbox)
-registry.set('V2Display', V2Display)
+registry.set('DataView', DataView)
 
 export function getComponents(): Record<string, AnyComponent> {
   return Object.fromEntries(registry)

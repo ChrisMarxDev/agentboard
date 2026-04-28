@@ -19,7 +19,7 @@ import (
 
 // Server implements the MCP Streamable HTTP transport.
 type Server struct {
-	FileStore            *store.Store // files-first content store; powers the agentboard_v2_* tools (renamed in Cut 3)
+	FileStore            *store.Store // files-first content store; powers the agentboard_* tools (renamed in Cut 3)
 	Pages                *mdx.PageManager
 	Search               *mdx.SearchStore
 	Components           *components.Manager

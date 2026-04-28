@@ -30,27 +30,27 @@ import (
 // something genuinely runaway to trip them. The bucket size + refill
 // rate together mean ~3 writes/sec sustained, 50 in a burst.
 const (
-	v2WriteBurst        = 50
-	v2WritesPerMinute   = 200
-	v2LimiterIdleEvict  = 1 * time.Hour
+	writeBurst        = 50
+	writesPerMinute   = 200
+	limiterIdleEvict  = 1 * time.Hour
 )
 
-// v2RateStore holds one token bucket per actor name. Anonymous /
+// storeRateStore holds one token bucket per actor name. Anonymous /
 // unauthenticated callers should never reach a v2 handler (auth gates
 // them earlier), but as a defensive default the empty actor maps to a
 // shared "anonymous" bucket so no single client can saturate.
-type v2RateStore struct {
+type storeRateStore struct {
 	mu sync.Mutex
-	m  map[string]*v2RateEntry
+	m  map[string]*storeRateEntry
 }
 
-type v2RateEntry struct {
+type storeRateEntry struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
 }
 
-func newV2RateStore() *v2RateStore {
-	s := &v2RateStore{m: map[string]*v2RateEntry{}}
+func newRateStore() *storeRateStore {
+	s := &storeRateStore{m: map[string]*storeRateEntry{}}
 	go s.janitor()
 	return s
 }
@@ -58,13 +58,13 @@ func newV2RateStore() *v2RateStore {
 // limiterFor returns (or creates) the per-actor token bucket. Holds
 // s.mu briefly; the limiter itself uses internal locking, so the hot
 // Allow() path is uncontended.
-func (s *v2RateStore) limiterFor(actor string) *rate.Limiter {
+func (s *storeRateStore) limiterFor(actor string) *rate.Limiter {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.m[actor]
 	if !ok {
-		e = &v2RateEntry{
-			limiter: rate.NewLimiter(rate.Limit(float64(v2WritesPerMinute)/60.0), v2WriteBurst),
+		e = &storeRateEntry{
+			limiter: rate.NewLimiter(rate.Limit(float64(writesPerMinute)/60.0), writeBurst),
 		}
 		s.m[actor] = e
 	}
@@ -72,11 +72,11 @@ func (s *v2RateStore) limiterFor(actor string) *rate.Limiter {
 	return e.limiter
 }
 
-func (s *v2RateStore) janitor() {
+func (s *storeRateStore) janitor() {
 	tick := time.NewTicker(15 * time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		cutoff := time.Now().Add(-v2LimiterIdleEvict)
+		cutoff := time.Now().Add(-limiterIdleEvict)
 		s.mu.Lock()
 		for k, e := range s.m {
 			if e.lastSeen.Before(cutoff) {
@@ -87,10 +87,10 @@ func (s *v2RateStore) janitor() {
 	}
 }
 
-// v2RateLimit is the chi middleware applied to /api/v2 mutation
+// storeRateLimit is the chi middleware applied to /api/v2 mutation
 // routes. Reads (GET, HEAD) bypass it — the bucket only matters for
 // state-changing calls.
-func (s *Server) v2RateLimit(next http.Handler) http.Handler {
+func (s *Server) storeRateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			next.ServeHTTP(w, r)
@@ -100,7 +100,7 @@ func (s *Server) v2RateLimit(next http.Handler) http.Handler {
 		if u := auth.UserFromContext(r.Context()); u != nil {
 			actor = u.Username
 		}
-		lim := s.V2Limits.limiterFor(actor)
+		lim := s.Limits.limiterFor(actor)
 		res := lim.Reserve()
 		if !res.OK() {
 			// Reserve always reports OK for non-zero buckets — only

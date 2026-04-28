@@ -31,7 +31,7 @@ func actorFor(r *http.Request) string {
 
 // readJSONBody decodes a request body into dst, capping at 1 MiB to
 // match the singleton write spec (binary content goes through the
-// presigned-URL flow, not /api/v2/data).
+// presigned-URL flow, not /api/data).
 func readJSONBody(r *http.Request, dst any) error {
 	defer r.Body.Close()
 	const maxBody = 1 << 20
@@ -143,7 +143,7 @@ func translateStoreError(w http.ResponseWriter, err error) {
 
 // ---------- Tier 1: index ----------
 
-func (s *Server) handleV2Index(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreIndex(w http.ResponseWriter, r *http.Request) {
 	cat := s.FileStore.Catalog()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"data":  cat,
@@ -153,7 +153,7 @@ func (s *Server) handleV2Index(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Tier 2: search ----------
 
-func (s *Server) handleV2Search(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		writeError(w, http.StatusBadRequest, "missing_query", `pass ?q=<search terms>`)
@@ -177,7 +177,7 @@ func (s *Server) handleV2Search(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Reads ----------
 
-func (s *Server) handleV2Read(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreRead(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 
 	cat, ok := s.FileStore.CatalogGet(key)
@@ -239,7 +239,7 @@ func (s *Server) handleV2Read(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleV2ReadItem(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreReadItem(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	id := chi.URLParam(r, "id")
 	env, err := s.FileStore.ReadItem(key, id)
@@ -267,11 +267,11 @@ func (p writePayload) version() string {
 	return p.Meta.Version
 }
 
-func (s *Server) handleV2Set(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreSet(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	op := r.URL.Query().Get("op")
 	if op != "" {
-		s.handleV2Action(w, r, key, "")
+		s.handleStoreAction(w, r, key, "")
 		return
 	}
 
@@ -292,7 +292,7 @@ func (s *Server) handleV2Set(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, env)
 }
 
-func (s *Server) handleV2Merge(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreMerge(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	var p writePayload
 	if err := readJSONBody(r, &p); err != nil {
@@ -317,7 +317,7 @@ func (s *Server) handleV2Merge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, env)
 }
 
-func (s *Server) handleV2Delete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreDelete(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	cat, ok := s.FileStore.CatalogGet(key)
 	if !ok {
@@ -355,12 +355,12 @@ func (s *Server) handleV2Delete(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Per-item writes ----------
 
-func (s *Server) handleV2Upsert(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreUpsert(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	id := chi.URLParam(r, "id")
 	op := r.URL.Query().Get("op")
 	if op != "" {
-		s.handleV2Action(w, r, key, id)
+		s.handleStoreAction(w, r, key, id)
 		return
 	}
 
@@ -381,7 +381,7 @@ func (s *Server) handleV2Upsert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, env)
 }
 
-func (s *Server) handleV2MergeItem(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreMergeItem(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	id := chi.URLParam(r, "id")
 	var p writePayload
@@ -401,7 +401,7 @@ func (s *Server) handleV2MergeItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, env)
 }
 
-func (s *Server) handleV2DeleteItem(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreDeleteItem(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	id := chi.URLParam(r, "id")
 	version := r.URL.Query().Get("version")
@@ -417,11 +417,11 @@ func (s *Server) handleV2DeleteItem(w http.ResponseWriter, r *http.Request) {
 
 // ---------- Action verbs (?op=...) ----------
 
-// handleV2Action handles the action-verb endpoints: append, increment,
+// handleStoreAction handles the action-verb endpoints: append, increment,
 // cas. Triggered when the corresponding write/upsert handler sees a
-// non-empty ?op= query. Path: /api/v2/data/{key}?op=... or
-// /api/v2/data/{key}/{id}?op=cas (item-level CAS).
-func (s *Server) handleV2Action(w http.ResponseWriter, r *http.Request, key, id string) {
+// non-empty ?op= query. Path: /api/data/{key}?op=... or
+// /api/data/{key}/{id}?op=cas (item-level CAS).
+func (s *Server) handleStoreAction(w http.ResponseWriter, r *http.Request, key, id string) {
 	op := r.URL.Query().Get("op")
 	actor := actorFor(r)
 
@@ -470,7 +470,7 @@ func (s *Server) handleV2Action(w http.ResponseWriter, r *http.Request, key, id 
 
 // ---------- History + activity ----------
 
-func (s *Server) handleV2History(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreHistory(w http.ResponseWriter, r *http.Request) {
 	key := chi.URLParam(r, "key")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	entries, err := s.FileStore.ReadHistory(key, "", limit)
@@ -485,7 +485,7 @@ func (s *Server) handleV2History(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleV2Activity(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleStoreActivity(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	entries, err := s.FileStore.ReadActivity(store.ReadActivityOpts{
 		Limit:      limit,
@@ -504,38 +504,38 @@ func (s *Server) handleV2Activity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// registerV2Routes mounts the /v2 surface on the authenticated /api
-// router. Skips registration when no FileStore is configured so the
-// server still boots in legacy-only mode.
-func (s *Server) registerV2Routes(r chi.Router) {
+// registerStoreRoutes mounts the store surface on the authenticated
+// /api router. Skips registration when no FileStore is configured so
+// the server still boots in legacy-only mode. Uses a Group instead of
+// a Route("/", ...) — Group scopes middleware without nesting, which
+// avoids chi's "trailing slash" conflict resolution that was eating
+// /api/search registrations.
+func (s *Server) registerStoreRoutes(r chi.Router) {
 	if s.FileStore == nil {
 		return
 	}
-	r.Route("/v2", func(r chi.Router) {
-		// Per-token write rate limit applied at the v2 group level.
-		// Reads bypass via the middleware's Method check, so /index,
-		// /search, /activity, and read-only data routes are unthrottled.
-		r.Use(s.v2RateLimit)
+	r.Group(func(r chi.Router) {
+		r.Use(s.storeRateLimit)
 
-		r.Get("/index", s.handleV2Index)
-		r.Get("/search", s.handleV2Search)
-		r.Get("/activity", s.handleV2Activity)
-		r.Post("/files/request-upload", s.handleV2RequestFileUpload)
+		r.Get("/index", s.handleStoreIndex)
+		r.Get("/search", s.handleStoreSearch)
+		r.Get("/activity", s.handleStoreActivity)
+		r.Post("/files/request-upload", s.handleRequestFileUpload)
 
 		r.Route("/data/{key}", func(r chi.Router) {
-			r.Get("/", s.handleV2Read)
-			r.Put("/", s.handleV2Set)
-			r.Patch("/", s.handleV2Merge)
-			r.Post("/", s.handleV2Set) // POST is the action-verb path (?op=...)
-			r.Delete("/", s.handleV2Delete)
+			r.Get("/", s.handleStoreRead)
+			r.Put("/", s.handleStoreSet)
+			r.Patch("/", s.handleStoreMerge)
+			r.Post("/", s.handleStoreSet) // POST is the action-verb path (?op=...)
+			r.Delete("/", s.handleStoreDelete)
 
-			r.Get("/history", s.handleV2History)
+			r.Get("/history", s.handleStoreHistory)
 
-			r.Get("/{id}", s.handleV2ReadItem)
-			r.Put("/{id}", s.handleV2Upsert)
-			r.Patch("/{id}", s.handleV2MergeItem)
-			r.Post("/{id}", s.handleV2Upsert) // ?op=cas for items
-			r.Delete("/{id}", s.handleV2DeleteItem)
+			r.Get("/{id}", s.handleStoreReadItem)
+			r.Put("/{id}", s.handleStoreUpsert)
+			r.Patch("/{id}", s.handleStoreMergeItem)
+			r.Post("/{id}", s.handleStoreUpsert)
+			r.Delete("/{id}", s.handleStoreDeleteItem)
 		})
 	})
 }

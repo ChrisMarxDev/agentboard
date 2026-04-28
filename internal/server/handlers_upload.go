@@ -2,8 +2,8 @@ package server
 
 // Handlers for the presigned-URL file upload flow (spec §12).
 // Two-step:
-//   1) POST /api/v2/files/request-upload — auth required, mints token
-//   2) PUT  /api/v2/upload/{token}       — no auth; bytes flow direct
+//   1) POST /api/files/request-upload — auth required, mints token
+//   2) PUT  /api/upload/{token}       — no auth; bytes flow direct
 //
 // The second route is mounted OUTSIDE the bearer-required group; its
 // authority is the unguessable token plus the size cap baked into the
@@ -21,7 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// requestUploadBody is the input to /api/v2/files/request-upload.
+// requestUploadBody is the input to /api/files/request-upload.
 type requestUploadBody struct {
 	Name         string `json:"name"`
 	SizeBytes    int64  `json:"size_bytes"`
@@ -37,7 +37,7 @@ type requestUploadResponse struct {
 	Token        string `json:"token"`
 }
 
-func (s *Server) handleV2RequestFileUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRequestFileUpload(w http.ResponseWriter, r *http.Request) {
 	if s.Files == nil || s.UploadTokens == nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "upload subsystem not configured")
 		return
@@ -83,7 +83,7 @@ func (s *Server) handleV2RequestFileUpload(w http.ResponseWriter, r *http.Reques
 	if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
 		host = fwdHost
 	}
-	uploadURL := fmt.Sprintf("%s://%s/api/v2/upload/%s", scheme, host, tok.Token)
+	uploadURL := fmt.Sprintf("%s://%s/api/upload/%s", scheme, host, tok.Token)
 
 	writeJSON(w, http.StatusOK, requestUploadResponse{
 		UploadURL:    uploadURL,
@@ -93,12 +93,12 @@ func (s *Server) handleV2RequestFileUpload(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// handleV2UploadWithToken accepts the actual bytes. Mounted on the
+// handleUploadWithToken accepts the actual bytes. Mounted on the
 // public router (no bearer middleware) — the token is the credential.
 // Validates: token is live + matches the file name + size is within
 // the cap. On any failure the bytes are dropped and a structured
 // poka-yoke error returns.
-func (s *Server) handleV2UploadWithToken(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleUploadWithToken(w http.ResponseWriter, r *http.Request) {
 	if s.Files == nil || s.UploadTokens == nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "upload subsystem not configured")
 		return

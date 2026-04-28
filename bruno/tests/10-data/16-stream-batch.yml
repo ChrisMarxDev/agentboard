@@ -5,7 +5,7 @@ info:
 
 http:
   method: POST
-  url: "{{baseUrl}}/api/v2/data/test.v2.events?op=append"
+  url: "{{baseUrl}}/api/data/test.v2.events?op=append"
   headers:
     - name: Content-Type
       value: application/json

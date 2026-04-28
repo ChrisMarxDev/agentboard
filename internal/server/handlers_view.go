@@ -247,7 +247,7 @@ func (s *Server) handleViewEvents(w http.ResponseWriter, r *http.Request) {
 			// happens here (not in the broker) because the broadcast
 			// payload only carries {key, version, shape, op} — re-read
 			// the file once on emit.
-			if kind == "data" && evt.Type == "data-v2" {
+			if kind == "data" && evt.Type == "data" {
 				if v, ok := unwrapV2ForBroadcast(s.FileStore, payload); ok {
 					payload = v
 				}
@@ -273,7 +273,7 @@ func (s *Server) handleViewEvents(w http.ResponseWriter, r *http.Request) {
 // reach this view session, and returns the translated kind + payload.
 func shouldForward(evt SSEEvent, scope *view.Scope) (bool, string, []byte) {
 	switch evt.Type {
-	case "data-v2":
+	case "data":
 		// store.Event JSON. Re-emitted to the client as plain `data`
 		// (the only data-event type now that legacy KV is gone). The
 		// server-side unwrap in handleViewEvents shapes payload into
@@ -440,7 +440,7 @@ func contentTypeForName(name string) string {
 // Unused alias to keep mdx import honest — referenced via PageRefs.
 var _ = mdx.RefSet{}
 
-// unwrapV2ForBroadcast takes a `data-v2` SSE payload (store.Event
+// unwrapV2ForBroadcast takes a `data` SSE payload (store.Event
 // JSON) and re-emits it in the legacy `data` shape `{key, value}` by
 // reading the current envelope from the file store. Returns ok=false
 // when the key is gone or unreadable — caller should drop the event

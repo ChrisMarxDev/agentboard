@@ -170,5 +170,5 @@ func (s *Server) handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleBulkDeleteData(w http.ResponseWriter, r *http.Request) {
 	_ = r
 	respondError(w, http.StatusGone, "REMOVED",
-		"the legacy /api/data/* surface was removed in the rewrite — use /api/v2/data/* (or /api/* once Cut 3 lands)")
+		"the legacy /api/data/* surface was removed in the rewrite — use /api/data/* (or /api/* once Cut 3 lands)")
 }

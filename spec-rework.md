@@ -1,6 +1,6 @@
 # AgentBoard — Rewrite Spec
 
-> **Status**: Implementation contract for the rewrite that supersedes `spec-file-storage.md`. Locks the design decisions reached in the planning conversation. **Pre-launch — no backward compatibility, no migrators.** The legacy SQLite KV, `/api/data/*` routes, dual-store fallback, `v2` framing, and `<V2Display>` escape hatch all get deleted.
+> **Status**: Implementation contract for the rewrite that supersedes `spec-file-storage.md`. Locks the design decisions reached in the planning conversation. **Pre-launch — no backward compatibility, no migrators.** The legacy SQLite KV, `/api/data/*` routes, dual-store fallback, `v2` framing, and `<DataView>` escape hatch all get deleted.
 
 ## 1. Thesis
 
@@ -120,10 +120,10 @@ No cross-page `source="other-page:field"` syntax. If two pages need the same val
 - `/api/data/*` REST routes.
 - `agentboard_set/merge/append/delete/get/list_keys/get_data_schema/upsert_by_id/merge_by_id/delete_by_id` MCP tools.
 - The `Store: data.DataStore` field on `server.Server`, `mcp.Server`, `ServerConfig`.
-- `<V2Display>` component.
-- `useDataV2` hook (folded into `useData`).
+- `<DataView>` component.
+- `useData` hook (folded into `useData`).
 - `dev.mcp.tools_v2` data key (the metric just becomes `dev.mcp.tools`).
-- `/api/v2/*` route prefix (collapses into `/api/`).
+- `/api/*` route prefix (collapses into `/api/`).
 - The `bruno/tests/01-data/` folder (legacy KV tests).
 - `internal/data/store_test.go` and any test that opens `data.NewSQLiteStore`.
 - The view broker's dual-store fallback (legacy-then-v2). Single source now.
@@ -133,14 +133,14 @@ No cross-page `source="other-page:field"` syntax. If two pages need the same val
 
 | Old | New |
 |---|---|
-| `/api/v2/data/<key>` | `/api/<path>` |
-| `/api/v2/index` | `/api/index` |
-| `/api/v2/search` | `/api/search` |
-| `/api/v2/files/request-upload` | `/api/files/request-upload` |
-| `agentboard_v2_*` | `agentboard_*` |
-| `useDataV2` | `useData` |
+| `/api/data/<key>` | `/api/<path>` |
+| `/api/index` | `/api/index` |
+| `/api/search` | `/api/search` |
+| `/api/files/request-upload` | `/api/files/request-upload` |
+| `agentboard_*` | `agentboard_*` |
+| `useData` | `useData` |
 | `internal/store` | `internal/store` (kept; just no longer "the v2 store") |
-| `data-v2` SSE event | `data` (the only data-event type) |
+| `data` SSE event | `data` (the only data-event type) |
 
 ## 10. What survives
 
@@ -156,7 +156,7 @@ No cross-page `source="other-page:field"` syntax. If two pages need the same val
 
 1. **Cut 1 — rip legacy data.** Delete `internal/data/`, all `/api/data/*` routes, all legacy MCP tools. Build clean. Dashboard stays alive on the existing v2 store.
 2. **Cut 2 — unify shapes.** Singleton/Collection/Stream → one Doc model. Folders are collections. `.md` is the only leaf type (plus `.ndjson` for streams).
-3. **Cut 3 — drop the v2 framing.** `/api/v2/*` → `/api/*`. `agentboard_v2_*` → `agentboard_*`. Rip `useDataV2` and `<V2Display>`.
+3. **Cut 3 — drop the v2 framing.** `/api/*` → `/api/*`. `agentboard_*` → `agentboard_*`. Rip `useData` and `<DataView>`.
 4. **Cut 4 — rewrite components.** The 25-ish built-ins read frontmatter / folders / ndjson via the new `source=` rules.
 5. **Cut 5 — dogfood reset.** Wipe `~/.agentboard/agentboard-dev/`. Reseed home, `/dev`, `/architecture`, `/principles`, `/seams`, `/features/*`, `/roadmap` on the new model.
 

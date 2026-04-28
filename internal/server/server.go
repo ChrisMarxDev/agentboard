@@ -60,7 +60,7 @@ type Server struct {
 	Invitations          *invitations.Store
 	Locks                *locks.Store
 	UploadTokens         *uploadTokens // one-shot presigned upload tokens (spec §12)
-	V2Limits             *v2RateStore  // per-actor token bucket for /api/v2 writes (spec §18)
+	Limits             *storeRateStore  // per-actor token bucket for /api/v2 writes (spec §18)
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -89,7 +89,7 @@ func New(cfg ServerConfig) *Server {
 
 	// Wire FileStore events to the SSE broadcaster — the only data
 	// source now that the legacy KV is gone (Cut 1). The Type stays
-	// "data-v2" for one more cut so the frontend's listener keeps
+	// "data" for one more cut so the frontend's listener keeps
 	// working; Cut 3 renames it to "data".
 	if cfg.FileStore != nil {
 		go func() {
@@ -97,7 +97,7 @@ func New(cfg ServerConfig) *Server {
 			for evt := range ch {
 				eventData, _ := json.Marshal(evt)
 				broadcaster.Broadcast(SSEEvent{
-					Type: "data-v2",
+					Type: "data",
 					Data: eventData,
 				})
 			}
@@ -310,7 +310,7 @@ func New(cfg ServerConfig) *Server {
 		Invitations:          invStore,
 		Locks:                lockStore,
 		UploadTokens:         newUploadTokens(),
-		V2Limits:             newV2RateStore(),
+		Limits:             newRateStore(),
 		Grab:                 grabber,
 		MCP:                  mcpServer,
 		Share:                shareStore,
@@ -342,7 +342,7 @@ func New(cfg ServerConfig) *Server {
 		tok := s.UploadTokens.Mint(clean, actor, maxBytes)
 		// Best-effort URL: localhost is correct on a dev machine; for
 		// hosted instances the REST mint is the supported path.
-		url := fmt.Sprintf("http://localhost:%d/api/v2/upload/%s", cfg.Project.Config.Port, tok.Token)
+		url := fmt.Sprintf("http://localhost:%d/api/upload/%s", cfg.Project.Config.Port, tok.Token)
 		return url, tok.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"), tok.MaxSizeBytes, true
 	}
 
@@ -528,11 +528,11 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Get("/api/invitations/{id}", s.handleGetInvitationPublic)
 	r.Post("/api/invitations/{id}/redeem", s.handleRedeemInvitation)
 
-	// /api/v2/upload/{token} is public — the unguessable token is the
+	// /api/upload/{token} is public — the unguessable token is the
 	// credential. Mounted here so the bearer-required middleware
 	// doesn't reject the upload before the handler can validate the
 	// token. The MINTING endpoint stays inside the auth group below.
-	r.Put("/api/v2/upload/{token}", s.handleV2UploadWithToken)
+	r.Put("/api/upload/{token}", s.handleUploadWithToken)
 
 	// API routes
 	r.Group(func(r chi.Router) {
@@ -598,7 +598,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 
 		// Legacy /api/data/* routes were removed in Cut 1 of the
 		// rewrite. The data layer is now files-first; consumers go
-		// through /api/v2/data/* until Cut 3 collapses the prefix into
+		// through /api/data/* until Cut 3 collapses the prefix into
 		// /api/data/* on the new shape.
 		//
 		// One survivor: the bulk-delete stub returns 410 with a forward
@@ -666,7 +666,7 @@ func apiRoutes(s *Server) func(r chi.Router) {
 
 		// /api/v2 — files-first store routes (spec-file-storage.md).
 		// Mounted parallel to /api/data/* during the migration window.
-		s.registerV2Routes(r)
+		s.registerStoreRoutes(r)
 
 		// Component endpoints
 		r.Get("/components", s.handleListComponents)
@@ -695,8 +695,10 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// Lightweight combined tree — pages + files, no source bodies
 		r.Get("/tree", s.handleTree)
 
-		// Full-text search over page content (FTS5)
-		r.Get("/search", s.handleSearch)
+		// /api/search is the unified store search (registered via
+		// registerStoreRoutes above). The page-only FTS5 search lives
+		// at /api/search/pages until Cut 4 merges them.
+		r.Get("/search/pages", s.handleSearch)
 
 		// Grab — materialize a list of picks into agent-ready text
 		r.Post("/grab", s.handleGrab)

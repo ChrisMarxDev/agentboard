@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/api/v2/index"
+  url: "{{baseUrl}}/api/index"
 
 runtime:
   scripts:
@@ -18,7 +18,7 @@ runtime:
         for (const k of keys) {
           try {
             const qs = k.shape === "collection" ? "?confirm=true" : "";
-            await fetch(`${baseUrl}/api/v2/data/${encodeURIComponent(k.key)}${qs}`, { method: "DELETE" });
+            await fetch(`${baseUrl}/api/data/${encodeURIComponent(k.key)}${qs}`, { method: "DELETE" });
           } catch (e) {}
         }
         bru.setVar("v2_cleaned", keys.length);

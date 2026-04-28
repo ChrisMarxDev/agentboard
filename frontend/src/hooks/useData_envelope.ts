@@ -1,6 +1,6 @@
-// useDataV2 — direct read against /api/v2/data/{key} with SSE-driven
+// useData — direct read against /api/data/{key} with SSE-driven
 // invalidation. Parallel to useData (which goes through the view
-// broker). Used by the <V2Display> component on the showcase page so
+// broker). Used by the <DataView> component on the showcase page so
 // agents and humans can watch envelope state change live without
 // touching the legacy data path.
 //
@@ -28,7 +28,7 @@ export interface V2CollectionItem {
   envelope: V2Envelope
 }
 
-// V2Read covers any of the three response shapes /api/v2/data returns:
+// V2Read covers any of the three response shapes /api/data returns:
 //   - singleton: V2Envelope
 //   - collection: { _meta, items: [...] }
 //   - stream: { _meta, lines: [...] }
@@ -38,10 +38,10 @@ export type V2Read =
   | { _meta: { shape: 'collection'; key: string; count: number }; items: V2CollectionItem[] }
   | { _meta: { shape: 'stream'; key: string; line_count: number }; lines: Array<{ ts: string; value: unknown }> }
 
-// useDataV2 fetches a key on mount and re-fetches whenever an SSE
+// useData fetches a key on mount and re-fetches whenever an SSE
 // event for that key arrives. Errors and loading state surfaced like
 // the legacy useData so consumers can mirror UX.
-export function useDataV2(key: string) {
+export function useData(key: string) {
   const [data, setData] = useState<V2Read | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -57,7 +57,7 @@ export function useDataV2(key: string) {
     const ctrl = new AbortController()
     abortRef.current = ctrl
     try {
-      const res = await apiFetch(`/api/v2/data/${encodeURIComponent(key)}`, { signal: ctrl.signal })
+      const res = await apiFetch(`/api/data/${encodeURIComponent(key)}`, { signal: ctrl.signal })
       if (!res.ok) {
         if (res.status === 404) {
           setData(null)
@@ -82,7 +82,7 @@ export function useDataV2(key: string) {
     fetchOnce()
 
     // Listen on the global SSE feed for v2 changes. The /api/events
-    // stream emits "data-v2" events whose payload is the store.Event
+    // stream emits "data" events whose payload is the store.Event
     // struct ({key, op, shape, version, id?}). When the key matches,
     // re-fetch — a tiny debounce avoids thrash if many writes land in
     // quick succession.
@@ -100,10 +100,10 @@ export function useDataV2(key: string) {
         // ignore malformed events
       }
     }
-    es.addEventListener('data-v2', onMessage)
+    es.addEventListener('data', onMessage)
 
     return () => {
-      es.removeEventListener('data-v2', onMessage)
+      es.removeEventListener('data', onMessage)
       es.close()
       if (timer) clearTimeout(timer)
       abortRef.current?.abort()

@@ -13,15 +13,15 @@ import (
 	"github.com/christophermarx/agentboard/internal/store"
 )
 
-// v2ToolDefs returns the new tier-shaped tool definitions. Caller folds
+// storeToolDefs returns the new tier-shaped tool definitions. Caller folds
 // these into toolDefinitions().
-func (s *Server) v2ToolDefs() []ToolDef {
+func (s *Server) storeToolDefs() []ToolDef {
 	if s.FileStore == nil {
 		return nil
 	}
 	return []ToolDef{
 		{
-			Name:        "agentboard_v2_index",
+			Name:        "agentboard_index",
 			Description: "Tier 1 — return the catalog of every key in the project: shape, version, size. One call after wakeup to orient.",
 			InputSchema: map[string]any{
 				"type":       "object",
@@ -29,7 +29,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_search",
+			Name:        "agentboard_search",
 			Description: "Tier 2 — substring search across all data values. Returns ranked snippets with paths.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -41,7 +41,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_read",
+			Name:        "agentboard_read",
 			Description: "Read a singleton, list a collection, or tail a stream. Pass `id` to read one collection item.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -53,7 +53,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_write",
+			Name:        "agentboard_write",
 			Description: "Set a singleton or upsert a collection item. Pass `version` (from a prior read) for optimistic CAS, or '*' to force-overwrite.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -67,7 +67,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_merge",
+			Name:        "agentboard_merge",
 			Description: "Deep-merge an RFC 7396 patch into a singleton or collection item. Server-retried; never returns conflict.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -80,7 +80,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_append",
+			Name:        "agentboard_append",
 			Description: "Append one (`value`) or many (`items`) lines to a stream. Each line is timestamped server-side. Lock-free; never conflicts.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -92,12 +92,12 @@ func (s *Server) v2ToolDefs() []ToolDef {
 				"required": []string{"key"},
 			},
 		},
-		// agentboard_v2_increment + agentboard_v2_cas were removed in
+		// agentboard_increment + agentboard_cas were removed in
 		// Cut 2 — atomic field-level ops are out, agents read-modify-
 		// write against the file's _meta.version. The file-level CAS
 		// at the write op layer handles concurrent races.
 		{
-			Name:        "agentboard_v2_delete",
+			Name:        "agentboard_delete",
 			Description: "Delete a key (any shape) or one collection item. Idempotent. Pass `confirm: true` to delete a non-empty collection.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -110,7 +110,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_history",
+			Name:        "agentboard_history",
 			Description: "Return per-key (or per-item) write history. Up to 100 entries retained, oldest first.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -123,7 +123,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_request_file_upload",
+			Name:        "agentboard_request_file_upload",
 			Description: "Mint a one-shot presigned URL for a binary file upload. Agent shells out: `curl -X PUT --data-binary @file <upload_url>`. Use this instead of the legacy base64 path — keeps bytes off the MCP/JSON channel and out of the context window.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -136,7 +136,7 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_v2_activity",
+			Name:        "agentboard_activity",
 			Description: "Return the global write log filtered by actor / path_prefix / time range.",
 			InputSchema: map[string]any{
 				"type": "object",
@@ -152,44 +152,44 @@ func (s *Server) v2ToolDefs() []ToolDef {
 	}
 }
 
-// dispatchV2 routes the agentboard_v2_* tools. Returns (result, ok). ok
+// dispatchStore routes the agentboard_* tools. Returns (result, ok). ok
 // is false when the tool name didn't match — caller falls through to
 // the legacy switch.
-func (s *Server) dispatchV2(name string, args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) dispatchStore(name string, args map[string]json.RawMessage) (any, *RPCError, bool) {
 	if s.FileStore == nil {
 		return nil, nil, false
 	}
 	switch name {
-	case "agentboard_v2_index":
-		return s.toolV2Index()
-	case "agentboard_v2_search":
-		return s.toolV2Search(args)
-	case "agentboard_v2_read":
-		return s.toolV2Read(args)
-	case "agentboard_v2_write":
-		return s.toolV2Write(args)
-	case "agentboard_v2_merge":
-		return s.toolV2Merge(args)
-	case "agentboard_v2_append":
-		return s.toolV2Append(args)
-	// agentboard_v2_increment + _v2_cas dispatched here pre-Cut-2.
-	case "agentboard_v2_delete":
-		return s.toolV2Delete(args)
-	case "agentboard_v2_history":
-		return s.toolV2History(args)
-	case "agentboard_v2_activity":
-		return s.toolV2Activity(args)
-	case "agentboard_v2_request_file_upload":
-		return s.toolV2RequestFileUpload(args)
+	case "agentboard_index":
+		return s.toolStoreIndex()
+	case "agentboard_search":
+		return s.toolStoreSearch(args)
+	case "agentboard_read":
+		return s.toolStoreRead(args)
+	case "agentboard_write":
+		return s.toolStoreWrite(args)
+	case "agentboard_merge":
+		return s.toolStoreMerge(args)
+	case "agentboard_append":
+		return s.toolStoreAppend(args)
+	// agentboard_increment + _v2_cas dispatched here pre-Cut-2.
+	case "agentboard_delete":
+		return s.toolStoreDelete(args)
+	case "agentboard_history":
+		return s.toolStoreHistory(args)
+	case "agentboard_activity":
+		return s.toolStoreActivity(args)
+	case "agentboard_request_file_upload":
+		return s.toolStoreRequestFileUpload(args)
 	}
 	return nil, nil, false
 }
 
-// toolV2RequestFileUpload returns a one-shot presigned URL the agent
+// toolStoreRequestFileUpload returns a one-shot presigned URL the agent
 // can PUT raw bytes to. The MintUploadToken closure is wired in by the
 // HTTP server — tests can stub it. Returning the *URL* (not just a
 // token) means the agent doesn't need to know the server's host.
-func (s *Server) toolV2RequestFileUpload(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreRequestFileUpload(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	if s.MintUploadToken == nil {
 		return nil, &RPCError{Code: -32000, Message: "upload subsystem not configured"}, true
 	}
@@ -213,16 +213,16 @@ func (s *Server) toolV2RequestFileUpload(args map[string]json.RawMessage) (any, 
 	}), nil, true
 }
 
-// dispatchV2 wrappers. Each tool returns the result body wrapped in
+// dispatchStore wrappers. Each tool returns the result body wrapped in
 // MCP content; structured store errors translate to RPCError with
 // embedded current state where applicable.
 
-func (s *Server) toolV2Index() (any, *RPCError, bool) {
+func (s *Server) toolStoreIndex() (any, *RPCError, bool) {
 	cat := s.FileStore.Catalog()
 	return mcpJSON(map[string]any{"data": cat, "count": len(cat)}), nil, true
 }
 
-func (s *Server) toolV2Search(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreSearch(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	q := getString(args, "q")
 	if q == "" {
 		return nil, &RPCError{Code: -32602, Message: "search needs a non-empty `q`"}, true
@@ -236,7 +236,7 @@ func (s *Server) toolV2Search(args map[string]json.RawMessage) (any, *RPCError, 
 	return mcpJSON(map[string]any{"query": q, "results": results}), nil, true
 }
 
-func (s *Server) toolV2Read(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreRead(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -278,7 +278,7 @@ func (s *Server) toolV2Read(args map[string]json.RawMessage) (any, *RPCError, bo
 	return nil, &RPCError{Code: -32000, Message: "unknown shape"}, true
 }
 
-func (s *Server) toolV2Write(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreWrite(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -304,7 +304,7 @@ func (s *Server) toolV2Write(args map[string]json.RawMessage) (any, *RPCError, b
 	return mcpJSON(env), nil, true
 }
 
-func (s *Server) toolV2Merge(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreMerge(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -329,7 +329,7 @@ func (s *Server) toolV2Merge(args map[string]json.RawMessage) (any, *RPCError, b
 	return mcpJSON(env), nil, true
 }
 
-func (s *Server) toolV2Append(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreAppend(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -363,7 +363,7 @@ func (s *Server) toolV2Append(args map[string]json.RawMessage) (any, *RPCError, 
 // write against the file's _meta.version for atomicity, and the
 // file-level CAS at the Set/UpsertItem layer covers concurrent races.
 
-func (s *Server) toolV2Delete(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreDelete(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -403,7 +403,7 @@ func (s *Server) toolV2Delete(args map[string]json.RawMessage) (any, *RPCError, 
 	return mcpContent(fmt.Sprintf("Deleted %s", key)), nil, true
 }
 
-func (s *Server) toolV2History(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreHistory(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
 	if key == "" {
 		return nil, &RPCError{Code: -32602, Message: "key required"}, true
@@ -418,7 +418,7 @@ func (s *Server) toolV2History(args map[string]json.RawMessage) (any, *RPCError,
 	return mcpJSON(map[string]any{"key": key, "id": id, "entries": entries, "count": len(entries)}), nil, true
 }
 
-func (s *Server) toolV2Activity(args map[string]json.RawMessage) (any, *RPCError, bool) {
+func (s *Server) toolStoreActivity(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	var limit int
 	_ = json.Unmarshal(args["limit"], &limit)
 	entries, err := s.FileStore.ReadActivity(store.ReadActivityOpts{

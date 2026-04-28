@@ -1,4 +1,4 @@
-// V2Display — read-only live view of one /api/v2/data/{key} envelope.
+// DataView — read-only live view of one /api/data/{key} envelope.
 // Used on the spec showcase page so the demo isn't curl-only — humans
 // and agents can watch the version timestamp tick forward as they
 // poke at the API in another tab.
@@ -9,17 +9,17 @@
 // envelope-aware semantics (full Phase 4), this becomes redundant.
 
 import { Loader2, AlertCircle } from 'lucide-react'
-import { useDataV2 } from '../../hooks/useDataV2'
+import { useData } from '../../hooks/useData'
 
-interface V2DisplayProps {
+interface DataViewProps {
   /** Dotted v2 key, e.g. "showcase.demo". */
   source: string
   /** Optional label rendered above the envelope. */
   label?: string
 }
 
-export function V2Display({ source, label }: V2DisplayProps) {
-  const { data, loading, error } = useDataV2(source)
+export function DataView({ source, label }: DataViewProps) {
+  const { data, loading, error } = useData(source)
 
   return (
     <div

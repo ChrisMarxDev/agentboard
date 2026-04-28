@@ -18,7 +18,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 		// Legacy KV tools (agentboard_set, _merge, _append, _delete,
 		// _get, _list_keys, _get_data_schema, _upsert_by_id,
 		// _merge_by_id, _delete_by_id, _get_by_id) were removed in
-		// Cut 1 of the rewrite. The agentboard_v2_* family is the
+		// Cut 1 of the rewrite. The agentboard_* family is the
 		// data surface; Cut 3 collapses it back into the unprefixed
 		// names.
 		{
@@ -83,7 +83,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		// agentboard_get_data_schema removed in Cut 1 — schema lookup
-		// happens via agentboard_v2_index now (every catalog entry
+		// happens via agentboard_index now (every catalog entry
 		// includes its inferred type).
 		{
 			Name:        "agentboard_write_file",
@@ -154,8 +154,8 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_search",
-			Description: "Full-text search over every page in the project. Returns ranked hits with path, title, and a short snippet highlighting the match. Prefer this over list_pages + read_page when you know what you're looking for but not where it lives.",
+			Name:        "agentboard_search_pages",
+			Description: "Full-text search restricted to dashboard pages. Returns ranked hits with path, title, and a short snippet highlighting the match. For a unified search across pages + store data + components, use agentboard_search.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
@@ -385,7 +385,7 @@ func (s *Server) toolDefinitions() []ToolDef {
 		)
 	}
 
-	tools = append(tools, s.v2ToolDefs()...)
+	tools = append(tools, s.storeToolDefs()...)
 
 	return tools
 }
@@ -404,7 +404,7 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 		return nil, &RPCError{Code: -32602, Message: "Invalid arguments"}
 	}
 
-	if result, err, ok := s.dispatchV2(call.Name, args); ok {
+	if result, err, ok := s.dispatchStore(call.Name, args); ok {
 		return result, err
 	}
 
@@ -445,7 +445,7 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 		return s.toolClearErrors(args)
 	case "agentboard_grab":
 		return s.toolGrab(args)
-	case "agentboard_search":
+	case "agentboard_search_pages":
 		return s.toolSearch(args)
 	case "agentboard_list_webhooks":
 		return s.toolListWebhooks()
@@ -686,7 +686,7 @@ func mcpContent(text string) interface{} {
 
 // toolSet / toolMerge / toolAppend / toolDelete / toolGet / toolListKeys
 // were the legacy KV implementations. Cut 1 of the rewrite removed
-// them along with the Store: data.DataStore field. The agentboard_v2_*
+// them along with the Store: data.DataStore field. The agentboard_*
 // tools cover the same surface against the files-first store; Cut 3
 // drops the v2 prefix.
 
@@ -780,4 +780,4 @@ func (s *Server) toolReadComponent(args map[string]json.RawMessage) (interface{}
 
 // toolGetSchema removed in Cut 1 — schema inference now comes through
 // the v2 catalog (every catalog entry has its inferred type alongside
-// shape + version). Callers use agentboard_v2_index instead.
+// shape + version). Callers use agentboard_index instead.

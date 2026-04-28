@@ -78,7 +78,7 @@ The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'
 
 ## v2 store surface (files-first)
 
-A parallel data surface lives at `/api/v2/*` backed by **files on disk** instead of SQLite. Full design in [`spec-file-storage.md`](spec-file-storage.md). Key points the agent needs to know:
+A parallel data surface lives at `/api/*` backed by **files on disk** instead of SQLite. Full design in [`spec-file-storage.md`](spec-file-storage.md). Key points the agent needs to know:
 
 **Three immutable shapes** per key, set on first write:
 - **Singleton** — one value, atomic write. `data/<key>.json` on disk.
@@ -92,27 +92,27 @@ A parallel data surface lives at `/api/v2/*` backed by **files on disk** instead
 The `version` is a server-monotonic timestamp; agents echo it back on `PUT`/`PATCH` for optimistic CAS. Conflict responses (412) **embed the current envelope** — no follow-up `GET` needed.
 
 **Endpoints:**
-- `GET  /api/v2/index` — Tier 1 catalog (every key, shape, version)
-- `GET  /api/v2/search?q=…` — Tier 2 substring search across values
-- `GET  /api/v2/data/<key>[/<id>]` — read; shape determined by catalog
-- `PUT  /api/v2/data/<key>[/<id>]` — set/upsert; CAS via `_meta.version` or `If-Match` header
-- `PATCH /api/v2/data/<key>[/<id>]` — RFC 7396 merge; never conflicts
-- `POST /api/v2/data/<key>?op=append|increment|cas` — atomic ops
-- `DELETE /api/v2/data/<key>[/<id>]` — idempotent
-- `GET  /api/v2/data/<key>/history` — per-key NDJSON, last 100 entries
-- `GET  /api/v2/activity` — global write log, filterable by actor/path/time
+- `GET  /api/index` — Tier 1 catalog (every key, shape, version)
+- `GET  /api/search?q=…` — Tier 2 substring search across values
+- `GET  /api/data/<key>[/<id>]` — read; shape determined by catalog
+- `PUT  /api/data/<key>[/<id>]` — set/upsert; CAS via `_meta.version` or `If-Match` header
+- `PATCH /api/data/<key>[/<id>]` — RFC 7396 merge; never conflicts
+- `POST /api/data/<key>?op=append|increment|cas` — atomic ops
+- `DELETE /api/data/<key>[/<id>]` — idempotent
+- `GET  /api/data/<key>/history` — per-key NDJSON, last 100 entries
+- `GET  /api/activity` — global write log, filterable by actor/path/time
 
 **Rate limit:** 200 writes/min sustained, 50/sec burst, per token. Reads bypass. `429` carries `Retry-After` + structured body. If you hit it in normal flow, switch to a batched op (`?by=N` increment, `items: [...]` append).
 
 **Binary uploads — kill base64:**
-- `POST /api/v2/files/request-upload` mints a one-shot URL
+- `POST /api/files/request-upload` mints a one-shot URL
 - Then `curl -X PUT --data-binary @file <upload_url>`
-- Or via MCP: `agentboard_v2_request_file_upload` returns the URL
+- Or via MCP: `agentboard_request_file_upload` returns the URL
 - Tokens are one-shot, TTL 5 min
 
-**Live mirror component:** `<V2Display source="some.key" />` renders the envelope live in any MDX page. Updates on every SSE event. Read-only by design.
+**Live mirror component:** `<DataView source="some.key" />` renders the envelope live in any MDX page. Updates on every SSE event. Read-only by design.
 
-**MCP tools (12):** `agentboard_v2_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_increment`, `_cas`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Prefer these over the legacy resource-CRUD tools — same data, smaller surface, conflict-aware errors.
+**MCP tools (12):** `agentboard_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_increment`, `_cas`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Prefer these over the legacy resource-CRUD tools — same data, smaller surface, conflict-aware errors.
 
 **Read path through the dashboard:** the view broker reads from BOTH stores (legacy SQLite first, files-first as fallback). Existing `<Status source="key" />` etc. on a page transparently picks up v2 keys. SSE events for v2 writes are re-shaped into the legacy `data` event so live updates work without component changes.
 
@@ -272,7 +272,7 @@ Keep the showcase folder's root page (`/showcase`) as an index that lists every 
 | `dev.tests.total` | number | Total test count; pair with passing for a Progress bar |
 | `dev.components.count` | number | Built-in component total (`GET /api/components | jq length`) |
 | `dev.mcp.tools` | number | Total MCP tool count advertised (`tools/list`) |
-| `dev.mcp.tools_v2` | number | Tier-shaped v2 tool subset (`agentboard_v2_*`) |
+| `dev.mcp.tools_v2` | number | Tier-shaped v2 tool subset (`agentboard_*`) |
 | `dev.stack.bundle_kb` | number | Frontend bundle size in KB |
 | `dev.stack.binary_mb` | number | Go binary size in MB |
 | `dev.features.shipped` | array of `{id, title, status, landed_at}` | Kanban/List input |

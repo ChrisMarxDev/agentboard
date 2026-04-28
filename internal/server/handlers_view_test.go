@@ -26,7 +26,7 @@ func TestView_AuthedOpen(t *testing.T) {
 
 	// Seed counter.value through the file-store v2 endpoint. The
 	// envelope wraps the value; the broker unwraps before bundling.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v2/data/counter.value", strings.NewReader(`{"value":42}`))
+	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/counter.value", strings.NewReader(`{"value":42}`))
 	dr.Header.Set("Content-Type", "application/json")
 	drResp, _ := http.DefaultClient.Do(dr)
 	drResp.Body.Close()
@@ -103,7 +103,7 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
 	// Seed the referenced data — v2 endpoint expects an envelope.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v2/data/share.demo", strings.NewReader(`{"value":"ok"}`))
+	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/share.demo", strings.NewReader(`{"value":"ok"}`))
 	dr.Header.Set("Content-Type", "application/json")
 	drResp, _ := http.DefaultClient.Do(dr)
 	drResp.Body.Close()
@@ -164,7 +164,7 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	}
 
 	// Cookie → /api/data/* must 401.
-	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v2/data/share.demo", nil)
+	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/data/share.demo", nil)
 	dresp, err := bare.Do(dreq)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	}
 
 	// Cookie → write must 401.
-	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/v2/data/share.demo", strings.NewReader(`"x"`))
+	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/share.demo", strings.NewReader(`"x"`))
 	wresp, err := bare.Do(wreq)
 	if err != nil {
 		t.Fatal(err)

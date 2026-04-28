@@ -893,7 +893,7 @@ The spec described `POST /api/data/<key>:append` (Google Cloud style). The imple
 
 ### B.2 — `/api/v2` mount, not `/api/data`
 
-The new surface is mounted at `/api/v2/data/*` parallel to the existing `/api/data/*` so the dashboard, MCP, and external integrations keep working through the migration window. Phase 5 removes the legacy mount; the v2 prefix can be dropped at the same time or kept as an alias.
+The new surface is mounted at `/api/data/*` parallel to the existing `/api/data/*` so the dashboard, MCP, and external integrations keep working through the migration window. Phase 5 removes the legacy mount; the v2 prefix can be dropped at the same time or kept as an alias.
 
 ### B.3 — Search uses a substring scanner, not Bleve
 
@@ -902,9 +902,9 @@ The spec called for Bleve as the search index. The implementation ships with a p
 ### B.4 — Presigned upload (§12) shipped end-to-end
 
 Implemented as designed:
-- `POST /api/v2/files/request-upload` (auth required) mints a `ut_<43 chars>` token, scoped to one filename + size cap, TTL 5 minutes.
-- `PUT /api/v2/upload/{token}` (no auth) accepts raw bytes; tokens are one-shot, deleted on first redemption.
-- `agentboard_v2_request_file_upload` MCP tool returns `{upload_url, expires_at, max_size_bytes}`. Agents shell out with `curl --data-binary @file <url>`.
+- `POST /api/files/request-upload` (auth required) mints a `ut_<43 chars>` token, scoped to one filename + size cap, TTL 5 minutes.
+- `PUT /api/upload/{token}` (no auth) accepts raw bytes; tokens are one-shot, deleted on first redemption.
+- `agentboard_request_file_upload` MCP tool returns `{upload_url, expires_at, max_size_bytes}`. Agents shell out with `curl --data-binary @file <url>`.
 
 The legacy base64 path through `agentboard_write_file` remains for agents that genuinely cannot shell out, capped at 1 MiB per spec.
 
@@ -923,14 +923,14 @@ The activity log uses the same logrotate-style scheme as streams: 100 MB cap on 
 ### B.7 — Phase 4 split into "plumbing" and "polish"
 
 The original Phase 4 plan was "migrate `useData` and the 9 components to envelope-aware semantics." What shipped:
-- **Plumbing** — the view broker reads from both stores (legacy first, files-first fallback) and re-shapes `data-v2` SSE events into the legacy `data` event shape. Existing components consume the same bare-value shape; pages can reference v2-only keys without component changes.
+- **Plumbing** — the view broker reads from both stores (legacy first, files-first fallback) and re-shapes `data` SSE events into the legacy `data` event shape. Existing components consume the same bare-value shape; pages can reference v2-only keys without component changes.
 - **Polish (deferred)** — making `useData` envelope-aware, migrating dogfood pages to write through `/api/v2`. Not strictly necessary because the broker bridge handles the read path transparently.
 
-The added `useDataV2` hook + `<V2Display>` component are the escape hatch for code that wants to consume the envelope directly.
+The added `useData` hook + `<DataView>` component are the escape hatch for code that wants to consume the envelope directly.
 
 ### B.8 — MCP surface count
 
-Final v2 tool count is **12**: the 11 originally specified plus `agentboard_v2_request_file_upload`. Legacy tools (`agentboard_set`, `_merge`, `_append`, `_delete`, `_get`, etc.) remain registered and dispatch to the SQLite store; Phase 5 retires them.
+Final v2 tool count is **12**: the 11 originally specified plus `agentboard_request_file_upload`. Legacy tools (`agentboard_set`, `_merge`, `_append`, `_delete`, `_get`, etc.) remain registered and dispatch to the SQLite store; Phase 5 retires them.
 
 ---
 

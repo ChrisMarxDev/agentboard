@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/api/v2/search"
+  url: "{{baseUrl}}/api/search"
   params:
     - name: q
       value: "Build"

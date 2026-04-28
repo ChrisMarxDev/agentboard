@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/api/v2/activity"
+  url: "{{baseUrl}}/api/activity"
   params:
     - name: path_prefix
       value: "test.v2"

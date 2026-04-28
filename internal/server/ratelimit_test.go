@@ -6,21 +6,21 @@ import (
 	"testing"
 )
 
-// TestV2RateLimit_BurstThenThrottle proves the limiter lets a burst of
-// v2WriteBurst writes through immediately and rejects the next one
+// TestRateLimit_BurstThenThrottle proves the limiter lets a burst of
+// writeBurst writes through immediately and rejects the next one
 // with a friendly 429 + Retry-After. Reads bypass the limiter entirely.
 //
 // Uses the limiter middleware directly with a no-op handler so the
 // test doesn't have to spin up the whole Server harness.
-func TestV2RateLimit_BurstThenThrottle(t *testing.T) {
-	srv := &Server{V2Limits: newV2RateStore()}
-	mw := srv.v2RateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestRateLimit_BurstThenThrottle(t *testing.T) {
+	srv := &Server{Limits: newRateStore()}
+	mw := srv.storeRateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	pass := 0
-	for i := range v2WriteBurst + 5 {
-		req := httptest.NewRequest(http.MethodPost, "/api/v2/data/k", nil)
+	for i := range writeBurst + 5 {
+		req := httptest.NewRequest(http.MethodPost, "/api/data/k", nil)
 		w := httptest.NewRecorder()
 		mw.ServeHTTP(w, req)
 		if w.Code == http.StatusOK {
@@ -40,20 +40,20 @@ func TestV2RateLimit_BurstThenThrottle(t *testing.T) {
 			t.Fatalf("429 body missing poka-yoke fields: %s", body)
 		}
 	}
-	if pass != v2WriteBurst {
-		t.Fatalf("burst: passed %d, want exactly %d", pass, v2WriteBurst)
+	if pass != writeBurst {
+		t.Fatalf("burst: passed %d, want exactly %d", pass, writeBurst)
 	}
 }
 
-func TestV2RateLimit_ReadsBypass(t *testing.T) {
-	srv := &Server{V2Limits: newV2RateStore()}
-	mw := srv.v2RateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+func TestRateLimit_ReadsBypass(t *testing.T) {
+	srv := &Server{Limits: newRateStore()}
+	mw := srv.storeRateLimit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	// Many GETs — should never hit the bucket.
-	for i := range v2WriteBurst * 5 {
-		req := httptest.NewRequest(http.MethodGet, "/api/v2/index", nil)
+	for i := range writeBurst * 5 {
+		req := httptest.NewRequest(http.MethodGet, "/api/index", nil)
 		w := httptest.NewRecorder()
 		mw.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
