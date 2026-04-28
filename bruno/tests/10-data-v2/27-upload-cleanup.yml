@@ -1,0 +1,14 @@
+info:
+  name: Tear down test.v2.upload.txt
+  type: http
+  seq: 27
+
+http:
+  method: DELETE
+  url: "{{baseUrl}}/api/files/test.v2.upload.txt"
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("delete clean", function() { expect(res.status).to.equal(200); });

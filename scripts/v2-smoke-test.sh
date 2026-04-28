@@ -129,6 +129,20 @@ assert_jq     "search finds value"        "/api/v2/search?q=signup" ".results | 
 assert_jq     "history has entries"       "/api/v2/data/smoke.k/history" ".entries | length > 0" "true"
 assert_jq     "activity has entries"      "/api/v2/activity?path_prefix=smoke" ".entries | length > 0" "true"
 
+# # --- Presigned upload (spec §12) ---
+MINT=$(curl_v2 -X POST -H 'Content-Type: application/json' \
+  "$URL/api/v2/files/request-upload" -d '{"name":"smoke.txt","size_bytes":12}')
+UPLOAD_URL=$(echo "$MINT" | jq -r .upload_url)
+if [ "$UPLOAD_URL" != "null" ] && [ -n "$UPLOAD_URL" ]; then pass "Mint upload URL"; else fail "Mint upload URL" "no url returned"; fi
+
+UPLOAD_STATUS=$(echo -n "Hello smoke" | curl -s -X PUT --data-binary @- -o /dev/null -w "%{http_code}" "$UPLOAD_URL")
+[ "$UPLOAD_STATUS" = "200" ] && pass "Presigned PUT" || fail "Presigned PUT" "got $UPLOAD_STATUS"
+
+REPLAY_STATUS=$(echo -n "replay" | curl -s -X PUT --data-binary @- -o /dev/null -w "%{http_code}" "$UPLOAD_URL")
+[ "$REPLAY_STATUS" = "401" ] && pass "One-shot enforced" || fail "One-shot enforced" "got $REPLAY_STATUS (want 401)"
+
+assert_status "Read back uploaded file"  GET "/api/files/smoke.txt" 200
+
 # --- Delete ---
 assert_status "Delete singleton"         DELETE "/api/v2/data/smoke.k" 204
 assert_status "GET after delete -> 404"  GET    "/api/v2/data/smoke.k" 404

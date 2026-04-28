@@ -1,0 +1,27 @@
+info:
+  name: PUT same token twice — second attempt is rejected
+  type: http
+  seq: 26
+
+http:
+  method: PUT
+  url: "{{upload_url}}"
+  headers:
+    - name: Content-Type
+      value: text/plain
+  body:
+    type: text
+    data: |-
+      replay attempt
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 401 expired_or_used", function() {
+          expect(res.status).to.equal(401);
+          expect(res.body.error).to.equal("expired_or_used");
+        });
+        test("error message names the recovery", function() {
+          expect(res.body.message).to.match(/fresh one/);
+        });

@@ -1,0 +1,35 @@
+info:
+  name: POST request-upload — mint a presigned URL
+  type: http
+  seq: 24
+
+http:
+  method: POST
+  url: "{{baseUrl}}/api/v2/files/request-upload"
+  headers:
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {"name": "test.v2.upload.txt", "size_bytes": 11, "content_type": "text/plain"}
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("returns full upload_url", function() {
+          expect(res.body.upload_url).to.be.a("string").and.match(/\/api\/v2\/upload\/ut_/);
+        });
+        test("token follows ut_ prefix", function() {
+          expect(res.body.token).to.match(/^ut_/);
+        });
+        test("expires_at is RFC3339", function() {
+          expect(res.body.expires_at).to.match(/^\d{4}-\d{2}-\d{2}T/);
+        });
+        test("max_size_bytes is set", function() {
+          expect(res.body.max_size_bytes).to.be.above(0);
+        });
+        bru.setVar("upload_url", res.body.upload_url);
+        bru.setVar("upload_token", res.body.token);

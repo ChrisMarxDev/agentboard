@@ -1,0 +1,31 @@
+info:
+  name: PUT bytes via presigned URL — no auth needed, token gates it
+  type: http
+  seq: 25
+
+http:
+  method: PUT
+  url: "{{upload_url}}"
+  headers:
+    - name: Content-Type
+      value: text/plain
+  body:
+    type: text
+    data: |-
+      Hello world
+
+runtime:
+  scripts:
+    - type: tests
+      code: |-
+        test("status 200", function() { expect(res.status).to.equal(200); });
+        test("response confirms upload", function() {
+          expect(res.body.ok).to.equal(true);
+          expect(res.body.name).to.equal("test.v2.upload.txt");
+        });
+        test("size matches body", function() {
+          expect(res.body.size).to.equal(11);
+        });
+        test("actor was recorded", function() {
+          expect(res.body.actor).to.be.a("string").and.have.lengthOf.above(0);
+        });
