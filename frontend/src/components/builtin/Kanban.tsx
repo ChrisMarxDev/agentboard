@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Trash2, Users } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { Send, Trash2, Users } from 'lucide-react'
 import { useData } from '../../hooks/useData'
 import { useDataContext } from '../../hooks/DataContext'
+import { apiFetch } from '../../lib/session'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 import {
   deleteCollectionItem,
@@ -9,6 +10,7 @@ import {
 } from '../../lib/collectionWrites'
 import { findUser, useUsers, type PublicUser } from '../../hooks/useUsers'
 import { findTeam, useTeams, type Team } from '../../hooks/useTeams'
+import { useMe } from '../../hooks/useMe'
 import { RichText } from './RichText'
 
 interface KanbanProps {
@@ -313,6 +315,7 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
       {openCard && (
         <KanbanCardModal
           card={openCard}
+          siblings={items}
           source={effectiveSource}
           groupBy={groupBy}
           columns={colOrder}
@@ -427,6 +430,9 @@ function ConfirmDeleteCardDialog({
 
 interface KanbanCardModalProps {
   card: Record<string, unknown>
+  /** All cards in the same collection. Powers parent_id picker, the
+   *  blocked_by picker, and the derived sub-tasks + blockers blocks. */
+  siblings: Record<string, unknown>[]
   source: string
   groupBy: string
   columns: string[]
@@ -455,6 +461,7 @@ interface KanbanCardModalProps {
 // back to a plain readonly line so legacy cards don't blow up.
 function KanbanCardModal({
   card,
+  siblings,
   source,
   groupBy,
   columns,
@@ -479,6 +486,25 @@ function KanbanCardModal({
     ? (merged.assignees as string[]).filter(a => typeof a === 'string')
     : []
   const body = typeof merged.body === 'string' ? merged.body : ''
+  const priority = typeof merged.priority === 'number' ? merged.priority : null
+  const due = typeof merged.due === 'string' ? merged.due : ''
+  const labels = Array.isArray(merged.labels)
+    ? (merged.labels as unknown[]).filter((l): l is string => typeof l === 'string')
+    : []
+  const parentID = typeof merged.parent_id === 'string' ? merged.parent_id : ''
+  const blockedBy = Array.isArray(merged.blocked_by)
+    ? (merged.blocked_by as unknown[]).filter((b): b is string => typeof b === 'string')
+    : []
+
+  // Derived: cards whose parent_id points at us → render as sub-tasks.
+  // Filter siblings for tasks where parent_id matches this id.
+  const subtasks = id
+    ? siblings.filter(s => typeof s.parent_id === 'string' && (s.parent_id as string) === id)
+    : []
+  // Resolve blocked_by id list → full sibling rows so we can show their status.
+  const blockerCards = blockedBy
+    .map(bid => siblings.find(s => String(s.id ?? '') === bid))
+    .filter((c): c is Record<string, unknown> => Boolean(c))
 
   const readonly = !id
 
@@ -599,6 +625,60 @@ function KanbanCardModal({
             />
           </FieldRow>
 
+          {/* Priority — segmented 1..5. Empty when unset; click any
+              segment to set, click the active one again to clear. */}
+          <FieldRow label="Priority">
+            <PriorityPicker
+              value={priority}
+              readonly={readonly}
+              onChange={next => patchField('priority', next)}
+            />
+          </FieldRow>
+
+          {/* Due date */}
+          <FieldRow label="Due">
+            <DueEditor
+              value={due}
+              readonly={readonly}
+              onChange={next => patchField('due', next)}
+            />
+          </FieldRow>
+
+          {/* Labels — string-array chips with + */}
+          <FieldRow label="Labels">
+            <LabelChips
+              value={labels}
+              readonly={readonly}
+              onChange={next => patchField('labels', next)}
+            />
+          </FieldRow>
+
+          {/* Parent — single task picker over siblings */}
+          <FieldRow label="Parent">
+            <TaskPicker
+              value={parentID}
+              siblings={siblings}
+              excludeId={id ?? undefined}
+              readonly={readonly}
+              groupBy={groupBy}
+              titleField={titleField}
+              onChange={next => patchField('parent_id', next)}
+            />
+          </FieldRow>
+
+          {/* Blocked by — multi-task picker over siblings */}
+          <FieldRow label="Blocked by">
+            <TaskMultiPicker
+              value={blockedBy}
+              siblings={siblings}
+              excludeId={id ?? undefined}
+              readonly={readonly}
+              groupBy={groupBy}
+              titleField={titleField}
+              onChange={next => patchField('blocked_by', next)}
+            />
+          </FieldRow>
+
           {/* Body */}
           <FieldRow label="Description">
             <BodyEditor
@@ -608,10 +688,47 @@ function KanbanCardModal({
             />
           </FieldRow>
 
+          {/* Comments — sibling stream, single per board, filtered to
+              this task's id. @mentions in comments produce inbox items. */}
+          {id && (
+            <FieldRow label="Comments">
+              <TaskComments taskId={id} source={source} />
+            </FieldRow>
+          )}
+
+          {/* Sub-tasks — only when at least one sibling references this
+              card via parent_id. */}
+          {subtasks.length > 0 && (
+            <FieldRow label={`Sub-tasks (${subtasks.length})`}>
+              <SubtasksBlock
+                tasks={subtasks}
+                groupBy={groupBy}
+                titleField={titleField}
+              />
+            </FieldRow>
+          )}
+
+          {/* Blockers — render each blocked_by id with its status inline. */}
+          {blockerCards.length > 0 && (
+            <FieldRow label="Blockers">
+              <BlockersBlock
+                blockers={blockerCards}
+                groupBy={groupBy}
+                titleField={titleField}
+              />
+            </FieldRow>
+          )}
+
           {/* Any other fields get a compact readonly echo so nothing
-              silently vanishes — legacy cards that carry `priority`,
-              `due`, etc. stay inspectable until we add typed editors. */}
-          <OtherFields card={merged} skip={new Set([titleField, groupBy, 'id', 'assignees', 'body', 'order'])} />
+              silently vanishes — legacy cards with custom fields stay
+              inspectable until we add typed editors for them. */}
+          <OtherFields
+            card={merged}
+            skip={new Set([
+              titleField, groupBy, 'id', 'assignees', 'body', 'order',
+              'priority', 'due', 'labels', 'parent_id', 'blocked_by',
+            ])}
+          />
         </div>
       </div>
     </div>
@@ -1035,6 +1152,678 @@ function BodyEditor({
         width: '100%',
       }}
     />
+  )
+}
+
+// Priority — segmented 1..5. null/undefined = unset (empty pill row);
+// click any number to set; click the active one to clear.
+function PriorityPicker({
+  value,
+  readonly,
+  onChange,
+}: {
+  value: number | null
+  readonly: boolean
+  onChange: (next: number | null) => void
+}) {
+  const opts = [1, 2, 3, 4, 5]
+  if (readonly) {
+    return (
+      <span className="text-sm" style={{ color: 'var(--text)' }}>
+        {value ?? '—'}
+      </span>
+    )
+  }
+  return (
+    <div className="inline-flex gap-1">
+      {opts.map(n => {
+        const active = value === n
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(active ? null : n)}
+            className="text-xs rounded-md px-2 py-1"
+            style={{
+              background: active ? 'var(--accent-light)' : 'var(--bg)',
+              border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+              color: active ? 'var(--accent)' : 'var(--text)',
+              fontWeight: active ? 600 : 400,
+              cursor: 'pointer',
+              minWidth: 28,
+            }}
+            aria-pressed={active}
+          >
+            {n}
+          </button>
+        )
+      })}
+      {value !== null && (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="text-xs px-2 py-1"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+          title="Clear priority"
+        >
+          clear
+        </button>
+      )}
+    </div>
+  )
+}
+
+function DueEditor({
+  value,
+  readonly,
+  onChange,
+}: {
+  value: string
+  readonly: boolean
+  onChange: (next: string) => void
+}) {
+  // Accept any ISO-8601 prefix (date or datetime). Render an <input
+  // type="date"> for simplicity; we keep whatever the user typed and
+  // trim to the YYYY-MM-DD prefix for the input.
+  const dateValue = (value || '').slice(0, 10)
+  if (readonly) {
+    return <span className="text-sm" style={{ color: 'var(--text)' }}>{value || '—'}</span>
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="date"
+        value={dateValue}
+        onChange={e => onChange(e.target.value)}
+        className="text-sm rounded-md px-2 py-1"
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--border)',
+          color: 'var(--text)',
+        }}
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="text-xs"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          clear
+        </button>
+      )}
+    </div>
+  )
+}
+
+function LabelChips({
+  value,
+  readonly,
+  onChange,
+}: {
+  value: string[]
+  readonly: boolean
+  onChange: (next: string[]) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const add = () => {
+    const v = draft.trim()
+    if (!v || value.includes(v)) {
+      setDraft('')
+      return
+    }
+    onChange([...value, v])
+    setDraft('')
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {value.length === 0 && readonly && (
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>—</span>
+      )}
+      {value.map(label => (
+        <span
+          key={label}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+          }}
+        >
+          {label}
+          {!readonly && (
+            <button
+              type="button"
+              onClick={() => onChange(value.filter(v => v !== label))}
+              aria-label={`Remove ${label}`}
+              className="leading-none"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 0,
+                marginLeft: 2,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+      {!readonly && (
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ',') {
+              e.preventDefault()
+              add()
+            }
+          }}
+          onBlur={add}
+          placeholder="+ label"
+          className="text-xs rounded-full px-2 py-1"
+          style={{
+            background: 'transparent',
+            border: '1px dashed var(--border)',
+            color: 'var(--text-secondary)',
+            outline: 'none',
+            width: 100,
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// TaskPicker — single-select over siblings. Empty value = no parent.
+function TaskPicker({
+  value,
+  siblings,
+  excludeId,
+  readonly,
+  groupBy,
+  titleField,
+  onChange,
+}: {
+  value: string
+  siblings: Record<string, unknown>[]
+  excludeId?: string
+  readonly: boolean
+  groupBy: string
+  titleField: string
+  onChange: (next: string) => void
+}) {
+  const opts = siblings
+    .map(s => ({
+      id: String(s.id ?? ''),
+      title: String(s[titleField] ?? s.id ?? ''),
+      col: String(s[groupBy] ?? ''),
+    }))
+    .filter(s => s.id && s.id !== excludeId)
+    .sort((a, b) => a.title.localeCompare(b.title))
+  if (readonly) {
+    if (!value) return <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>—</span>
+    const found = opts.find(o => o.id === value)
+    return <span className="text-sm" style={{ color: 'var(--text)' }}>{found?.title ?? value}</span>
+  }
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="text-sm rounded-md px-2 py-1 max-w-full"
+      style={{
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        color: 'var(--text)',
+        maxWidth: '100%',
+      }}
+    >
+      <option value="">— none —</option>
+      {opts.map(o => (
+        <option key={o.id} value={o.id}>
+          {o.title}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+// TaskMultiPicker — multi-select via chips + searchable combobox.
+function TaskMultiPicker({
+  value,
+  siblings,
+  excludeId,
+  readonly,
+  groupBy,
+  titleField,
+  onChange,
+}: {
+  value: string[]
+  siblings: Record<string, unknown>[]
+  excludeId?: string
+  readonly: boolean
+  groupBy: string
+  titleField: string
+  onChange: (next: string[]) => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [q, setQ] = useState('')
+  const candidates = siblings
+    .map(s => ({
+      id: String(s.id ?? ''),
+      title: String(s[titleField] ?? s.id ?? ''),
+      col: String(s[groupBy] ?? ''),
+    }))
+    .filter(s => s.id && s.id !== excludeId && !value.includes(s.id))
+  const filtered = candidates.filter(c =>
+    !q.trim() || c.title.toLowerCase().includes(q.toLowerCase()) || c.id.includes(q),
+  )
+  const titleOf = (id: string): string => {
+    const s = siblings.find(x => String(x.id ?? '') === id)
+    return s ? String(s[titleField] ?? s.id ?? id) : id
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {value.length === 0 && !adding && readonly && (
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>—</span>
+      )}
+      {value.map(bid => (
+        <span
+          key={bid}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs"
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+          }}
+        >
+          {titleOf(bid)}
+          {!readonly && (
+            <button
+              type="button"
+              onClick={() => onChange(value.filter(v => v !== bid))}
+              aria-label={`Remove ${bid}`}
+              className="leading-none"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+      {!readonly && (
+        adding ? (
+          <div className="relative">
+            <input
+              autoFocus
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Escape') {
+                  setAdding(false)
+                  setQ('')
+                } else if (e.key === 'Enter' && filtered[0]) {
+                  onChange([...value, filtered[0].id])
+                  setQ('')
+                }
+              }}
+              placeholder="search task…"
+              className="text-xs rounded-full px-2 py-1"
+              style={{
+                background: 'var(--bg)',
+                border: '1px solid var(--accent)',
+                color: 'var(--text)',
+                outline: 'none',
+                width: 180,
+              }}
+            />
+            {q && (
+              <div
+                className="absolute z-10 mt-1 rounded-md overflow-hidden"
+                style={{
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border)',
+                  minWidth: 220,
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                }}
+              >
+                {filtered.length === 0 ? (
+                  <div className="text-xs px-2 py-1" style={{ color: 'var(--text-secondary)' }}>
+                    No match
+                  </div>
+                ) : (
+                  filtered.slice(0, 8).map(c => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        onChange([...value, c.id])
+                        setQ('')
+                      }}
+                      className="block w-full text-left text-xs px-2 py-1"
+                      style={{ background: 'transparent', border: 'none', color: 'var(--text)', cursor: 'pointer' }}
+                    >
+                      <span style={{ fontWeight: 500 }}>{c.title}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}> · {c.col}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="text-xs inline-flex items-center gap-1 rounded-full px-2 py-1"
+            style={{
+              background: 'transparent',
+              border: '1px dashed var(--border)',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            + Add
+          </button>
+        )
+      )}
+    </div>
+  )
+}
+
+// SubtasksBlock — read-only list of cards whose parent_id points at us.
+// Click-through navigates to the sub-task's own page.
+function SubtasksBlock({
+  tasks,
+  groupBy,
+  titleField,
+}: {
+  tasks: Record<string, unknown>[]
+  groupBy: string
+  titleField: string
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {tasks.map(t => {
+        const tid = String(t.id ?? '')
+        const tTitle = String(t[titleField] ?? tid)
+        const tCol = String(t[groupBy] ?? '')
+        return (
+          <div
+            key={tid}
+            className="flex items-center gap-2 px-2 py-1 rounded-md text-sm"
+            style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+          >
+            <StatusPill col={tCol} />
+            <span style={{ flex: 1, color: 'var(--text)' }}>{tTitle}</span>
+            <code style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{tid}</code>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// BlockersBlock — list of cards this task is blocked_by, with status.
+function BlockersBlock({
+  blockers,
+  groupBy,
+  titleField,
+}: {
+  blockers: Record<string, unknown>[]
+  groupBy: string
+  titleField: string
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {blockers.map(t => {
+        const tid = String(t.id ?? '')
+        const tTitle = String(t[titleField] ?? tid)
+        const tCol = String(t[groupBy] ?? '')
+        const isDone = ['done', 'shipped', 'cancelled'].includes(tCol.toLowerCase())
+        return (
+          <div
+            key={tid}
+            className="flex items-center gap-2 px-2 py-1 rounded-md text-sm"
+            style={{
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+              opacity: isDone ? 0.55 : 1,
+            }}
+          >
+            <StatusPill col={tCol} />
+            <span style={{ flex: 1, color: 'var(--text)', textDecoration: isDone ? 'line-through' : 'none' }}>
+              {tTitle}
+            </span>
+            <code style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{tid}</code>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// StatusPill renders a small colored pill for a column value. Reused
+// by the SubtasksBlock and BlockersBlock so both speak the same
+// vocabulary visually.
+function StatusPill({ col }: { col: string }) {
+  const lower = col.toLowerCase()
+  let color = 'var(--text-secondary)'
+  if (lower === 'done' || lower === 'shipped') color = 'var(--success)'
+  else if (lower === 'in-progress' || lower === 'in_progress') color = 'var(--accent)'
+  else if (lower === 'blocked') color = 'var(--warning)'
+  else if (lower === 'cancelled') color = 'var(--error)'
+  return (
+    <span
+      className="inline-block rounded-full"
+      style={{
+        width: 8,
+        height: 8,
+        background: color,
+        flexShrink: 0,
+      }}
+      title={col}
+    />
+  )
+}
+
+// TaskComments — append-only stream rendered below the task body.
+//
+// One stream per BOARD (not per task) keeps the catalog tidy: collection
+// `tasks/` has a sibling stream `tasks.comments` (the trailing slash
+// stripped → dot suffix). Each line is `{task_id, body, actor?, at?}`.
+// We filter by task_id at render time so a busy board doesn't bloat the
+// modal load.
+//
+// @mention support — appends pass through `dispatchInboxForValueWrite`
+// server-side, so a comment with `@dana` produces an inbox item exactly
+// like any other prose.
+function TaskComments({
+  taskId,
+  source,
+}: {
+  taskId: string
+  source: string
+}) {
+  const streamKey = source.replace(/\/$/, '') + '.comments'
+  const me = useMe()
+  type CommentLine = {
+    task_id?: string
+    body?: string
+    actor?: string
+    at?: string
+    ts?: string
+  }
+  const [comments, setComments] = useState<CommentLine[] | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await apiFetch(`/api/data/${encodeURIComponent(streamKey)}?limit=200`)
+      if (res.status === 404) {
+        setComments([])
+        return
+      }
+      if (!res.ok) throw new Error(`stream read ${res.status}`)
+      const j = (await res.json()) as { lines?: Array<{ value: CommentLine; ts: string }> }
+      const lines = (j.lines ?? [])
+        .map(l => ({ ...l.value, ts: l.ts }))
+        .filter(l => l.task_id === taskId)
+      setComments(lines)
+      setErr(null)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'comments load failed')
+      setComments([])
+    }
+  }, [streamKey, taskId])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    const body = draft.trim()
+    if (!body) return
+    setBusy(true)
+    try {
+      const res = await apiFetch(`/api/data/${encodeURIComponent(streamKey)}?op=append`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          value: {
+            task_id: taskId,
+            body,
+            actor: me?.username,
+            at: new Date().toISOString(),
+          },
+        }),
+      })
+      if (!res.ok) {
+        let msg = `append ${res.status}`
+        try {
+          const j = await res.json() as { message?: string; error?: string }
+          msg = j.message ?? j.error ?? msg
+        } catch { /* ignore */ }
+        throw new Error(msg)
+      }
+      setDraft('')
+      await refresh()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'comment post failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function fmtTime(iso?: string): string {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return iso
+    const now = new Date()
+    const sameDay = d.toDateString() === now.toDateString()
+    return sameDay
+      ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {comments === null ? (
+        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading…</div>
+      ) : comments.length === 0 ? (
+        <div className="text-sm italic" style={{ color: 'var(--text-secondary)' }}>
+          No comments yet.
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {comments.map((c, i) => (
+            <div
+              key={i}
+              className="rounded-md p-2.5 text-sm"
+              style={{
+                background: 'var(--bg)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <div className="text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>
+                <strong style={{ color: 'var(--text)' }}>@{c.actor || 'unknown'}</strong>
+                {' · '}
+                {fmtTime(c.at || c.ts)}
+              </div>
+              <div style={{ color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
+                <RichText text={c.body || ''} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <form onSubmit={submit} className="flex gap-2 items-start mt-1">
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            // Cmd/Ctrl-Enter posts. Shift-Enter inserts a newline.
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault()
+              void submit(e as unknown as FormEvent)
+            }
+          }}
+          placeholder="Add a comment… @mentions are routed to inboxes. ⌘↵ to post."
+          rows={2}
+          className="text-sm rounded-md p-2 flex-1 resize-y"
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--border)',
+            color: 'var(--text)',
+            outline: 'none',
+            minHeight: 36,
+          }}
+        />
+        <button
+          type="submit"
+          disabled={busy || !draft.trim()}
+          aria-label="Post comment"
+          className="text-sm inline-flex items-center gap-1 rounded-md px-2.5 py-1.5"
+          style={{
+            background: draft.trim() ? 'var(--accent)' : 'var(--bg-secondary)',
+            border: 'none',
+            color: draft.trim() ? 'white' : 'var(--text-secondary)',
+            cursor: draft.trim() ? 'pointer' : 'default',
+            alignSelf: 'flex-end',
+          }}
+        >
+          <Send size={12} />
+          Post
+        </button>
+      </form>
+
+      {err && (
+        <div className="text-xs" style={{ color: 'var(--error)' }}>
+          {err}
+        </div>
+      )}
+    </div>
   )
 }
 

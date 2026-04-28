@@ -457,6 +457,11 @@ func (s *Server) handleStoreAction(w http.ResponseWriter, r *http.Request, key, 
 			translateStoreError(w, err)
 			return
 		}
+		// Inbox dispatch: @mentions inside the appended value land in the
+		// mentioned user's inbox. Same path the singleton/collection
+		// writes use, so a comment carrying "@dana please check" produces
+		// an inbox row exactly like a page edit would.
+		s.dispatchInboxForValueWrite(key, body.Value, actor, "")
 		writeJSON(w, http.StatusOK, line)
 
 	default:
