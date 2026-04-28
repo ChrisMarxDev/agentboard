@@ -1,6 +1,6 @@
 # AgentBoard — Files-First Data Store Spec
 
-> **Status**: Draft. Replaces the SQLite-backed data layer with a files-first store. Synthesizes the design conversation in branch `claude/file-based-storage-concept-EUSPh`. **Scoped to the data KV store only** — auth, teams, locks, invitations stay in SQLite for this phase and get their own spec later.
+> **Status**: Phases 0-4 shipped (additive, parallel to legacy). Phase 5 (remove SQLite KV) is the only outstanding deferred work. Synthesizes the design conversation in branch `claude/file-based-storage-concept-EUSPh`. **Scoped to the data KV store only** — auth, teams, locks, invitations stay in SQLite for this phase and get their own spec later.
 
 > **Migration**: explicitly out of scope. The existing dogfood instance gets reset; we ship as a clean break, not a compatibility layer.
 
@@ -880,6 +880,53 @@ This spec consolidates the design discussion in branch `claude/file-based-storag
 8. **Stream rotation, rate limiting, hot-path coalescing.** Logrotate-style segments; friendly 429; in-memory write coalescing for INCREMENT/APPEND.
 9. **Page-locking work landed on main.** Pessimistic admin-only lock for pages — orthogonal to optimistic version-CAS for data; coexists.
 10. **Migration explicitly out of scope.** User confirmed: fresh start, no SQLite import.
+
+---
+
+## Appendix B — Implementation deltas (post-spec adjustments)
+
+The spec above is the design contract. These notes record where the implementation diverged or extended during the build, so the spec stays the canonical reference without rewriting history.
+
+### B.1 — REST action verbs use `?op=`, not `:<action>`
+
+The spec described `POST /api/data/<key>:append` (Google Cloud style). The implementation uses `POST /api/data/<key>?op=append` because chi's path parser handles query params more cleanly and the URL is just as self-documenting once an agent reads `?op=` once. Same operations, same body shapes, same error codes. Path-style remains a possibility for a future v3.
+
+### B.2 — `/api/v2` mount, not `/api/data`
+
+The new surface is mounted at `/api/v2/data/*` parallel to the existing `/api/data/*` so the dashboard, MCP, and external integrations keep working through the migration window. Phase 5 removes the legacy mount; the v2 prefix can be dropped at the same time or kept as an alias.
+
+### B.3 — Search uses a substring scanner, not Bleve
+
+The spec called for Bleve as the search index. The implementation ships with a pure-Go substring scanner that walks the catalog and reads each file. Decision rationale: Bleve adds ~10 MB of binary weight + persistence complexity for a project size where walk-and-grep finishes in a few milliseconds. The Bleve upgrade is a drop-in replacement when scale demands it; the `Search()` interface is stable.
+
+### B.4 — Presigned upload (§12) shipped end-to-end
+
+Implemented as designed:
+- `POST /api/v2/files/request-upload` (auth required) mints a `ut_<43 chars>` token, scoped to one filename + size cap, TTL 5 minutes.
+- `PUT /api/v2/upload/{token}` (no auth) accepts raw bytes; tokens are one-shot, deleted on first redemption.
+- `agentboard_v2_request_file_upload` MCP tool returns `{upload_url, expires_at, max_size_bytes}`. Agents shell out with `curl --data-binary @file <url>`.
+
+The legacy base64 path through `agentboard_write_file` remains for agents that genuinely cannot shell out, capped at 1 MiB per spec.
+
+### B.5 — Rate limiter (§18) shipped
+
+`golang.org/x/time/rate` token bucket per actor (200 writes/min sustained, 50/sec burst) gates every v2 mutation. Reads bypass. 429 response carries `Retry-After`, `retry_after_seconds`, and the configured limit per CORE_GUIDELINES §12. Idle limiters evicted after 1 hour by a janitor goroutine.
+
+### B.6 — Activity log rotation (§17 mechanics, applied to audit)
+
+The activity log uses the same logrotate-style scheme as streams: 100 MB cap on the active file, 5 segments retained. `ReadActivity` walks segments oldest → newest then the active file, producing a contiguous timeline across rotation boundaries.
+
+### B.7 — Phase 4 split into "plumbing" and "polish"
+
+The original Phase 4 plan was "migrate `useData` and the 9 components to envelope-aware semantics." What shipped:
+- **Plumbing** — the view broker reads from both stores (legacy first, files-first fallback) and re-shapes `data-v2` SSE events into the legacy `data` event shape. Existing components consume the same bare-value shape; pages can reference v2-only keys without component changes.
+- **Polish (deferred)** — making `useData` envelope-aware, migrating dogfood pages to write through `/api/v2`. Not strictly necessary because the broker bridge handles the read path transparently.
+
+The added `useDataV2` hook + `<V2Display>` component are the escape hatch for code that wants to consume the envelope directly.
+
+### B.8 — MCP surface count
+
+Final v2 tool count is **12**: the 11 originally specified plus `agentboard_v2_request_file_upload`. Legacy tools (`agentboard_set`, `_merge`, `_append`, `_delete`, `_get`, etc.) remain registered and dispatch to the SQLite store; Phase 5 retires them.
 
 ---
 
