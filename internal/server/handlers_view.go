@@ -77,26 +77,16 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 	// undefined to the client; not an error. The client was probably
 	// going to render an empty component and that's fine.
 	//
-	// Two backends in flight during the v2 migration:
-	//   1) Legacy SQLite store (s.Store) — every existing project key.
-	//   2) Files-first store (s.FileStore) — keys written via /api/v2.
-	// Legacy wins on collision so existing pages don't drift while we
-	// migrate. The v2 fallback strips the _meta envelope before
-	// emission so component code is unchanged.
+	// One backend now: the files-first store. The legacy SQLite KV
+	// was removed in Cut 1 of the rewrite. Envelope is unwrapped
+	// server-side so component code consumes the bare value.
 	dataOut := map[string]any{}
 	for key := range scope.DataKeys {
 		if !scope.CanReadData(key) {
 			continue
 		}
-		if raw, err := s.Store.Get(key); err == nil && len(raw) > 0 {
-			var v any
-			if jerr := json.Unmarshal(raw, &v); jerr == nil {
-				dataOut[key] = v
-				continue
-			}
-		}
-		if v2, ok := readV2Unwrapped(s.FileStore, key); ok {
-			dataOut[key] = v2
+		if v, ok := readV2Unwrapped(s.FileStore, key); ok {
+			dataOut[key] = v
 		}
 	}
 
@@ -283,20 +273,11 @@ func (s *Server) handleViewEvents(w http.ResponseWriter, r *http.Request) {
 // reach this view session, and returns the translated kind + payload.
 func shouldForward(evt SSEEvent, scope *view.Scope) (bool, string, []byte) {
 	switch evt.Type {
-	case "data":
-		// evt.Data is the DataEvent JSON. Peek the key to filter.
-		var de struct {
-			Key string `json:"key"`
-		}
-		_ = json.Unmarshal(evt.Data, &de)
-		if de.Key == "" || !scope.CanReadData(de.Key) {
-			return false, "", nil
-		}
-		return true, "data", evt.Data
 	case "data-v2":
-		// store.Event JSON. Same scope filter; the reader on the other
-		// end re-shapes into the legacy `data` event so DataContext
-		// doesn't need to learn a second shape.
+		// store.Event JSON. Re-emitted to the client as plain `data`
+		// (the only data-event type now that legacy KV is gone). The
+		// server-side unwrap in handleViewEvents shapes payload into
+		// {key, value} before sending.
 		var de struct {
 			Key string `json:"key"`
 		}

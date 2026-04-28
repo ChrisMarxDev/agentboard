@@ -13,7 +13,7 @@ import (
 
 	agentboard "github.com/christophermarx/agentboard"
 	"github.com/christophermarx/agentboard/internal/auth"
-	"github.com/christophermarx/agentboard/internal/data"
+	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/locks"
@@ -84,60 +84,46 @@ func runServe(cmd *cobra.Command, args []string) error {
 		p = 3000
 	}
 
-	// Open data store (SQLite — legacy KV path, still authoritative
-	// while Phase 4 migrates the dashboard to the files-first store).
-	store, err := data.NewSQLiteStore(proj.DatabasePath())
+	// Open the SQLite connection used by auth + co-stores (teams,
+	// invitations, locks, mdx-meta, view-sessions, share, inbox,
+	// webhooks). The KV-data layer has moved to files; SQLite now
+	// only holds operational metadata.
+	dbConn, err := dbpkg.Open(proj.DatabasePath())
 	if err != nil {
-		return fmt.Errorf("open data store: %w", err)
+		return fmt.Errorf("open db: %w", err)
 	}
-	defer store.Close()
+	defer dbConn.Close()
 
-	// Open files-first store (spec-file-storage.md). Lives parallel to
-	// the SQLite store; mounted at /api/v2 in handlers_v2.go.
+	// Files-first content store. Owns the project tree on disk and
+	// is the only data source for the dashboard.
 	fileStore, err := storepkg.NewStore(storepkg.Config{ProjectRoot: proj.Path})
 	if err != nil {
-		return fmt.Errorf("open files-first store: %w", err)
+		return fmt.Errorf("open file store: %w", err)
 	}
 	defer fileStore.Close()
 
-	// Open auth store on the same SQLite connection pool.
-	authStore, err := auth.NewStore(store.DB())
+	// Auth store rides on the shared SQLite connection.
+	authStore, err := auth.NewStore(dbConn.Conn())
 	if err != nil {
 		return fmt.Errorf("open auth store: %w", err)
 	}
 
-	// Open invitations + locks stores ahead of server construction so
-	// BootstrapFirstAdmin has something to write into. These same stores
-	// get handed to server.New() below so there's one instance per
-	// process — no duplicate schema migrations, no surprises.
-	invStore, err := invitations.NewStore(store.DB())
+	// Invitations + locks open ahead of server construction so the
+	// first-admin bootstrap below has something to write into.
+	invStore, err := invitations.NewStore(dbConn.Conn())
 	if err != nil {
 		return fmt.Errorf("open invitations store: %w", err)
 	}
-	lockStore, err := locks.NewStore(store.DB())
+	lockStore, err := locks.NewStore(dbConn.Conn())
 	if err != nil {
 		return fmt.Errorf("open locks store: %w", err)
 	}
 
-	// Seed sample data if this is a fresh database
-	keys, _ := store.ListKeys()
-	if len(keys) == 0 {
-		if err := project.SeedSampleData(store); err != nil {
-			log.Printf("Warning: could not seed sample data: %v", err)
-		}
-	}
-
-	// Start history pruning background job
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		retention := time.Duration(proj.Config.HistoryRetentionDays) * 24 * time.Hour
-		for range ticker.C {
-			if err := store.PruneHistory(cmd.Context(), retention); err != nil {
-				log.Printf("Warning: history pruning failed: %v", err)
-			}
-		}
-	}()
+	// Sample content seeding moves to a Cut 5 deliverable — for now
+	// fresh projects start empty. The per-doc history NDJSON in the
+	// file store is bounded (100 entries per key) + auto-rotated, so
+	// no separate pruning loop is needed either.
+	_ = fileStore // referenced below; nothing to do here at boot.
 
 	// Set up embedded frontend filesystem
 	var frontendHTTPFS http.FileSystem
@@ -177,7 +163,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Create server
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
-		Store:                store,
+		Conn:                 dbConn.Conn(),
 		FileStore:            fileStore,
 		Auth:                 authStore,
 		Invitations:          invStore,

@@ -98,7 +98,9 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
+	// Restrict to GETs under /api/v2/data/** — the data surface during
+	// the rewrite. Cut 3 collapses this back to /api/data/**.
+	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/v2/data/**","methods":["GET"]}]}`
 	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users", body, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -118,16 +120,18 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 		t.Errorf("bad token shape: %s", tok.Token)
 	}
 
-	// Viewer GET works, PUT denied.
-	gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	// Viewer GET passes auth (rule allows /api/v2/data/** GETs); the
+	// key may not exist yet, so 200 OR 404 both mean "auth let me
+	// through." 401/403 would mean the rule didn't apply.
+	gr, _ := http.NewRequest("GET", ts.URL+"/api/v2/data/foo", nil)
 	gr.Header.Set("Authorization", "Bearer "+tok.Token)
 	gresp, _ := http.DefaultClient.Do(gr)
-	if gresp.StatusCode != 200 {
-		t.Errorf("GET = %d, want 200", gresp.StatusCode)
+	if gresp.StatusCode != 200 && gresp.StatusCode != 404 {
+		t.Errorf("GET = %d, want 200 or 404 (auth pass)", gresp.StatusCode)
 	}
 	gresp.Body.Close()
 
-	pr, _ := http.NewRequest("PUT", ts.URL+"/api/data/foo", strings.NewReader(`"x"`))
+	pr, _ := http.NewRequest("PUT", ts.URL+"/api/v2/data/foo", strings.NewReader(`{"value":"x"}`))
 	pr.Header.Set("Content-Type", "application/json")
 	pr.Header.Set("Authorization", "Bearer "+tok.Token)
 	presp, _ := http.DefaultClient.Do(pr)
@@ -224,14 +228,14 @@ func TestAdmin_RotateToken(t *testing.T) {
 		t.Error("rotated token should differ")
 	}
 
-	gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 	gr.Header.Set("Authorization", "Bearer "+oldToken)
 	r, _ := http.DefaultClient.Do(gr)
 	r.Body.Close()
 	if r.StatusCode != 401 {
 		t.Errorf("old token = %d, want 401", r.StatusCode)
 	}
-	gr2, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr2, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 	gr2.Header.Set("Authorization", "Bearer "+rotated.Token)
 	r2, _ := http.DefaultClient.Do(gr2)
 	r2.Body.Close()
@@ -281,7 +285,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	}
 
 	for _, tok := range []string{first.Token, second.Token} {
-		gr, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+		gr, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 		gr.Header.Set("Authorization", "Bearer "+tok)
 		g, _ := http.DefaultClient.Do(gr)
 		g.Body.Close()
@@ -295,7 +299,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 		"", adminToken))
 	rv.Body.Close()
 
-	gr1, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr1, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 	gr1.Header.Set("Authorization", "Bearer "+first.Token)
 	g1, _ := http.DefaultClient.Do(gr1)
 	g1.Body.Close()
@@ -303,7 +307,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 		t.Errorf("revoked = %d, want 401", g1.StatusCode)
 	}
 
-	gr2, _ := http.NewRequest("GET", ts.URL+"/api/data", nil)
+	gr2, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 	gr2.Header.Set("Authorization", "Bearer "+second.Token)
 	g2, _ := http.DefaultClient.Do(gr2)
 	g2.Body.Close()

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/christophermarx/agentboard/internal/auth"
-	"github.com/christophermarx/agentboard/internal/data"
+	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/spf13/cobra"
@@ -82,16 +82,16 @@ func openAuthStore() (*auth.Store, func(), error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("load project: %w", err)
 	}
-	store, err := data.NewSQLiteStore(proj.DatabasePath())
+	dbConn, err := dbpkg.Open(proj.DatabasePath())
 	if err != nil {
 		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
-	authStore, err := auth.NewStore(store.DB())
+	authStore, err := auth.NewStore(dbConn.Conn())
 	if err != nil {
-		store.Close()
+		dbConn.Close()
 		return nil, nil, fmt.Errorf("open auth store: %w", err)
 	}
-	return authStore, func() { store.Close() }, nil
+	return authStore, func() { dbConn.Close() }, nil
 }
 
 func runAdminList(cmd *cobra.Command, _ []string) error {
@@ -149,12 +149,12 @@ func runAdminListInvitations(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
-	store, err := data.NewSQLiteStore(proj.DatabasePath())
+	dbConn, err := dbpkg.Open(proj.DatabasePath())
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer store.Close()
-	invStore, err := invitations.NewStore(store.DB())
+	defer dbConn.Close()
+	invStore, err := invitations.NewStore(dbConn.Conn())
 	if err != nil {
 		return fmt.Errorf("open invitations store: %w", err)
 	}

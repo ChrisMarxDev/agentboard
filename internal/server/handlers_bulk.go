@@ -163,49 +163,12 @@ func (s *Server) handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, out)
 }
 
-// handleBulkDeleteData — same shape for KV keys. Takes `keys` instead of
-// `paths` to match the singular key/value naming.
+// handleBulkDeleteData — DEPRECATED stub. The legacy KV layer is gone
+// in the rewrite; the route entry itself gets removed in Cut 1.D.
+// Until then, the handler returns 410 Gone with a clear forward
+// pointer to the v2 surface.
 func (s *Server) handleBulkDeleteData(w http.ResponseWriter, r *http.Request) {
-	var req bulkRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "expected JSON { keys?, prefix?, dry_run? }")
-		return
-	}
-
-	var targets []string
-	if len(req.Keys) > 0 {
-		targets = append(targets, req.Keys...)
-	} else if req.Prefix != "" {
-		keys, err := s.Store.ListKeys()
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
-			return
-		}
-		for _, k := range keys {
-			if strings.HasPrefix(k, req.Prefix) {
-				targets = append(targets, k)
-			}
-		}
-	} else {
-		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "provide `keys` or `prefix`")
-		return
-	}
-
-	out := bulkResponse{Deleted: []string{}, Skipped: []string{}, DryRun: req.DryRun}
-	source := getSource(r)
-	for _, k := range targets {
-		if req.DryRun {
-			if m, _ := s.Store.GetMeta(k); m != nil {
-				out.Deleted = append(out.Deleted, k)
-			}
-			continue
-		}
-		if err := s.Store.Delete(k, source); err != nil {
-			out.Skipped = append(out.Skipped, k)
-			continue
-		}
-		out.Deleted = append(out.Deleted, k)
-	}
-
-	respondJSON(w, http.StatusOK, out)
+	_ = r
+	respondError(w, http.StatusGone, "REMOVED",
+		"the legacy /api/data/* surface was removed in the rewrite — use /api/v2/data/* (or /api/* once Cut 3 lands)")
 }

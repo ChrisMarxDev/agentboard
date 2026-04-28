@@ -15,72 +15,12 @@ import (
 
 func (s *Server) toolDefinitions() []ToolDef {
 	tools := []ToolDef{
-		{
-			Name:        "agentboard_set",
-			Description: "Set a data value at a key. Value can be any JSON.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"key":   map[string]string{"type": "string", "description": "Dotted path key (e.g. analytics.dau)"},
-					"value": map[string]string{"description": "Any valid JSON value"},
-				},
-				"required": []string{"key", "value"},
-			},
-		},
-		{
-			Name:        "agentboard_merge",
-			Description: "Deep merge JSON into an existing data value. Creates key if it doesn't exist.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"key":   map[string]string{"type": "string", "description": "Dotted path key"},
-					"value": map[string]string{"description": "JSON object to merge"},
-				},
-				"required": []string{"key", "value"},
-			},
-		},
-		{
-			Name:        "agentboard_append",
-			Description: "Append an item to a data array. Creates array if key doesn't exist.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"key":  map[string]string{"type": "string", "description": "Dotted path key"},
-					"item": map[string]string{"description": "JSON value to append"},
-				},
-				"required": []string{"key", "item"},
-			},
-		},
-		{
-			Name:        "agentboard_delete",
-			Description: "Delete a data key entirely.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"key": map[string]string{"type": "string", "description": "Dotted path key to delete"},
-				},
-				"required": []string{"key"},
-			},
-		},
-		{
-			Name:        "agentboard_get",
-			Description: "Read the current value at a data key.",
-			InputSchema: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"key": map[string]string{"type": "string", "description": "Dotted path key to read"},
-				},
-				"required": []string{"key"},
-			},
-		},
-		{
-			Name:        "agentboard_list_keys",
-			Description: "List all data keys with their current values.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-		},
+		// Legacy KV tools (agentboard_set, _merge, _append, _delete,
+		// _get, _list_keys, _get_data_schema, _upsert_by_id,
+		// _merge_by_id, _delete_by_id, _get_by_id) were removed in
+		// Cut 1 of the rewrite. The agentboard_v2_* family is the
+		// data surface; Cut 3 collapses it back into the unprefixed
+		// names.
 		{
 			Name:        "agentboard_list_pages",
 			Description: "List all dashboard pages.",
@@ -142,14 +82,9 @@ func (s *Server) toolDefinitions() []ToolDef {
 				"required": []string{"name"},
 			},
 		},
-		{
-			Name:        "agentboard_get_data_schema",
-			Description: "Get the inferred JSON schema of all current data keys.",
-			InputSchema: map[string]interface{}{
-				"type":       "object",
-				"properties": map[string]interface{}{},
-			},
-		},
+		// agentboard_get_data_schema removed in Cut 1 — schema lookup
+		// happens via agentboard_v2_index now (every catalog entry
+		// includes its inferred type).
 		{
 			Name:        "agentboard_write_file",
 			Description: "Upload (or replace) a binary file under the project's files/ folder. Pass the bytes base64-encoded. File is served at /api/files/<name>; reference from pages with <Image source=\"...\"> or <File source=\"...\">.",
@@ -474,18 +409,10 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 	}
 
 	switch call.Name {
-	case "agentboard_set":
-		return s.toolSet(args)
-	case "agentboard_merge":
-		return s.toolMerge(args)
-	case "agentboard_append":
-		return s.toolAppend(args)
-	case "agentboard_delete":
-		return s.toolDelete(args)
-	case "agentboard_get":
-		return s.toolGet(args)
-	case "agentboard_list_keys":
-		return s.toolListKeys()
+	// Legacy KV tools removed in Cut 1 of the rewrite. Callers using
+	// agentboard_set / _merge / _append / _delete / _get / _list_keys /
+	// _get_data_schema fall through to the unknown-tool branch below
+	// and get a clear error.
 	case "agentboard_list_pages":
 		return s.toolListPages()
 	case "agentboard_read_page":
@@ -498,8 +425,6 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 		return s.toolListComponents()
 	case "agentboard_read_component":
 		return s.toolReadComponent(args)
-	case "agentboard_get_data_schema":
-		return s.toolGetSchema()
 	case "agentboard_write_component":
 		return s.toolWriteComponent(args)
 	case "agentboard_delete_component":
@@ -759,102 +684,11 @@ func mcpContent(text string) interface{} {
 	}
 }
 
-func (s *Server) toolSet(args map[string]json.RawMessage) (interface{}, *RPCError) {
-	key := getString(args, "key")
-	value := args["value"]
-	if key == "" || value == nil {
-		return nil, &RPCError{Code: -32602, Message: "key and value required"}
-	}
-	if err := s.Store.Set(key, value, "mcp"); err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	return mcpContent(fmt.Sprintf("Set %s successfully", key)), nil
-}
-
-func (s *Server) toolMerge(args map[string]json.RawMessage) (interface{}, *RPCError) {
-	key := getString(args, "key")
-	value := args["value"]
-	if key == "" || value == nil {
-		return nil, &RPCError{Code: -32602, Message: "key and value required"}
-	}
-	if err := s.Store.Merge(key, value, "mcp"); err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	return mcpContent(fmt.Sprintf("Merged into %s successfully", key)), nil
-}
-
-func (s *Server) toolAppend(args map[string]json.RawMessage) (interface{}, *RPCError) {
-	key := getString(args, "key")
-	item := args["item"]
-	if key == "" || item == nil {
-		return nil, &RPCError{Code: -32602, Message: "key and item required"}
-	}
-	if err := s.Store.Append(key, item, "mcp"); err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	return mcpContent(fmt.Sprintf("Appended to %s successfully", key)), nil
-}
-
-func (s *Server) toolDelete(args map[string]json.RawMessage) (interface{}, *RPCError) {
-	key := getString(args, "key")
-	if key == "" {
-		return nil, &RPCError{Code: -32602, Message: "key required"}
-	}
-	if err := s.Store.Delete(key, "mcp"); err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	return mcpContent(fmt.Sprintf("Deleted %s", key)), nil
-}
-
-func (s *Server) toolGet(args map[string]json.RawMessage) (interface{}, *RPCError) {
-	key := getString(args, "key")
-	if key == "" {
-		return nil, &RPCError{Code: -32602, Message: "key required"}
-	}
-	value, err := s.Store.Get(key)
-	if err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	if value == nil {
-		return mcpContent(fmt.Sprintf("Key %s not found", key)), nil
-	}
-	pretty, _ := json.MarshalIndent(json.RawMessage(value), "", "  ")
-	return mcpContent(string(pretty)), nil
-}
-
-func (s *Server) toolListKeys() (interface{}, *RPCError) {
-	all, err := s.Store.GetAll("", nil)
-	if err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-
-	type keyInfo struct {
-		Key  string `json:"key"`
-		Type string `json:"type"`
-	}
-	keys := make([]keyInfo, 0)
-	for k, v := range all {
-		var val interface{}
-		json.Unmarshal(v, &val)
-		t := "unknown"
-		switch val.(type) {
-		case float64:
-			t = "number"
-		case string:
-			t = "string"
-		case bool:
-			t = "boolean"
-		case []interface{}:
-			t = "array"
-		case map[string]interface{}:
-			t = "object"
-		}
-		keys = append(keys, keyInfo{Key: k, Type: t})
-	}
-
-	pretty, _ := json.MarshalIndent(keys, "", "  ")
-	return mcpContent(string(pretty)), nil
-}
+// toolSet / toolMerge / toolAppend / toolDelete / toolGet / toolListKeys
+// were the legacy KV implementations. Cut 1 of the rewrite removed
+// them along with the Store: data.DataStore field. The agentboard_v2_*
+// tools cover the same surface against the files-first store; Cut 3
+// drops the v2 prefix.
 
 func (s *Server) toolListPages() (interface{}, *RPCError) {
 	pages := s.Pages.ListPages()
@@ -944,11 +778,6 @@ func (s *Server) toolReadComponent(args map[string]json.RawMessage) (interface{}
 	return mcpContent(source), nil
 }
 
-func (s *Server) toolGetSchema() (interface{}, *RPCError) {
-	schema, err := s.Store.InferSchema()
-	if err != nil {
-		return nil, &RPCError{Code: -32000, Message: err.Error()}
-	}
-	pretty, _ := json.MarshalIndent(schema, "", "  ")
-	return mcpContent(string(pretty)), nil
-}
+// toolGetSchema removed in Cut 1 — schema inference now comes through
+// the v2 catalog (every catalog entry has its inferred type alongside
+// shape + version). Callers use agentboard_v2_index instead.

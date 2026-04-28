@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/christophermarx/agentboard/internal/components"
-	"github.com/christophermarx/agentboard/internal/data"
 	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
@@ -20,8 +19,7 @@ import (
 
 // Server implements the MCP Streamable HTTP transport.
 type Server struct {
-	Store                data.DataStore
-	FileStore            *store.Store // files-first store; powers the agentboard_v2_* tools
+	FileStore            *store.Store // files-first content store; powers the agentboard_v2_* tools (renamed in Cut 3)
 	Pages                *mdx.PageManager
 	Search               *mdx.SearchStore
 	Components           *components.Manager

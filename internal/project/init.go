@@ -1,12 +1,9 @@
 package project
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"github.com/christophermarx/agentboard/internal/data"
 )
 
 const welcomeIndexMd = `# Welcome to AgentBoard
@@ -284,36 +281,10 @@ func seedAgentboardSkill(projectPath string) error {
 	return nil
 }
 
-// SeedSampleData populates the welcome sample data.
-func SeedSampleData(store data.DataStore) error {
-	samples := map[string]interface{}{
-		"welcome.users": 42,
-		"welcome.progress": map[string]interface{}{
-			"value": 3,
-			"max":   10,
-			"label": "Getting Started",
-		},
-		"welcome.status": map[string]interface{}{
-			"state":  "running",
-			"label":  "AgentBoard",
-			"detail": "All systems go",
-		},
-		"welcome.tasks": []map[string]interface{}{
-			{"id": "1", "title": "Install AgentBoard", "status": "done"},
-			{"id": "2", "title": "Connect Claude", "status": "in_progress"},
-			{"id": "3", "title": "Build your first dashboard", "status": "todo"},
-		},
-	}
-
-	for key, val := range samples {
-		jsonVal, err := json.Marshal(val)
-		if err != nil {
-			return fmt.Errorf("marshal sample %s: %w", key, err)
-		}
-		if err := store.Set(key, jsonVal, "agentboard"); err != nil {
-			return fmt.Errorf("seed %s: %w", key, err)
-		}
-	}
-
-	return nil
-}
+// SeedSampleData was the legacy welcome-data seeder against the
+// SQLite KV. Cut 1 of the rewrite removed the KV layer; sample seeding
+// will return as Cut 5 against the unified MDX tree (writing
+// welcome/index.md with frontmatter + body + components instead of
+// scattering keys across data/welcome.*). Kept as a deliberate stub
+// so any caller that still references it gets a compiler error
+// rather than silent breakage — the whole signature changes.

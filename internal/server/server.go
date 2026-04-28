@@ -12,7 +12,6 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/components"
-	"github.com/christophermarx/agentboard/internal/data"
 	interrors "github.com/christophermarx/agentboard/internal/errors"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
@@ -35,8 +34,8 @@ import (
 // Server is the main AgentBoard HTTP server.
 type Server struct {
 	Project              *project.Project
-	Store                data.DataStore
-	FileStore            *store.Store // files-first store (spec-file-storage.md), parallel to Store while we migrate
+	Conn                 *sql.DB      // shared SQLite connection for auth + co-stores
+	FileStore            *store.Store // files-first content store; sole data source
 	Auth                 *auth.Store
 	Broadcaster          *Broadcaster
 	Pages                *mdx.PageManager
@@ -70,8 +69,8 @@ type Server struct {
 // ServerConfig holds configuration for creating a new server.
 type ServerConfig struct {
 	Project              *project.Project
-	Store                data.DataStore
-	FileStore            *store.Store // files-first store
+	Conn                 *sql.DB
+	FileStore            *store.Store
 	Auth                 *auth.Store // identity-backed auth; required
 	Invitations          *invitations.Store
 	Locks                *locks.Store
@@ -88,20 +87,10 @@ func New(cfg ServerConfig) *Server {
 	broadcaster := NewBroadcaster()
 	broadcaster.StartHeartbeat()
 
-	// Wire data store events to SSE broadcaster
-	go func() {
-		ch := cfg.Store.Subscribe()
-		for evt := range ch {
-			eventData, _ := json.Marshal(evt)
-			broadcaster.Broadcast(SSEEvent{
-				Type: "data",
-				Data: eventData,
-			})
-		}
-	}()
-
-	// Wire FileStore events to the same SSE broadcaster so dashboards
-	// re-render on writes regardless of which store they came through.
+	// Wire FileStore events to the SSE broadcaster — the only data
+	// source now that the legacy KV is gone (Cut 1). The Type stays
+	// "data-v2" for one more cut so the frontend's listener keeps
+	// working; Cut 3 renames it to "data".
 	if cfg.FileStore != nil {
 		go func() {
 			ch := cfg.FileStore.Subscribe()
@@ -121,8 +110,8 @@ func New(cfg ServerConfig) *Server {
 	// the assert fails, PageMeta stays nil and handlers fall back to "no
 	// meta available" — never fatal.
 	var metaStore *mdx.MetaStore
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ms, err := mdx.NewMetaStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if ms, err := mdx.NewMetaStore(cfg.Conn); err == nil {
 			metaStore = ms
 		}
 	}
@@ -131,8 +120,8 @@ func New(cfg ServerConfig) *Server {
 	// at every read/write site so a DB without SQL backing just
 	// degrades to "no approvals", not a boot error.
 	var approvalStore *mdx.ApprovalStore
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if a, err := mdx.NewApprovalStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if a, err := mdx.NewApprovalStore(cfg.Conn); err == nil {
 			approvalStore = a
 		}
 	}
@@ -140,8 +129,8 @@ func New(cfg ServerConfig) *Server {
 	// Ref store — the page-dependency graph the view broker uses to
 	// decide what a page touches. Best-effort like the others.
 	var refStore *mdx.RefStore
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if rs, err := mdx.NewRefStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if rs, err := mdx.NewRefStore(cfg.Conn); err == nil {
 			refStore = rs
 			// Backfill: walk every page on boot and record its refs.
 			// PageInfo.Path has a leading slash; the ref store uses the
@@ -164,8 +153,8 @@ func New(cfg ServerConfig) *Server {
 	// FTS isn't available, search silently becomes a no-op rather than
 	// failing the boot.
 	var searchStore *mdx.SearchStore
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ss, err := mdx.NewSearchStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if ss, err := mdx.NewSearchStore(cfg.Conn); err == nil {
 			searchStore = ss
 			// Prime the index from whatever's on disk. Zero-cost on a
 			// fresh project; O(N) on an existing one.
@@ -182,8 +171,8 @@ func New(cfg ServerConfig) *Server {
 	// underlying data store doesn't expose a DB, share stays nil and
 	// the middleware becomes a no-op.
 	var shareStore *share.Store
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ss, err := share.NewStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if ss, err := share.NewStore(cfg.Conn); err == nil {
 			shareStore = ss
 		} else {
 			log.Printf("agentboard: share tokens unavailable (continuing without): %v", err)
@@ -192,8 +181,8 @@ func New(cfg ServerConfig) *Server {
 
 	// Inbox store — per-user reminders.
 	var inboxStore *inbox.Store
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if is, err := inbox.NewStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if is, err := inbox.NewStore(cfg.Conn); err == nil {
 			inboxStore = is
 		} else {
 			log.Printf("agentboard: inbox unavailable (continuing without): %v", err)
@@ -202,8 +191,8 @@ func New(cfg ServerConfig) *Server {
 
 	// Teams store — role groups that expand mentions to members.
 	var teamStore *teams.Store
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ts, err := teams.NewStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if ts, err := teams.NewStore(cfg.Conn); err == nil {
 			teamStore = ts
 		} else {
 			log.Printf("agentboard: teams unavailable (continuing without): %v", err)
@@ -217,8 +206,8 @@ func New(cfg ServerConfig) *Server {
 	// any caller that didn't.
 	invStore := cfg.Invitations
 	if invStore == nil {
-		if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-			if is, err := invitations.NewStore(dber.DB()); err == nil {
+		if cfg.Conn != nil {
+			if is, err := invitations.NewStore(cfg.Conn); err == nil {
 				invStore = is
 			} else {
 				log.Printf("agentboard: invitations unavailable (continuing without): %v", err)
@@ -229,8 +218,8 @@ func New(cfg ServerConfig) *Server {
 	// Page-locks store — admin-gated freeze on individual pages.
 	lockStore := cfg.Locks
 	if lockStore == nil {
-		if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-			if ls, err := locks.NewStore(dber.DB()); err == nil {
+		if cfg.Conn != nil {
+			if ls, err := locks.NewStore(cfg.Conn); err == nil {
 				lockStore = ls
 			} else {
 				log.Printf("agentboard: page locks unavailable (continuing without): %v", err)
@@ -240,8 +229,8 @@ func New(cfg ServerConfig) *Server {
 
 	// Webhook subscription store. Same best-effort posture.
 	var webhookStore *webhooks.Store
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if ws, err := webhooks.NewStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if ws, err := webhooks.NewStore(cfg.Conn); err == nil {
 			webhookStore = ws
 		} else {
 			log.Printf("agentboard: webhooks unavailable (continuing without): %v", err)
@@ -250,8 +239,8 @@ func New(cfg ServerConfig) *Server {
 
 	// View session store — cookie-backed redeemed share sessions.
 	var viewSessions *view.SessionStore
-	if dber, ok := cfg.Store.(interface{ DB() *sql.DB }); ok {
-		if vs, err := view.NewSessionStore(dber.DB()); err == nil {
+	if cfg.Conn != nil {
+		if vs, err := view.NewSessionStore(cfg.Conn); err == nil {
 			viewSessions = vs
 		} else {
 			log.Printf("agentboard: view sessions unavailable (continuing without): %v", err)
@@ -274,10 +263,9 @@ func New(cfg ServerConfig) *Server {
 	compManager := components.NewManager(cfg.Project)
 	fileManager := files.NewManager(cfg.Project, cfg.MaxFileSizeMB)
 	errorBuffer := interrors.NewBuffer()
-	grabber := &grab.Materializer{Pages: pageManager, Store: cfg.Store}
+	grabber := &grab.Materializer{Pages: pageManager, FileStore: cfg.FileStore}
 
 	mcpServer := &mcp.Server{
-		Store:                cfg.Store,
 		FileStore:            cfg.FileStore,
 		Pages:                pageManager,
 		Search:               searchStore,
@@ -305,7 +293,7 @@ func New(cfg ServerConfig) *Server {
 
 	s := &Server{
 		Project:              cfg.Project,
-		Store:                cfg.Store,
+		Conn:                 cfg.Conn,
 		FileStore:            cfg.FileStore,
 		Auth:                 cfg.Auth,
 		Broadcaster:          broadcaster,
@@ -608,25 +596,15 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// board claim now happens via /invite/<id>.
 		r.Get("/setup/status", s.handleSetupStatus)
 
-		// Data endpoints
-		r.Get("/data", s.handleGetAllData)
-		r.Get("/data/schema", s.handleGetSchema)
+		// Legacy /api/data/* routes were removed in Cut 1 of the
+		// rewrite. The data layer is now files-first; consumers go
+		// through /api/v2/data/* until Cut 3 collapses the prefix into
+		// /api/data/* on the new shape.
+		//
+		// One survivor: the bulk-delete stub returns 410 with a forward
+		// pointer so existing callers see a structured error instead of
+		// a raw 404.
 		r.Post("/data/bulk-delete", s.handleBulkDeleteData)
-
-		// Data key endpoints — use a wildcard to support dotted keys
-		r.Route("/data/{key}", func(r chi.Router) {
-			r.Get("/", s.handleGetData)
-			r.Put("/", s.handleSetData)
-			r.Patch("/", s.handleMergeData)
-			r.Post("/", s.handleAppendData)
-			r.Delete("/", s.handleDeleteData)
-
-			// ID-based operations
-			r.Get("/{id}", s.handleGetDataById)
-			r.Put("/{id}", s.handleUpsertById)
-			r.Patch("/{id}", s.handleMergeById)
-			r.Delete("/{id}", s.handleDeleteById)
-		})
 
 		// Content endpoints (MDX dashboards + knowledge docs)
 		r.Get("/content", s.handleListPages)

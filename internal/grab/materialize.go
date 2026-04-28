@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/christophermarx/agentboard/internal/data"
 	"github.com/christophermarx/agentboard/internal/mdx"
+	"github.com/christophermarx/agentboard/internal/store"
 )
 
 // PickKind identifies which slicing strategy a Pick uses.
@@ -70,10 +70,14 @@ const (
 	FormatJSON     Format = "json"
 )
 
-// Materializer resolves picks using a PageManager + data store.
+// Materializer resolves picks using a PageManager + the files-first
+// content store. The data lookup for component sources is best-effort:
+// the store reads the same dotted-key path the agent wrote (singleton
+// or collection-flattened) and unwraps the envelope before stitching
+// the value into the materialised section.
 type Materializer struct {
-	Pages *mdx.PageManager
-	Store data.DataStore
+	Pages     *mdx.PageManager
+	FileStore *store.Store
 }
 
 // Materialize returns the list of resolved sections for the given picks.
@@ -359,10 +363,10 @@ func (m *Materializer) resolveComponents(body string) []Component {
 		if lm := languageAttrRegex.FindStringSubmatch(attrs); len(lm) >= 2 {
 			c.Language = lm[1]
 		}
-		if m.Store != nil {
-			if raw, err := m.Store.Get(source); err == nil && raw != nil {
+		if m.FileStore != nil {
+			if env, err := m.FileStore.ReadSingleton(source); err == nil && env != nil {
 				var v interface{}
-				if err := json.Unmarshal(raw, &v); err == nil {
+				if err := json.Unmarshal(env.Value, &v); err == nil {
 					c.Value = v
 				}
 			}
