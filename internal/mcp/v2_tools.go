@@ -145,6 +145,19 @@ func (s *Server) v2ToolDefs() []ToolDef {
 			},
 		},
 		{
+			Name:        "agentboard_v2_request_file_upload",
+			Description: "Mint a one-shot presigned URL for a binary file upload. Agent shells out: `curl -X PUT --data-binary @file <upload_url>`. Use this instead of the legacy base64 path — keeps bytes off the MCP/JSON channel and out of the context window.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":         map[string]string{"type": "string", "description": "Filename. May contain nested path segments (e.g. exports/q1.csv)."},
+					"size_bytes":   map[string]string{"type": "integer", "description": "Expected size; rejected if it would exceed the per-project cap."},
+					"content_type": map[string]string{"type": "string", "description": "Advisory MIME (server still sniffs)."},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
 			Name:        "agentboard_v2_activity",
 			Description: "Return the global write log filtered by actor / path_prefix / time range.",
 			InputSchema: map[string]any{
@@ -191,8 +204,38 @@ func (s *Server) dispatchV2(name string, args map[string]json.RawMessage) (any, 
 		return s.toolV2History(args)
 	case "agentboard_v2_activity":
 		return s.toolV2Activity(args)
+	case "agentboard_v2_request_file_upload":
+		return s.toolV2RequestFileUpload(args)
 	}
 	return nil, nil, false
+}
+
+// toolV2RequestFileUpload returns a one-shot presigned URL the agent
+// can PUT raw bytes to. The MintUploadToken closure is wired in by the
+// HTTP server — tests can stub it. Returning the *URL* (not just a
+// token) means the agent doesn't need to know the server's host.
+func (s *Server) toolV2RequestFileUpload(args map[string]json.RawMessage) (any, *RPCError, bool) {
+	if s.MintUploadToken == nil {
+		return nil, &RPCError{Code: -32000, Message: "upload subsystem not configured"}, true
+	}
+	name := getString(args, "name")
+	if name == "" {
+		return nil, &RPCError{Code: -32602, Message: "name required"}, true
+	}
+	var sizeBytes int64
+	if raw, ok := args["size_bytes"]; ok && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &sizeBytes)
+	}
+	url, expiresAt, maxBytes, ok := s.MintUploadToken(name, s.actor(), sizeBytes)
+	if !ok {
+		return nil, &RPCError{Code: -32000, Message: "could not mint token (check size cap or filename rules)"}, true
+	}
+	return mcpJSON(map[string]any{
+		"upload_url":     url,
+		"expires_at":     expiresAt,
+		"max_size_bytes": maxBytes,
+		"hint":           "Shell out: curl -X PUT --data-binary @<path> <upload_url>",
+	}), nil, true
 }
 
 // dispatchV2 wrappers. Each tool returns the result body wrapped in

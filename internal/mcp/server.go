@@ -38,6 +38,13 @@ type Server struct {
 	IsAdmin              func(*http.Request) bool
 	ActorResolver        func() string // returns current actor for attribution; optional
 	AllowComponentUpload bool
+
+	// MintUploadToken minds a one-shot presigned upload token for the
+	// caller. Wired in by the HTTP server (mcp tests stub it). Returns
+	// the public URL the agent should PUT bytes to and the expiry. Nil
+	// means the upload feature isn't configured (returned to the agent
+	// as a structured error).
+	MintUploadToken func(name, actor string, sizeBytes int64) (uploadURL, expiresAt string, maxBytes int64, ok bool)
 }
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.

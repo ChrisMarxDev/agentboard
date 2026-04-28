@@ -60,6 +60,7 @@ type Server struct {
 	Teams                *teams.Store
 	Invitations          *invitations.Store
 	Locks                *locks.Store
+	UploadTokens         *uploadTokens // one-shot presigned upload tokens (spec §12)
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -293,6 +294,13 @@ func New(cfg ServerConfig) *Server {
 		// WebhookDispatcher is set below after the dispatcher is built.
 		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
+	// Wire the upload-token mint into MCP. The base URL needs a host;
+	// for now we use localhost + port, which works for every Claude
+	// Code or Codex agent connecting to the same machine. Hosted-mode
+	// callers will see this URL through the X-Forwarded-Host path on
+	// the REST mint and never reach this MCP fallback. Wider-trust
+	// rework lives behind the same flag as `--allow-component-upload`
+	// when it lands.
 
 	s := &Server{
 		Project:              cfg.Project,
@@ -312,6 +320,7 @@ func New(cfg ServerConfig) *Server {
 		Teams:                teamStore,
 		Invitations:          invStore,
 		Locks:                lockStore,
+		UploadTokens:         newUploadTokens(),
 		Grab:                 grabber,
 		MCP:                  mcpServer,
 		Share:                shareStore,
@@ -321,6 +330,30 @@ func New(cfg ServerConfig) *Server {
 		ViewPublic:           publicMatcher,
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
+	}
+
+	// MCP fallback for the upload-token flow when the agent doesn't
+	// have an HTTP-side base URL handy. The REST endpoint is the
+	// preferred path (it reflects X-Forwarded-Host); this mint defaults
+	// to localhost:<port> which is the right answer for the local-dev
+	// majority of MCP usage.
+	mcpServer.MintUploadToken = func(name, actor string, sizeBytes int64) (string, string, int64, bool) {
+		if s.UploadTokens == nil || s.Files == nil {
+			return "", "", 0, false
+		}
+		clean, err := files.ValidateName(name)
+		if err != nil {
+			return "", "", 0, false
+		}
+		maxBytes := s.Files.MaxSizeBytes()
+		if sizeBytes > maxBytes {
+			return "", "", 0, false
+		}
+		tok := s.UploadTokens.Mint(clean, actor, maxBytes)
+		// Best-effort URL: localhost is correct on a dev machine; for
+		// hosted instances the REST mint is the supported path.
+		url := fmt.Sprintf("http://localhost:%d/api/v2/upload/%s", cfg.Project.Config.Port, tok.Token)
+		return url, tok.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"), tok.MaxSizeBytes, true
 	}
 
 	// Start the webhook dispatcher once the server struct is fully
@@ -504,6 +537,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	// the credential.
 	r.Get("/api/invitations/{id}", s.handleGetInvitationPublic)
 	r.Post("/api/invitations/{id}/redeem", s.handleRedeemInvitation)
+
+	// /api/v2/upload/{token} is public — the unguessable token is the
+	// credential. Mounted here so the bearer-required middleware
+	// doesn't reject the upload before the handler can validate the
+	// token. The MINTING endpoint stays inside the auth group below.
+	r.Put("/api/v2/upload/{token}", s.handleV2UploadWithToken)
 
 	// API routes
 	r.Group(func(r chi.Router) {

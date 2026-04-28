@@ -560,6 +560,7 @@ func (s *Server) registerV2Routes(r chi.Router) {
 		r.Get("/index", s.handleV2Index)
 		r.Get("/search", s.handleV2Search)
 		r.Get("/activity", s.handleV2Activity)
+		r.Post("/files/request-upload", s.handleV2RequestFileUpload)
 
 		r.Route("/data/{key}", func(r chi.Router) {
 			r.Get("/", s.handleV2Read)
