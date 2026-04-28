@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { Home as HomeIcon, Inbox as InboxIcon, LogOut, Magnet, Search, ShieldCheck, SquareCheckBig, X } from 'lucide-react'
+import { Inbox as InboxIcon, LogOut, Magnet, Search, Users as UsersIcon, X } from 'lucide-react'
 import { clearToken, getToken, redirectToLogin } from '../../lib/session'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
@@ -309,8 +309,6 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
         />
       </div>
 
-      <SystemNavItems activePath={location.pathname} />
-
       <div className="flex items-center gap-2 pt-2">
         <ThemeSwitch />
         <button
@@ -429,12 +427,13 @@ function SignOutButton() {
   )
 }
 
-// TopNavItems are the three "where do I GO right now" destinations:
-// Inbox · Home · Tasks. Sits above the search box; the page tree below
-// the search box answers "where is THAT doc". Skills and the rest of
-// the folder tree live in the page tree, not as separate slots.
+// TopNavItems are the destinations that don't have a corresponding page
+// in the content tree: Inbox (per-user reminder queue) and Members
+// (the admin user/teams/invitations page). Tasks, Skills, and the
+// canonical Home all live in the page tree itself — Tasks and Skills
+// get a hoisted-to-top decoration in ContentNav so they're easy to find.
 //
-// See `concept.md` §4 and `/concept-rollout` Phase A.
+// See `concept.md` §4.
 interface TopSlot {
   href: string
   label: string
@@ -442,9 +441,8 @@ interface TopSlot {
 }
 
 const TOP_SLOTS: TopSlot[] = [
-  { href: '/inbox', label: 'Inbox', icon: InboxIcon },
-  { href: '/',      label: 'Home',  icon: HomeIcon },
-  { href: '/tasks', label: 'Tasks', icon: SquareCheckBig },
+  { href: '/inbox', label: 'Inbox',   icon: InboxIcon },
+  { href: '/admin', label: 'Members', icon: UsersIcon },
 ]
 
 function TopNavItems({ activePath }: { activePath: string }) {
@@ -486,32 +484,6 @@ function TopNavItems({ activePath }: { activePath: string }) {
   )
 }
 
-// SystemNavItems holds the non-content "destinations" (currently just Auth).
-// Kept outside the content tree so page-search doesn't affect it and so the
-// styling reads as a distinct section. Sits above the utility-icon row.
-function SystemNavItems({ activePath }: { activePath: string }) {
-  const active = activePath === '/admin' || activePath.startsWith('/admin/')
-  return (
-    <div className="flex flex-col gap-1 pt-2 pb-1 border-t" style={{ borderColor: 'var(--border)' }}>
-      <Link
-        to="/admin"
-        className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm"
-        style={{
-          background: active ? 'var(--accent-light)' : 'transparent',
-          color: active ? 'var(--accent)' : 'var(--text-secondary)',
-          fontWeight: active ? 600 : 500,
-          textDecoration: 'none',
-        }}
-        onMouseEnter={e => {
-          if (!active) e.currentTarget.style.background = 'var(--bg)'
-        }}
-        onMouseLeave={e => {
-          if (!active) e.currentTarget.style.background = 'transparent'
-        }}
-      >
-        <ShieldCheck size={14} />
-        <span>Auth</span>
-      </Link>
-    </div>
-  )
-}
+// SystemNavItems is gone — Auth got renamed to "Members" and folded
+// into TopNavItems above. Inbox + Members are the only two non-content
+// destinations the shell exposes.
