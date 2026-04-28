@@ -96,6 +96,15 @@ export function DataProvider({ children, path }: DataProviderProps) {
         body: JSON.stringify({ path: p }),
       })
       if (!res.ok) {
+        // 404 = page doesn't exist at this path. Not an error
+        // condition — let PageRenderer's fallback resolve to a folder
+        // landing or render the "page not found" affordance. Reserve
+        // the error channel for actual failures (5xx, network) and
+        // for auth (401/403, surfaced as the AuthRequiredPanel).
+        if (res.status === 404) {
+          setBundle(null)
+          return
+        }
         setError(`view/open ${p} → ${res.status}`)
         setBundle(null)
         return
