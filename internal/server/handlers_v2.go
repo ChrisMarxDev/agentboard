@@ -557,6 +557,11 @@ func (s *Server) registerV2Routes(r chi.Router) {
 		return
 	}
 	r.Route("/v2", func(r chi.Router) {
+		// Per-token write rate limit applied at the v2 group level.
+		// Reads bypass via the middleware's Method check, so /index,
+		// /search, /activity, and read-only data routes are unthrottled.
+		r.Use(s.v2RateLimit)
+
 		r.Get("/index", s.handleV2Index)
 		r.Get("/search", s.handleV2Search)
 		r.Get("/activity", s.handleV2Activity)

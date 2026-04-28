@@ -61,6 +61,7 @@ type Server struct {
 	Invitations          *invitations.Store
 	Locks                *locks.Store
 	UploadTokens         *uploadTokens // one-shot presigned upload tokens (spec §12)
+	V2Limits             *v2RateStore  // per-actor token bucket for /api/v2 writes (spec §18)
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -321,6 +322,7 @@ func New(cfg ServerConfig) *Server {
 		Invitations:          invStore,
 		Locks:                lockStore,
 		UploadTokens:         newUploadTokens(),
+		V2Limits:             newV2RateStore(),
 		Grab:                 grabber,
 		MCP:                  mcpServer,
 		Share:                shareStore,
