@@ -6,6 +6,14 @@ vi.mock('../../hooks/useData', () => ({
   useData: vi.fn(),
 }))
 
+// Sheet now reads ctx.path off DataContext for folder auto-attach
+// (`<Sheet />` resolves to the rendering page's own folder). The
+// tests pass an explicit `source` so a null path is fine — but
+// useDataContext throws without a provider, so stub it.
+vi.mock('../../hooks/DataContext', () => ({
+  useDataContext: () => ({ path: null, get: () => undefined, subscribe: () => () => {} }),
+}))
+
 import { useData } from '../../hooks/useData'
 const mockUseData = vi.mocked(useData)
 

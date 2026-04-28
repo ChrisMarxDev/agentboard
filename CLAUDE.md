@@ -2,7 +2,9 @@
 
 Single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST/MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
 
-> **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the product invariants, the stable API/MCP/component contracts, what's in vs out of Phase 1 scope, and the pre-flight checklist for risky changes. Full design is in `spec.md`.
+> **Start with [`REWRITE.md`](./REWRITE.md).** AgentBoard went through a structural rewrite (cuts 1–4): SQLite KV gone, files-first MDX with YAML frontmatter, 8-tool MCP, single tree under the project root, no `v2`. The doc summarizes what changed, what got deleted, where things live now, and the gotchas that bit during the cuts.
+>
+> **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the product invariants, the stable API/MCP/component contracts, what's in vs out of Phase 1 scope, and the pre-flight checklist for risky changes. The locked rewrite contract is in [`spec-rework.md`](./spec-rework.md); full design is in `spec.md`.
 >
 > **Before widening the trust boundary** (binding to non-loopback, adding hosted mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
 
