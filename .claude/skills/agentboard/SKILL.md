@@ -76,6 +76,48 @@ The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'
 
 ---
 
+## v2 store surface (files-first)
+
+A parallel data surface lives at `/api/v2/*` backed by **files on disk** instead of SQLite. Full design in [`spec-file-storage.md`](spec-file-storage.md). Key points the agent needs to know:
+
+**Three immutable shapes** per key, set on first write:
+- **Singleton** — one value, atomic write. `data/<key>.json` on disk.
+- **Collection** — per-ID files. `data/<key>/<id>.json`. Siblings never contend.
+- **Stream** — append-only NDJSON. `data/<key>.ndjson`. Lock-free.
+
+**Envelope format** every value is wrapped in:
+```json
+{"_meta": {"version", "created_at", "modified_by", "shape"}, "value": <...>}
+```
+The `version` is a server-monotonic timestamp; agents echo it back on `PUT`/`PATCH` for optimistic CAS. Conflict responses (412) **embed the current envelope** — no follow-up `GET` needed.
+
+**Endpoints:**
+- `GET  /api/v2/index` — Tier 1 catalog (every key, shape, version)
+- `GET  /api/v2/search?q=…` — Tier 2 substring search across values
+- `GET  /api/v2/data/<key>[/<id>]` — read; shape determined by catalog
+- `PUT  /api/v2/data/<key>[/<id>]` — set/upsert; CAS via `_meta.version` or `If-Match` header
+- `PATCH /api/v2/data/<key>[/<id>]` — RFC 7396 merge; never conflicts
+- `POST /api/v2/data/<key>?op=append|increment|cas` — atomic ops
+- `DELETE /api/v2/data/<key>[/<id>]` — idempotent
+- `GET  /api/v2/data/<key>/history` — per-key NDJSON, last 100 entries
+- `GET  /api/v2/activity` — global write log, filterable by actor/path/time
+
+**Rate limit:** 200 writes/min sustained, 50/sec burst, per token. Reads bypass. `429` carries `Retry-After` + structured body. If you hit it in normal flow, switch to a batched op (`?by=N` increment, `items: [...]` append).
+
+**Binary uploads — kill base64:**
+- `POST /api/v2/files/request-upload` mints a one-shot URL
+- Then `curl -X PUT --data-binary @file <upload_url>`
+- Or via MCP: `agentboard_v2_request_file_upload` returns the URL
+- Tokens are one-shot, TTL 5 min
+
+**Live mirror component:** `<V2Display source="some.key" />` renders the envelope live in any MDX page. Updates on every SSE event. Read-only by design.
+
+**MCP tools (12):** `agentboard_v2_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_increment`, `_cas`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Prefer these over the legacy resource-CRUD tools — same data, smaller surface, conflict-aware errors.
+
+**Read path through the dashboard:** the view broker reads from BOTH stores (legacy SQLite first, files-first as fallback). Existing `<Status source="key" />` etc. on a page transparently picks up v2 keys. SSE events for v2 writes are re-shaped into the legacy `data` event so live updates work without component changes.
+
+---
+
 ## When the user ships a feature
 
 If the user just shipped something (landed a commit, says "we shipped X", asks for the dashboard to reflect new work), update the dashboard in this order:
@@ -229,7 +271,8 @@ Keep the showcase folder's root page (`/showcase`) as an index that lists every 
 | `dev.tests.passing` | number | Current green test count (run `task test:bruno` + `task test:go` to refresh) |
 | `dev.tests.total` | number | Total test count; pair with passing for a Progress bar |
 | `dev.components.count` | number | Built-in component total (`GET /api/components | jq length`) |
-| `dev.mcp.tools` | number | MCP tool count advertised (`tools/list`) |
+| `dev.mcp.tools` | number | Total MCP tool count advertised (`tools/list`) |
+| `dev.mcp.tools_v2` | number | Tier-shaped v2 tool subset (`agentboard_v2_*`) |
 | `dev.stack.bundle_kb` | number | Frontend bundle size in KB |
 | `dev.stack.binary_mb` | number | Go binary size in MB |
 | `dev.features.shipped` | array of `{id, title, status, landed_at}` | Kanban/List input |
@@ -326,7 +369,8 @@ code.
 Before marking a feature shipped, ask: does this change affect how an agent would talk to AgentBoard? If **yes**, edit this file in the same commit. Concretely:
 
 - **Added or removed a built-in component** → update the "Component choices" list and any data-key conventions for its typical `source`.
-- **Added or removed an MCP tool** → update any tool reference (including the "How to invoke" section) plus the `dev.mcp.tools` expected count in "Data-key conventions".
+- **Added or removed an MCP tool** → update any tool reference (including the "How to invoke" section) plus the `dev.mcp.tools` expected count in "Data-key conventions". For tier-shaped v2 tools, also bump `dev.mcp.tools_v2`.
+- **Touched the v2 store / surface** (new envelope field, new shape, new endpoint, new error code) → update the "v2 store surface" section. The v2 contract is the agent-facing contract for all new work; drift here is the highest-cost kind.
 - **Added or changed a REST route** → update curl examples and the endpoint references (e.g. the `PUT /api/content/...` line in "When the user ships a feature").
 - **Renamed or moved a `dev.*` key** → update the table in "Data-key conventions". Old keys left in the skill are worse than no keys; they send the next agent to a dead path.
 - **Changed a trigger phrase or a setup step** (e.g. new `--flag` on the binary, new port, new project name) → fix the YAML `description` up top AND any embedded command lines.
