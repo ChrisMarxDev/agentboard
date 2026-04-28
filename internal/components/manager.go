@@ -177,9 +177,9 @@ func (m *Manager) registerBuiltins() {
 			Name: "List", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "List",
-				Description: "An ordered or unordered list with optional status badges.",
+				Description: "An ordered or unordered list with optional status badges. Pass `source` for an array key, or omit it on a folder-index page to auto-attach to the page's own children.",
 				Props: map[string]PropMeta{
-					"source":  {Type: "string", Description: "Data key. Expects array of strings or objects", Required: true},
+					"source":  {Type: "string", Description: "Frontmatter array key, OR a folder path with trailing slash (e.g. \"items/\"). Omit on a folder-index page to auto-attach."},
 					"variant": {Type: "string", Description: "ordered | unordered"},
 				},
 			},
@@ -188,12 +188,12 @@ func (m *Manager) registerBuiltins() {
 			Name: "Kanban", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Kanban",
-				Description: "A non-interactive kanban board.",
+				Description: "A kanban board. Pass `source` as a folder path with trailing slash (e.g. \"tasks/\") for a folder-collection of cards, or as a frontmatter array key for inline cards. Omit `source` on a folder-index page (`/tasks.md`) to auto-attach to the page's own folder.",
 				Props: map[string]PropMeta{
-					"source":     {Type: "string", Description: "Data key. Expects array of objects", Required: true},
-					"groupBy":    {Type: "string", Description: "Field to group by", Required: true},
-					"columns":    {Type: "array", Description: "Explicit column order"},
-					"titleField": {Type: "string", Description: "Field for card title", Default: "title"},
+					"source":     {Type: "string", Description: "Folder path (\"tasks/\") or frontmatter array key. Omit on a folder-index page to auto-attach."},
+					"groupBy":    {Type: "string", Description: "Field to group cards by (e.g. \"col\" or \"status\").", Required: true},
+					"columns":    {Type: "array", Description: "Explicit column order. Without this, columns appear in the order encountered."},
+					"titleField": {Type: "string", Description: "Card field rendered as the card title.", Default: "title"},
 				},
 			},
 		},
@@ -247,11 +247,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Badge", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Badge",
-				Description: "A small inline pill for versions, environment labels, or inline status.",
+				Description: "A small inline pill for versions, environment labels, or inline status. Prefer inline `text` for hand-authored pages; `source` is for agent-driven labels.",
 				Props: map[string]PropMeta{
-					"text":    {Type: "string", Description: "Label text (inline)."},
+					"text":    {Type: "string", Description: "Label text (inline). Wins over `source` when present."},
 					"variant": {Type: "string", Description: "default | accent | success | warning | error"},
-					"source":  {Type: "string", Description: "Optional KV key. Expects a string, or { text, variant? } object."},
+					"source":  {Type: "string", Description: "Optional frontmatter key. Expects a string, or { text, variant? } object."},
 				},
 			},
 		},
@@ -259,12 +259,12 @@ func (m *Manager) registerBuiltins() {
 			Name: "Counter", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Counter",
-				Description: "Like Metric but flashes green on increase / red on decrease when the value updates.",
+				Description: "Like Metric but flashes green on increase / red on decrease when the value updates. Prefer inline `value` for hand-authored pages; `source` is for agent-driven counters.",
 				Props: map[string]PropMeta{
-					"value":  {Type: "number", Description: "Inline value. Wins over `source` when present."},
+					"value":  {Type: "number", Description: "Inline value (preferred). Wins over `source` when present."},
 					"label":  {Type: "string", Description: "Optional label rendered below the number."},
 					"format": {Type: "string", Description: "number | currency | percent"},
-					"source": {Type: "string", Description: "Optional KV key. Expects a number or { value } object."},
+					"source": {Type: "string", Description: "Optional frontmatter key. Expects a number or { value } object."},
 				},
 			},
 		},
@@ -272,11 +272,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Code", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Code",
-				Description: "A syntax-highlighted code block.",
+				Description: "A syntax-highlighted code block. Prefer inline `value` (or children) for hand-authored pages; `source` is for agent-driven snippets.",
 				Props: map[string]PropMeta{
-					"value":    {Type: "string", Description: "Inline code text."},
+					"value":    {Type: "string", Description: "Inline code text (preferred). Wins over `source` when present."},
 					"language": {Type: "string", Description: "Prism language id (e.g. js, ts, json, bash, sql). Default: text."},
-					"source":   {Type: "string", Description: "Optional KV key. Expects a string, or { code, language? } object."},
+					"source":   {Type: "string", Description: "Optional frontmatter key. Expects a string, or { code, language? } object."},
 				},
 			},
 		},
@@ -284,11 +284,11 @@ func (m *Manager) registerBuiltins() {
 			Name: "Mermaid", Type: "builtin",
 			Meta: ComponentMeta{
 				Name:        "Mermaid",
-				Description: "Renders a Mermaid diagram. The library loads lazily on first render.",
+				Description: "Renders a Mermaid diagram. Prefer inline `value` for hand-authored pages; `source` is for agent-generated diagrams. The library loads lazily on first render.",
 				Props: map[string]PropMeta{
-					"value":  {Type: "string", Description: "Inline Mermaid source (preferred when hand-authoring)."},
+					"value":  {Type: "string", Description: "Inline Mermaid source (preferred). Wins over `source` when present."},
 					"theme":  {Type: "string", Description: "default | dark | forest | neutral | base (follows system color scheme by default)"},
-					"source": {Type: "string", Description: "Optional KV key. Expects a Mermaid source string, or { code } object."},
+					"source": {Type: "string", Description: "Optional frontmatter key. Expects a Mermaid source string, or { code } object."},
 				},
 			},
 		},
