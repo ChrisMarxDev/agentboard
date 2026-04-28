@@ -1,6 +1,6 @@
 # AgentBoard — Files-First Data Store Spec
 
-> **Status**: Phases 0-4 shipped (additive, parallel to legacy). Phase 5 (remove SQLite KV) is the only outstanding deferred work. Synthesizes the design conversation in branch `claude/file-based-storage-concept-EUSPh`. **Scoped to the data KV store only** — auth, teams, locks, invitations stay in SQLite for this phase and get their own spec later.
+> **Status**: Phases 0-4 shipped (additive, parallel to legacy), plus §12 presigned uploads, §18 rate limiter, §17 activity-log rotation, and §20 backup CLI. Phase 5 (remove SQLite KV) is the only outstanding deferred work. Synthesizes the design conversation in branch `claude/file-based-storage-concept-EUSPh`. **Scoped to the data KV store only** — auth, teams, locks, invitations stay in SQLite for this phase and get their own spec later.
 
 > **Migration**: explicitly out of scope. The existing dogfood instance gets reset; we ship as a clean break, not a compatibility layer.
 
@@ -915,6 +915,10 @@ The legacy base64 path through `agentboard_write_file` remains for agents that g
 ### B.6 — Activity log rotation (§17 mechanics, applied to audit)
 
 The activity log uses the same logrotate-style scheme as streams: 100 MB cap on the active file, 5 segments retained. `ReadActivity` walks segments oldest → newest then the active file, producing a contiguous timeline across rotation boundaries.
+
+### B.6.1 — Backup CLI (§20) shipped
+
+`agentboard backup --to <path.tar.gz>` and `agentboard restore --from <path.tar.gz> --path <target>` are built-in CLI subcommands. Includes the entire project folder; excludes SQLite WAL/SHM (mid-flight state), `.DS_Store`/`Thumbs.db`, partial atomic-rename targets, and the bootstrap-secret URL. Restore refuses non-empty targets without `--force` and rejects tar entries with path traversal. S3 destinations are reserved for Phase 2 (AWS SDK pending).
 
 ### B.7 — Phase 4 split into "plumbing" and "polish"
 
