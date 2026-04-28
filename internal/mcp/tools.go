@@ -11,6 +11,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/components"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
+	"github.com/christophermarx/agentboard/internal/mdx"
 )
 
 func (s *Server) toolDefinitions() []ToolDef {
@@ -50,6 +51,19 @@ func (s *Server) toolDefinitions() []ToolDef {
 					"source": map[string]string{"type": "string", "description": "MDX source content"},
 				},
 				"required": []string{"path", "source"},
+			},
+		},
+		{
+			Name:        "agentboard_patch_page",
+			Description: "Merge into an existing page's YAML frontmatter and/or replace its body, without touching the rest. Use this to flip a kanban card's column, stamp a `shipped` date, or rewrite prose without re-emitting the structured fields. Frontmatter merge is shallow + RFC-7396: a `null` value deletes the key; missing keys are preserved. Use `agentboard_write_page` for full replacement.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"path":              map[string]string{"type": "string", "description": "Page path (e.g. tasks/ship-v2)"},
+					"frontmatter_patch": map[string]interface{}{"type": "object", "description": "Top-level keys to merge into the page's frontmatter. null deletes the key."},
+					"body":              map[string]string{"type": "string", "description": "Optional. Replaces the page body verbatim. Omit to leave the body untouched."},
+				},
+				"required": []string{"path"},
 			},
 		},
 		{
@@ -419,6 +433,8 @@ func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interf
 		return s.toolReadPage(args)
 	case "agentboard_write_page":
 		return s.toolWritePage(args)
+	case "agentboard_patch_page":
+		return s.toolPatchPage(args)
 	case "agentboard_delete_page":
 		return s.toolDeletePage(args)
 	case "agentboard_list_components":
@@ -758,6 +774,68 @@ func (s *Server) toolDeletePage(args map[string]json.RawMessage) (interface{}, *
 		return nil, &RPCError{Code: -32000, Message: err.Error()}
 	}
 	return mcpContent(fmt.Sprintf("Page %s deleted", path)), nil
+}
+
+// toolPatchPage merges frontmatter and/or replaces the body of an
+// existing page. Mirrors PATCH /api/content/<path>. RFC-7396 semantics:
+// null in frontmatter_patch deletes the key; missing keys are
+// preserved. Body field replaces the whole body when set; omitted
+// means body stays as-is.
+func (s *Server) toolPatchPage(args map[string]json.RawMessage) (interface{}, *RPCError) {
+	path := getString(args, "path")
+	if path == "" {
+		return nil, &RPCError{Code: -32602, Message: "path required"}
+	}
+
+	var fmPatch map[string]any
+	if raw, ok := args["frontmatter_patch"]; ok {
+		if err := json.Unmarshal(raw, &fmPatch); err != nil {
+			return nil, &RPCError{Code: -32602, Message: "frontmatter_patch must be a JSON object: " + err.Error()}
+		}
+	}
+	var bodyPtr *string
+	if raw, ok := args["body"]; ok {
+		var b string
+		if err := json.Unmarshal(raw, &b); err != nil {
+			return nil, &RPCError{Code: -32602, Message: "body must be a string: " + err.Error()}
+		}
+		bodyPtr = &b
+	}
+	if fmPatch == nil && bodyPtr == nil {
+		return nil, &RPCError{Code: -32602, Message: "frontmatter_patch and/or body required"}
+	}
+
+	normalizedPath := mdx.NormalizePagePath(path)
+	current := s.Pages.GetPage(normalizedPath)
+	if current == nil {
+		return nil, &RPCError{Code: -32000, Message: "page not found: " + normalizedPath}
+	}
+
+	merged := map[string]any{}
+	for k, v := range current.Frontmatter {
+		merged[k] = v
+	}
+	for k, v := range fmPatch {
+		if v == nil {
+			delete(merged, k)
+		} else {
+			merged[k] = v
+		}
+	}
+
+	body := current.Source
+	if bodyPtr != nil {
+		body = *bodyPtr
+	}
+
+	newSource, err := mdx.AssemblePageSource(merged, body)
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: "assemble source: " + err.Error()}
+	}
+	if err := s.Pages.WritePage(path, newSource); err != nil {
+		return nil, &RPCError{Code: -32000, Message: err.Error()}
+	}
+	return mcpContent(fmt.Sprintf("Page %s patched", normalizedPath)), nil
 }
 
 func (s *Server) toolListComponents() (interface{}, *RPCError) {

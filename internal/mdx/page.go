@@ -338,6 +338,55 @@ func (pm *PageManager) MovePage(from, to string) error {
 	return nil
 }
 
+// NormalizePagePath turns a URL path or file path into the canonical key
+// the PageManager indexes under: trailing `.md` stripped, and a
+// `<folder>/SKILL` collapsed to `<folder>` so the Anthropic skill manifest
+// convention round-trips with the page tree. Handlers that look up a
+// freshly-written page (write/patch/delete) MUST go through this helper —
+// otherwise SKILL.md writes silently miss every post-write hook
+// (PageMeta, Search, PageRefs, etag echo, mention dispatch).
+func NormalizePagePath(pagePath string) string {
+	pagePath = strings.TrimSuffix(pagePath, ".md")
+	if filepath.Base(pagePath) == "SKILL" {
+		parent := filepath.ToSlash(filepath.Dir(pagePath))
+		if parent != "." && parent != "" {
+			return parent
+		}
+	}
+	return pagePath
+}
+
+// AssemblePageSource builds an MDX file source from a frontmatter map and
+// a body. Empty frontmatter writes no `---` block. Used by PATCH handlers
+// that need to round-trip a structured frontmatter edit back to disk.
+//
+// Round-trip note: marshalling through map[string]any loses key order and
+// comments. The body is passed through verbatim so prose whitespace is
+// preserved exactly.
+func AssemblePageSource(fm map[string]any, body string) (string, error) {
+	if len(fm) == 0 {
+		return body, nil
+	}
+	fmBytes, err := yaml.Marshal(fm)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	out.WriteString("---\n")
+	out.Write(fmBytes)
+	out.WriteString("---\n")
+	if body != "" {
+		if !strings.HasPrefix(body, "\n") {
+			out.WriteString("\n")
+		}
+		out.WriteString(body)
+		if !strings.HasSuffix(body, "\n") {
+			out.WriteString("\n")
+		}
+	}
+	return out.String(), nil
+}
+
 // frontmatter captures the authored metadata at the top of a page. Fields
 // are YAML-unmarshaled from the block between two `---` lines. Missing
 // fields stay at their zero value — agents can write a page without any

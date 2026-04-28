@@ -6,6 +6,20 @@ vi.mock('../../hooks/useData', () => ({
   useData: vi.fn(),
 }))
 
+// Kanban now reads ctx.path off DataContext for folder auto-attach
+// (`<Kanban groupBy=...>` with no source resolves to the rendering
+// page's own folder). The tests use explicit `source` so null path
+// is fine — but useDataContext throws without a provider, so stub it.
+vi.mock('../../hooks/DataContext', () => ({
+  useDataContext: () => ({ path: null, get: () => undefined, subscribe: () => () => {} }),
+}))
+
+// useMe drives the comment-author UI in the detail dialog. Tests
+// don't exercise that path; null = "no me yet".
+vi.mock('../../hooks/useMe', () => ({
+  useMe: () => null,
+}))
+
 // Kanban renders <AssigneeStrip> which pulls useUsers → /api/users and
 // useTeams → /api/teams on mount. Those fetches pollute the spy in the
 // drag-drop tests below, so we stub both.
@@ -71,8 +85,12 @@ describe('Kanban', () => {
   })
 
   describe('click → detail modal', () => {
+    // `customField` is intentionally non-canonical — `assignee`,
+    // `priority`, `due`, `labels`, `parent`, etc. now have dedicated
+    // dialog widgets, so only unknown fields fall through to the
+    // "Other fields" section. We assert the fallback path renders.
     const tasks = [
-      { id: '1', title: 'Fix bug', status: 'todo', assignee: 'alice', priority: 'high' },
+      { id: '1', title: 'Fix bug', status: 'todo', customField: 'arbitrary-value' },
     ]
 
     it('opens a modal when a card is clicked, showing non-title fields', () => {
@@ -85,11 +103,9 @@ describe('Kanban', () => {
       expect(dialog).toBeInTheDocument()
       // Title shows in the modal header.
       expect(dialog).toHaveTextContent('Fix bug')
-      // Non-title fields are listed.
-      expect(dialog).toHaveTextContent('assignee')
-      expect(dialog).toHaveTextContent('alice')
-      expect(dialog).toHaveTextContent('priority')
-      expect(dialog).toHaveTextContent('high')
+      // Non-title, non-canonical field falls through to Other fields.
+      expect(dialog).toHaveTextContent('customField')
+      expect(dialog).toHaveTextContent('arbitrary-value')
     })
 
     it('closes the modal on Escape', () => {

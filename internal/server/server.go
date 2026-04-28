@@ -476,6 +476,7 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware)
+	r.Use(rejectAPITraversal)
 
 	// Token-auth is scoped to the API / MCP / skill endpoints only. The
 	// SPA assets (`/`, `/login`, static JS/CSS) must render without a
@@ -537,33 +538,59 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	// API routes
 	r.Group(func(r chi.Router) {
 		gated(r)
-		r.Route("/api", apiRoutes(s))
+		r.Route("/api", func(api chi.Router) {
+			// Mount the registered handlers, then override chi's default
+			// plaintext "404 page not found" with a JSON envelope so
+			// agents that mistype an /api/* path get a parseable error
+			// instead of a wall of HTML or "404 page not found" text.
+			apiRoutes(s)(api)
+			api.NotFound(apiNotFound)
+			api.MethodNotAllowed(apiMethodNotAllowed)
+		})
 		r.Get("/skill", s.handleSkill)
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
 	})
 
-	// Frontend — serve embedded SPA or proxy to dev server.
-	if cfg.DevMode && cfg.DevProxy != "" {
-		r.HandleFunc("/*", devProxyHandler(cfg.DevProxy))
-	} else if cfg.FrontendFS != nil {
-		fileServer := http.FileServer(cfg.FrontendFS)
-		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-			// Try to serve the file; if not found, serve index.html (SPA fallback)
-			path := r.URL.Path
-			f, err := cfg.FrontendFS.Open(path[1:]) // strip leading /
-			if err != nil {
-				// SPA fallback
-				r.URL.Path = "/"
+	// Frontend — serve embedded SPA or proxy to dev server. Unknown
+	// `/api/*` requests are caught by the api router's NotFound
+	// handler above (apiNotFound). This fallback fires for non-API
+	// URLs.
+	//
+	// Guard: only GET/HEAD/OPTIONS fall through to the SPA. A write
+	// verb (PUT/POST/PATCH/DELETE) hitting an unmatched non-API path
+	// — e.g. a client that strips `..` from `/api/content/../foo`
+	// before sending and lands on `/foo` — must NOT receive 200 +
+	// dashboard HTML. Return JSON 404 so the caller sees an error.
+	spaFallback := func() http.HandlerFunc {
+		if cfg.DevMode && cfg.DevProxy != "" {
+			return devProxyHandler(cfg.DevProxy)
+		}
+		if cfg.FrontendFS != nil {
+			fileServer := http.FileServer(cfg.FrontendFS)
+			return func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				f, err := cfg.FrontendFS.Open(path[1:])
+				if err != nil {
+					r.URL.Path = "/"
+					fileServer.ServeHTTP(w, r)
+					return
+				}
+				f.Close()
 				fileServer.ServeHTTP(w, r)
-				return
 			}
-			f.Close()
-			fileServer.ServeHTTP(w, r)
-		})
-	} else {
-		r.HandleFunc("/*", s.handleFrontend)
-	}
+		}
+		return s.handleFrontend
+	}()
+	r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			spaFallback(w, r)
+		default:
+			respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
+				"no route matches "+r.Method+" "+r.URL.Path)
+		}
+	})
 
 	return r
 }
@@ -750,6 +777,51 @@ func respondError(w http.ResponseWriter, status int, code string, message string
 	respondJSON(w, status, map[string]string{
 		"error": message,
 		"code":  code,
+	})
+}
+
+// apiNotFound is the catch-all for `/api/*` URLs that don't match any
+// registered route. Without this, unknown API paths fell through to
+// the SPA's `*` handler and returned the dashboard HTML with status
+// 200 — agents reading the response could not distinguish "wrote ok"
+// from "no route here" until they parsed the body.
+func apiNotFound(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
+		"no API route matches "+r.Method+" "+r.URL.Path)
+}
+
+// apiMethodNotAllowed mirrors apiNotFound for the case where the path
+// matches a registered route but the verb doesn't. chi defaults to a
+// plaintext 405; we want the same JSON envelope as every other error.
+func apiMethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	respondError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED",
+		r.Method+" not allowed on "+r.URL.Path)
+}
+
+// rejectAPITraversal catches `/api/...` URLs whose raw RequestURI
+// contains `..` segments BEFORE chi's path normalisation rewrites them
+// out of the API namespace. Without this, `PUT /api/content/../foo`
+// silently became `PUT /foo`, which fell through to the SPA and
+// returned 200 + dashboard HTML. The path-cleaning is harmless from a
+// disk-access standpoint (chi never lets the `..` reach a file
+// system call), but the response shape was misleading to agents.
+//
+// Inspecting the *RequestURI* (raw bytes from the wire) rather than
+// `r.URL.Path` (already cleaned) is the only reliable way to spot
+// the traversal attempt.
+func rejectAPITraversal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ru := r.RequestURI
+		// Strip query string for the traversal check.
+		if i := strings.IndexByte(ru, '?'); i >= 0 {
+			ru = ru[:i]
+		}
+		if strings.HasPrefix(ru, "/api/") && strings.Contains(ru, "/..") {
+			respondError(w, http.StatusBadRequest, "INVALID_PATH",
+				"path traversal segments are not allowed in /api/ URLs")
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

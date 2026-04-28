@@ -216,7 +216,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e := s.enforcePageLock(r, strings.TrimSuffix(pagePath, ".md")); e != nil {
+	if e := s.enforcePageLock(r, mdx.NormalizePagePath(pagePath)); e != nil {
 		respondPageLocked(w, e)
 		return
 	}
@@ -231,7 +231,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	writeErr := s.Pages.WritePageIfMatch(pagePath, string(body), expected)
 	if writeErr != nil {
 		if errors.Is(writeErr, mdx.ErrStale) || errors.Is(writeErr, mdx.ErrNotFoundForMatch) {
-			respondPageStale(w, s.Pages.GetPage(strings.TrimSuffix(pagePath, ".md")), pagePath)
+			respondPageStale(w, s.Pages.GetPage(mdx.NormalizePagePath(pagePath)), pagePath)
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", writeErr.Error())
@@ -241,7 +241,12 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	// Record last-edited-by before broadcasting so readers hitting the SSE
 	// refetch see the new meta right away. Best-effort; a meta failure
 	// doesn't roll back the write.
-	normalizedPath := strings.TrimSuffix(pagePath, ".md")
+	//
+	// NormalizePagePath collapses `<folder>/SKILL.md` to `<folder>` —
+	// the same rule the page manager uses to index. Without it, every
+	// post-write hook below would miss for SKILL.md uploads (no etag
+	// echo, no FTS row, no ref recording).
+	normalizedPath := mdx.NormalizePagePath(pagePath)
 	actor := resolveActor(r)
 	if s.PageMeta != nil {
 		_ = s.PageMeta.Record(normalizedPath, actor)
@@ -313,7 +318,7 @@ func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "page path required")
 		return
 	}
-	normalizedPath := strings.TrimSuffix(pagePath, ".md")
+	normalizedPath := mdx.NormalizePagePath(pagePath)
 
 	if e := s.enforcePageLock(r, normalizedPath); e != nil {
 		respondPageLocked(w, e)
@@ -418,7 +423,7 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e := s.enforcePageLock(r, strings.TrimSuffix(pagePath, ".md")); e != nil {
+	if e := s.enforcePageLock(r, mdx.NormalizePagePath(pagePath)); e != nil {
 		respondPageLocked(w, e)
 		return
 	}
@@ -427,7 +432,7 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 	delErr := s.Pages.DeletePageIfMatch(pagePath, expected)
 	if delErr != nil {
 		if errors.Is(delErr, mdx.ErrStale) || errors.Is(delErr, mdx.ErrNotFoundForMatch) {
-			respondPageStale(w, s.Pages.GetPage(strings.TrimSuffix(pagePath, ".md")), pagePath)
+			respondPageStale(w, s.Pages.GetPage(mdx.NormalizePagePath(pagePath)), pagePath)
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", delErr.Error())
@@ -437,7 +442,7 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 	// Drop the meta + approval rows too — a recreated page should start
 	// with a fresh attribution rather than inherit the deleter, and
 	// absolutely shouldn't carry a stale approval across identity-reuse.
-	normalizedPath := strings.TrimSuffix(pagePath, ".md")
+	normalizedPath := mdx.NormalizePagePath(pagePath)
 	if s.PageMeta != nil {
 		_ = s.PageMeta.Delete(normalizedPath)
 	}

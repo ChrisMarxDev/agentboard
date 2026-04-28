@@ -1,20 +1,41 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { useData } from '../../hooks/useData'
-import { apiFetch, isPublicMode } from '../../lib/session'
+import { useDataContext } from '../../hooks/DataContext'
+import { isPublicMode } from '../../lib/session'
+import {
+  createCollectionItem,
+  deleteCollectionItem,
+  patchCollectionItem,
+} from '../../lib/collectionWrites'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 
 // Sheet renders an array-of-objects data key as an editable grid.
 // Cells are inline-editable for authed users; in public/share mode
-// the grid is read-only. Every save goes through the existing data
-// API (PATCH /api/data/<source>/<id>, POST for append, DELETE by id)
-// — which means every edit fans out on the webhook bus via the
-// standard data.* events. No new server plumbing required.
+// the grid is read-only.
 //
-// Usage:
+// The source determines where writes land:
 //
-//   <Sheet source="team.roster" />
-//   <Sheet source="q1.priorities" columns={["id","title","owner","due"]} />
+//   <Sheet />                                — auto-attach: rows are
+//     children of the rendering page's own folder. Equivalent to
+//     `<Sheet source="<this-page-path>/" />`. Use this on a folder-
+//     index page to bind the grid to its siblings.
+//
+//   <Sheet source="tasks/" />                — folder collection
+//     → PATCH /api/content/tasks/<id>      (frontmatter merge)
+//     → PUT   /api/content/tasks/<newid>   (create as MDX doc)
+//     → DELETE /api/content/tasks/<id>
+//
+//   <Sheet source="store.key" />              — file-store collection
+//     → PATCH /api/data/store.key/<id>
+//     → POST  /api/data/store.key
+//     → DELETE /api/data/store.key/<id>
+//
+// Sources that resolve from a page's own frontmatter (`<Sheet source="roster" />`
+// where `roster` is an array literal in YAML) read fine but cannot be edited
+// here — there is no per-row write endpoint for inline-array fields. To make
+// such a sheet editable, hoist each row to its own .md file under the page's
+// folder and reference the folder with a trailing slash, or omit the prop.
 //
 // Design notes:
 //  - Columns are inferred from the first row's keys unless `columns`
@@ -29,7 +50,9 @@ import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 //    with a fresh uuid-style id.
 
 interface SheetProps {
-  source: string
+  /** Folder collection path (e.g. "tasks/"). Omit to auto-attach to
+   *  the rendering page's own folder. */
+  source?: string
   columns?: string[]
   title?: string
 }
@@ -37,7 +60,13 @@ interface SheetProps {
 type RowRecord = Record<string, unknown>
 
 export function Sheet({ source, columns, title }: SheetProps) {
-  const { data, loading } = useData(source)
+  const ctx = useDataContext()
+  // Auto-attach: if no `source` prop, treat the rendering page's own
+  // folder as the implicit collection. Mirrors Kanban — the broker's
+  // ref-extractor adds the same folder key to scope when it sees
+  // `<Sheet>` without source, so the bundle is already populated.
+  const effectiveSource = source ?? (ctx.path ? ctx.path + '/' : '')
+  const { data, loading } = useData(effectiveSource)
   const readOnly = isPublicMode()
 
   // Optimistic overlay: a short-lived map of (rowId → patched values)
@@ -120,13 +149,9 @@ export function Sheet({ source, columns, title }: SheetProps) {
       [id]: { ...(prev[id] ?? {}), [col]: parsed },
     }))
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [col]: parsed }),
-      })
-      if (!res.ok) throw new Error(`PATCH ${source}/${id} → ${res.status}`)
-      resetBeacon('Sheet', source)
+      const res = await patchCollectionItem(effectiveSource, id, { [col]: parsed })
+      if (!res.ok) throw new Error(`patch ${effectiveSource}/${id} → ${res.status}`)
+      resetBeacon('Sheet', effectiveSource)
     } catch (e) {
       // Revert optimistic overlay for this cell.
       setPendingEdits(prev => {
@@ -139,7 +164,7 @@ export function Sheet({ source, columns, title }: SheetProps) {
       })
       beaconError({
         component: 'Sheet',
-        source,
+        source: effectiveSource,
         error: e instanceof Error ? e.message : 'row edit failed',
       })
     }
@@ -152,17 +177,13 @@ export function Sheet({ source, columns, title }: SheetProps) {
     const blank: RowRecord = { id: newId }
     for (const c of cols) if (c !== 'id') blank[c] = ''
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(blank),
-      })
-      if (!res.ok) throw new Error(`POST ${source} → ${res.status}`)
-      resetBeacon('Sheet', source)
+      const res = await createCollectionItem(effectiveSource, newId, blank)
+      if (!res.ok) throw new Error(`create ${effectiveSource}/${newId} → ${res.status}`)
+      resetBeacon('Sheet', effectiveSource)
     } catch (e) {
       beaconError({
         component: 'Sheet',
-        source,
+        source: effectiveSource,
         error: e instanceof Error ? e.message : 'append failed',
       })
     }
@@ -171,11 +192,9 @@ export function Sheet({ source, columns, title }: SheetProps) {
   async function deleteRow(id: string) {
     setPendingDeletes(prev => ({ ...prev, [id]: true }))
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error(`DELETE ${source}/${id} → ${res.status}`)
-      resetBeacon('Sheet', source)
+      const res = await deleteCollectionItem(effectiveSource, id)
+      if (!res.ok) throw new Error(`delete ${effectiveSource}/${id} → ${res.status}`)
+      resetBeacon('Sheet', effectiveSource)
     } catch (e) {
       setPendingDeletes(prev => {
         const next = { ...prev }
@@ -184,7 +203,7 @@ export function Sheet({ source, columns, title }: SheetProps) {
       })
       beaconError({
         component: 'Sheet',
-        source,
+        source: effectiveSource,
         error: e instanceof Error ? e.message : 'delete failed',
       })
     }
@@ -201,7 +220,7 @@ export function Sheet({ source, columns, title }: SheetProps) {
   if (!Array.isArray(data)) {
     return (
       <div className="p-4 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        <code>{source}</code> is not an array — <code>&lt;Sheet&gt;</code> expects an array of objects.
+        <code>{effectiveSource || '(no source)'}</code> is not an array — <code>&lt;Sheet&gt;</code> expects an array of objects.
       </div>
     )
   }

@@ -57,14 +57,16 @@ func introductionManifest() map[string]any {
 			"base":         "/api",
 			"auth":         "Bearer ab_<43> (header, ?token=, or HTTP Basic password)",
 			"write_verbs":  []string{"PUT", "PATCH", "POST", "DELETE"},
-			"open_paths":   []string{"/api/health", "/api/config", "/api/introduction"},
-			"bootstrap":    "/api/setup/status returns {claimed:bool}; if false, POST /api/setup claims the board.",
+			"open_paths":   []string{"/api/health", "/api/config", "/api/introduction", "/api/setup/status"},
+			"bootstrap":    "/api/setup/status returns {initialized:bool}. If false, the server prints a /invite/<id> URL on first boot — open it in a browser to claim the first admin.",
 			"endpoints": []map[string]string{
 				{"method": "GET", "path": "/api/health", "summary": "liveness probe"},
 				{"method": "GET", "path": "/api/config", "summary": "project config + public paths"},
 				{"method": "GET", "path": "/api/content", "summary": "list all pages"},
 				{"method": "GET", "path": "/api/content/{path}", "summary": "read one page (markdown+etag)"},
 				{"method": "PUT", "path": "/api/content/{path}", "summary": "write a page (MDX source); If-Match supported"},
+				{"method": "PATCH", "path": "/api/content/{path}", "summary": "merge into frontmatter and/or replace body; If-Match supported"},
+				{"method": "DELETE", "path": "/api/content/{path}", "summary": "delete a page"},
 				{"method": "GET", "path": "/api/data", "summary": "list data keys"},
 				{"method": "GET", "path": "/api/data/{key}", "summary": "read a value"},
 				{"method": "PUT", "path": "/api/data/{key}", "summary": "set a value"},
@@ -91,8 +93,8 @@ func introductionManifest() map[string]any {
 
 // introductionMarkdown is the primary artifact: a self-contained
 // agent primer. Reading this top-to-bottom should be enough for an
-// agent to write pages, set data, and wire up live dashboards without
-// a human walk-through.
+// agent to write pages, edit collections, and wire up live dashboards
+// without a human walk-through.
 func introductionMarkdown() string {
 	return `# AgentBoard — agent primer
 
@@ -104,50 +106,65 @@ Running AgentBoard version: ` + versionStr + `
 
 ## What AgentBoard is
 
-AgentBoard is a **single-binary, self-hosted knowledge and dashboarding surface for teams that work with AI agents**. One Go binary, one SQLite file, one web UI.
+AgentBoard is a **single-binary, self-hosted knowledge and dashboarding surface for teams that work with AI agents**. One Go binary, one SQLite file (auth + indexes only), and a tree of MDX files on disk.
 
-The core pattern is:
+The core pattern:
 
-> **Agents write via REST/MCP. Humans read via live dashboards. Updates stream in real time over SSE.**
+> **Agents write via REST/MCP. Humans read via live dashboards. Updates stream over SSE.**
 
 What lives inside AgentBoard:
 
-- **Pages** — MDX documents. Any mix of Markdown + first-party React components. The normal stuff a team keeps — docs, runbooks, project briefs, meeting notes — but also **live dashboards** because any component can bind to a data key and update as data changes.
-- **Data** — a key/value store with dotted-path keys. Seven write operations (set, merge, append, upsert-by-id, merge-by-id, delete, delete-by-id). Every write broadcasts to every connected browser via SSE.
-- **Files** — uploaded artifacts (images, PDFs, SVGs, zips). Referenced by pages via ` + "`<Image>`" + ` / ` + "`<File>`" + `.
-- **Components** — the vocabulary of visual bricks agents can drop into pages. Built-ins: ` + "`Metric`, `Status`, `Progress`, `Kanban`, `Chart`, `Log`, `List`, `Table`, `TimeSeries`, `Deck`, `Card`, `Markdown`, `Badge`, `Counter`, `Code`, `Mermaid`, `Image`, `File`, `Errors`, `ApiList`, `SkillInstall`, `Mention`, `RichText`" + `.
-- **Skills** — agent-consumable skill bundles hosted under ` + "`skills/<slug>`" + `. Every skill page auto-gets an install card.
+- **Pages** — ` + "`.md`" + ` files with YAML frontmatter and MDX body. The frontmatter holds structured fields (title, status, priority, anything); the body holds prose + first-party React components. A page can be a doc, a runbook, a kanban card, or a live dashboard — same shape.
+- **Folders** — collections. A folder is its own collection: ` + "`content/tasks/<id>.md`" + ` is one card; ` + "`<Kanban groupBy=\"col\">`" + ` on ` + "`/tasks`" + ` reads the whole folder. There is no separate ` + "`data/`" + ` namespace.
+- **Files** — uploaded binaries (images, PDFs, SVGs). Served from ` + "`/api/files/`" + `, embedded via ` + "`<Image>`" + ` / ` + "`<File>`" + `.
+- **Components** — visual bricks agents drop into MDX. Run ` + "`GET /api/components`" + ` for the live catalog; built-ins include ` + "`Metric`, `Status`, `Progress`, `Kanban`, `Sheet`, `List`, `Chart`, `Log`, `Table`, `TimeSeries`, `Deck`, `Card`, `Stack`, `Markdown`, `Badge`, `Counter`, `Code`, `Mermaid`, `Image`, `File`, `Errors`, `ApiList`, `SkillInstall`, `Mention`, `RichText`, `TeamRoster`, `Inbox`, `Button`" + `.
+- **Skills** — agent-consumable skill bundles at ` + "`content/skills/<slug>/SKILL.md`" + `. ` + "`GET /api/skills`" + ` lists them; ` + "`GET /api/skills/<slug>`" + ` returns a zip.
 
-What AgentBoard is **not**: a database replacement, a general-purpose CMS, a CI/CD tool, or a chat product. It's a collaboration surface *between* agents and humans.
+What AgentBoard is **not**: a database, a general-purpose CMS, a CI/CD tool, a chat product. It's a collaboration surface *between* agents and humans.
 
 ---
 
-## The mental model
+## The mental model — one tree, two write paths
 
-Three things to keep separate in your head.
+Everything is a file under the project root.
 
-1. **Pages are content.** They're MDX. When you edit a page, the content of a paragraph changes. You don't edit a page to change a live metric.
-2. **Data is signal.** It lives in the key/value store. You edit data to change what a dashboard component renders.
-3. **Rendering is one-way.** A page mounts a ` + "`<Metric source=\"team.uptime\"/>`" + ` and the browser subscribes to that data key. Every write to ` + "`team.uptime`" + ` is reflected in every open browser within ~100ms.
+` + "```" + `
+<project>/
+  index.md                  # the home page
+  content/
+    handbook.md             # a regular page
+    tasks.md                # a board (or omit; the folder itself is the index)
+    tasks/
+      ship-v2.md            # one card — frontmatter is the structured data, body is prose
+      hire-engineer.md
+    skills/
+      kanban/
+        SKILL.md            # the manifest (URL: /skills/kanban)
+        examples.md         # supporting file (URL: /skills/kanban/examples)
+` + "```" + `
 
-This separation means you can edit a page once and then drive the dashboard by just setting data — no page re-edit, no redeploy. Your rule of thumb: **if the number changes hourly, it's data; if it changes weekly, it's prose.**
+There are two write paths, distinguished by where state lives:
+
+1. **Page writes — `+"`/api/content/<path>`"+`.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
+2. **Data writes — `+"`/api/data/<key>`"+`.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
+
+**Rule of thumb**: if it deserves a URL on the dashboard, it's a page. If it's a number that updates without a story, it's data.
 
 ---
 
 ## Authentication
 
-One token per user, one format: ` + "`ab_<43 chars>`" + `. Passed in any of:
+One token per user, format ` + "`ab_<43 chars>`" + `. Pass it in any of:
 
 - Header: ` + "`Authorization: Bearer ab_...`" + `
 - Basic: password=token, username ignored
-- Query: ` + "`?token=ab_...`" + `
+- Query: ` + "`?token=ab_...`" + ` (last resort; logs the token to access logs)
 
-Two kinds of tokens:
+Three user kinds: ` + "`admin`" + `, ` + "`member`" + `, ` + "`bot`" + `. Admins additionally unlock ` + "`/api/admin/*`" + `.
 
-- **agent** — scoped by per-user rules
-- **admin** — additionally unlocks ` + "`/api/admin/*`" + `
+**If the board is unclaimed**, the server prints a ` + "`/invite/<id>`" + ` URL on first boot. Open it in a browser, pick a username, get the first admin token. ` + "`GET /api/setup/status`" + ` returns ` + "`{initialized: bool}`" + ` so you can detect this state programmatically.
 
-If you see 401, ask your operator for a token. If the board is **unclaimed** (no users yet), ` + "`POST /api/setup`" + ` with ` + "`{username, display_name?}`" + ` mints the first admin + returns a token.
+If you see 401, ask your operator for a token. **Never** route around auth by editing files on disk — every write goes through the API, period.
 
 ---
 
@@ -159,144 +176,141 @@ All URLs are relative to this board's origin. Replace ` + "`$B`" + ` with the bo
 
 ` + "```bash" + `
 curl -H "Authorization: Bearer $T" $B/api/content/handbook
-# → { "path": "handbook", "source": "# Handbook\\n\\n...", "etag": "...", ... }
-
-curl -H "Authorization: Bearer $T" -H "Accept: text/markdown" $B/api/content/handbook
-# → raw MDX source
+# → { "path": "/handbook", "source": "# Handbook\\n…", "frontmatter": {...}, "etag": "...", ... }
+#   NOTE: "source" is the body only; frontmatter travels in the "frontmatter" map.
 ` + "```" + `
 
-### Write a page
+### Write a page (full replace)
 
-Body is raw MDX source. No JSON envelope.
+Body is raw MDX source — frontmatter (` + "`---`" + ` block) plus body. Content-Type: ` + "`text/markdown`" + `.
 
 ` + "```bash" + `
 curl -X PUT -H "Authorization: Bearer $T" -H "Content-Type: text/markdown" \
-  --data-binary @my-page.md \
-  $B/api/content/handbook
+  --data-binary @- $B/api/content/handbook <<'EOF'
+---
+title: Handbook
+tags: [intro, onboarding]
+---
+
+# Handbook
+
+Body prose lives here.
+EOF
 ` + "```" + `
 
-Supports optimistic concurrency:
+Optimistic concurrency:
 
 ` + "```bash" + `
-curl -X PUT -H "Authorization: Bearer $T" -H 'If-Match: "<etag>"' ...
-# → 200 on match; 412 with current etag on mismatch
+curl -X PUT -H 'If-Match: "<etag>"' ...   # 200 on match, 412 with current etag on mismatch
 ` + "```" + `
+
+### Patch a page (frontmatter merge / body replace)
+
+` + "```bash" + `
+# Move a kanban card without rewriting the doc.
+curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  $B/api/content/tasks/ship-v2 \
+  -d '{"frontmatter_patch": {"col": "done", "shipped": "2026-04-28"}}'
+
+# Replace just the body, frontmatter preserved.
+curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  $B/api/content/handbook \
+  -d '{"body": "# Handbook\\n\\nFresh prose."}'
+
+# Delete a frontmatter key (RFC-7396 null = remove).
+curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  $B/api/content/tasks/ship-v2 \
+  -d '{"frontmatter_patch": {"deprecated_field": null}}'
+` + "```" + `
+
+` + "`PATCH`" + ` honours ` + "`If-Match`" + ` the same way as PUT.
+
+### Build a kanban board (the canonical folder pattern)
+
+The board page IS the folder index. ` + "`<Kanban>`" + ` with no ` + "`source`" + ` auto-attaches.
+
+` + "```mdx" + `
+---
+title: Intake
+---
+
+# Intake
+
+<Kanban groupBy="col" columns={["todo","doing","done"]} />
+` + "```" + `
+
+Then PUT cards under the same folder:
+
+` + "```bash" + `
+curl -X PUT -H "Authorization: Bearer $T" -H "Content-Type: text/markdown" \
+  --data-binary @- $B/api/content/intake/triage <<'EOF'
+---
+title: Triage support mailbox
+col: todo
+owner: alice
+priority: 2
+---
+
+# Triage support mailbox
+Tickets from the long weekend.
+EOF
+` + "```" + `
+
+Move a card with one PATCH:
+
+` + "```bash" + `
+curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  $B/api/content/intake/triage -d '{"frontmatter_patch": {"col": "doing"}}'
+` + "```" + `
+
+` + "`<Sheet>`" + ` and ` + "`<List>`" + ` follow the same auto-attach rule. See the ` + "`kanban`" + ` skill at ` + "`GET /api/skills/kanban`" + ` for a full worked example.
 
 ### Set a data value
 
 ` + "```bash" + `
-# scalar
 curl -X PUT $B/api/data/team.uptime -d '99.98' -H "Authorization: Bearer $T"
 
-# object
-curl -X PUT $B/api/data/team.status -H "Authorization: Bearer $T" \
-  -d '{"state":"running","label":"All good","detail":"no incidents today"}'
-
-# array (append one item)
-curl -X POST $B/api/data/team.incidents -H "Authorization: Bearer $T" \
-  -d '{"id":"INC-17","title":"search-index stall","severity":"warn"}'
-
-# deep-merge
 curl -X PATCH $B/api/data/team.status -H "Authorization: Bearer $T" \
   -d '{"detail":"one small blip"}'
 
-# merge one row inside an array of objects by id
-curl -X PATCH $B/api/data/team.incidents/INC-17 -H "Authorization: Bearer $T" \
-  -d '{"resolved":true}'
+curl -X POST $B/api/data/app.log -H "Authorization: Bearer $T" \
+  -d '{"ts":"2026-04-28T12:00:00Z","level":"info","message":"deploy started"}'
 ` + "```" + `
 
-### Write a live dashboard page that reacts to those values
-
-` + "```mdx" + `
-# Team status
-
-<Deck>
-  <Card title="Uptime">
-    <Metric source="team.uptime" unit="%" />
-  </Card>
-  <Card title="Status">
-    <Status source="team.status" />
-  </Card>
-</Deck>
-
-## Incidents
-
-<Kanban source="team.incidents" groupBy="severity" columns={["info","warn","critical"]} />
-` + "```" + `
-
-That's it. Every browser with this page open sees the metrics and the board update the instant you PATCH the data.
+Useful for log streams, counters, and ad-hoc state. **Use pages for anything that has structure or deserves a URL.**
 
 ### Discover what components exist on THIS board
 
 ` + "```bash" + `
 curl -H "Authorization: Bearer $T" $B/api/components
-# → [{ name: "Metric", schema: {...} }, ... ]
+# → [{ name: "Metric", meta: { description, props: {...} } }, ... ]
 ` + "```" + `
-
-Use this to know what JSX tags are valid — built-ins plus any the operator has uploaded.
 
 ### Full-text search
 
 ` + "```bash" + `
-curl -H "Authorization: Bearer $T" "$B/api/search?q=login+timeout"
-# → ranked list of matching pages with snippets
-` + "```" + `
-
----
-
-## Common recipes
-
-### "Make a project status page"
-
-1. Set some data keys: ` + "`project.status`" + `, ` + "`project.progress`" + `, ` + "`project.tasks`" + `.
-2. Write a page that mounts ` + "`<Status>`, `<Progress>`, `<Kanban>`" + ` bound to those keys.
-3. Done. From now on, the only thing you touch is the data — the page updates itself.
-
-### "Post a log line"
-
-` + "```bash" + `
-curl -X POST $B/api/data/app.log -H "Authorization: Bearer $T" \
-  -d '{"timestamp":"2026-04-23T12:00:00Z","level":"info","message":"started"}'
-` + "```" + `
-
-The page that mounts ` + "`<Log source=\"app.log\" />`" + ` will scroll to show it.
-
-### "Record something happened" (counter)
-
-` + "```bash" + `
-# Step 1: read current value
-CUR=$(curl -H "Authorization: Bearer $T" -s $B/api/data/team.deploys | jq -r .value)
-# Step 2: PUT incremented value
-curl -X PUT $B/api/data/team.deploys -d $((CUR + 1)) -H "Authorization: Bearer $T"
-` + "```" + `
-
-Or add a ` + "`<Counter source=\"team.deploys\" />`" + ` component that handles this UI-side.
-
-### "Attach an image to a page"
-
-` + "```bash" + `
-curl -X PUT -H "Authorization: Bearer $T" --data-binary @banner.png \
-  $B/api/files/banner.png
-
-# Then in the page:
-# <Image src="/api/files/banner.png" />
+curl -H "Authorization: Bearer $T" "$B/api/search/pages?q=login+timeout"
 ` + "```" + `
 
 ---
 
 ## MCP
 
-Prefer MCP over REST if you are a Claude-family agent. JSON-RPC 2.0 over HTTP at ` + "`POST /mcp`" + `. Methods: ` + "`initialize`, `tools/list`, `tools/call`" + `. Tool schemas mirror the REST endpoints above — ` + "`agentboard_set`, `agentboard_merge`, `agentboard_append`, `agentboard_read`, `agentboard_write_page`, `agentboard_search`" + `, etc. Use ` + "`tools/list`" + ` to see exactly what this board advertises.
+Prefer MCP over REST if you are a Claude-family agent. JSON-RPC 2.0 over HTTP at ` + "`POST /mcp`" + `. Methods: ` + "`initialize`, `tools/list`, `tools/call`" + `. Tool names use the prefix ` + "`agentboard_*`" + ` — page operations (` + "`agentboard_read_page`, `agentboard_write_page`, `agentboard_list_pages`, `agentboard_delete_page`" + `), data operations (` + "`agentboard_read`, `agentboard_set`, `agentboard_merge`, `agentboard_append`, `agentboard_delete`" + `), discovery (` + "`agentboard_list_components`, `agentboard_list_skills`, `agentboard_get_skill`" + `), and more. Always run ` + "`tools/list`" + ` first — that's the source of truth for what this specific board advertises.
 
 ---
 
-## Error signals agents should know
+## Error envelope
 
-- **401** — missing or invalid token. Ask the operator.
-- **403** — authenticated but your user-rules deny this write/read.
-- **404** — page/key doesn't exist yet. ` + "`PUT`" + ` to create.
-- **412** — ` + "`If-Match`" + ` etag mismatch. Re-read, then retry with the new etag.
-- **422** — your body doesn't match the expected shape (e.g. ` + "`PATCH`" + ` against a scalar).
+Every error is JSON ` + "`{code, error}`" + ` with the appropriate HTTP status:
+
+- **400** — bad request shape (` + "`INVALID_VALUE`, `INVALID_KEY`" + `).
+- **401** — missing or invalid token (` + "`UNAUTHORIZED`" + `). Ask the operator.
+- **403** — authenticated but per-user rules or admin gating denied (` + "`FORBIDDEN`, `ADMIN_REQUIRED`" + `).
+- **404** — path doesn't exist (` + "`NOT_FOUND`, `ROUTE_NOT_FOUND`" + `). For pages, ` + "`PUT`" + ` to create.
+- **409** — conflict (e.g. move destination already exists).
+- **412** — ` + "`If-Match`" + ` etag mismatch (` + "`STALE_WRITE`" + `). Body includes ` + "`current`" + ` so you can re-base in one round-trip.
+- **429** — rate-limited; ` + "`Retry-After`" + ` header tells you when to retry.
 
 ---
 
@@ -305,25 +319,26 @@ Prefer MCP over REST if you are a Claude-family agent. JSON-RPC 2.0 over HTTP at
 - ` + "`GET /api/introduction`" + ` → *this document*
 - ` + "`GET /api/config`" + ` → project title, theme, public paths
 - ` + "`GET /api/components`" + ` → what JSX tags this board knows
-- ` + "`GET /api/content`" + ` → page tree
-- ` + "`GET /api/data`" + ` → data keys currently set
-- ` + "`POST /mcp`" + ` with ` + "`{method: \"tools/list\"}`" + ` → MCP tool catalog
+- ` + "`GET /api/content`" + ` → page tree (use ` + "`?prefix=`" + ` and ` + "`?fields=`" + ` to slim)
+- ` + "`GET /api/skills`" + ` → installable skill registry
+- ` + "`GET /api/setup/status`" + ` → ` + "`{initialized}`" + ` flag for unclaimed-board detection
+- ` + "`POST /mcp`" + ` with ` + "`{method:\"tools/list\"}`" + ` → MCP tool catalog
 
 ---
 
 ## Two invariants to memorise
 
-1. **Writes always require auth.** Public-routes config can open *reads* on specific paths; it cannot open writes. Writing without a token is always 401.
-2. **Rendering is one-way.** You edit data *or* edit a page. You never edit a rendered dashboard — the dashboard isn't a source of truth, it's a view over one.
+1. **Writes always require auth.** The public-routes config can open *reads* on specific paths; it cannot open writes. Writing without a token is always 401.
+2. **Never edit files on disk directly.** Even though the project is a tree of plain ` + "`.md`" + ` files, direct disk writes bypass auth, optimistic concurrency, the activity log, mention-dispatch, and ref-graph updates. Always go through the REST/MCP API.
 
 ---
 
 ## Next steps
 
-- List pages: ` + "`GET /api/content`" + `
-- Browse components: ` + "`GET /api/components`" + ` (or read ` + "`/components`" + ` in the UI if public)
-- Set your first value: ` + "`PUT /api/data/hello`" + ` with body ` + "`\"world\"`" + `
-- Then mount it: write a page with ` + "`<Metric source=\"hello\" />`" + ` and watch it render.
+- ` + "`GET /api/skills/kanban`" + ` if you've been asked to build a board
+- ` + "`GET /api/skills/agentboard`" + ` for the broader skill that ships on every board
+- ` + "`GET /api/content`" + ` to see what's already authored here
+- ` + "`GET /api/components`" + ` to learn what JSX tags are valid
 
 That's it. You know enough to start.
 `

@@ -140,10 +140,28 @@ No token / revoked token / deactivated user → ` + "`401 Unauthorized`" + `. Do
 
 | What | How to write | How to read |
 |---|---|---|
+| Pages (MDX) | ` + "`agentboard_write_page`, `agentboard_patch_page`" + ` (or ` + "`PUT/PATCH /api/content/<path>`" + `) | ` + "`agentboard_read_page`, `agentboard_list_pages`" + ` |
 | Data (key/value) | ` + "`agentboard_set`, `agentboard_merge`, `agentboard_append`" + ` | ` + "`agentboard_get`, `agentboard_list_keys`" + ` |
-| Pages (MDX) | ` + "`agentboard_write_page`" + ` | ` + "`agentboard_read_page`, `agentboard_list_pages`" + ` |
 | Files (binary) | ` + "`agentboard_write_file`" + ` | ` + "`agentboard_list_files`, GET /api/files/<name>" + ` |
-| Skills | write a folder under ` + "`content/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` via the file API | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
+| Skills | write a folder under ` + "`content/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` via the page API | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
+
+## Folder collections (the most useful pattern)
+
+A folder of ` + "`.md`" + ` docs IS a collection. ` + "`content/tasks/<id>.md`" + ` cards make up the ` + "`tasks/`" + ` board. The components ` + "`<Kanban>`, `<Sheet>`, `<List>`" + ` read the folder directly.
+
+**Auto-attach**: ` + "`<Kanban groupBy=\"col\" />`" + ` with **no source prop** on a page resolves to that page's own folder. The page is then the folder's index. This is the cleanest shape.
+
+To move a card across columns, ` + "`PATCH`" + ` only the field that changed:
+
+` + "```bash" + `
+curl -X PATCH "$B/api/content/tasks/ship-v2" \
+  -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
+  -d '{"frontmatter_patch": {"col": "done"}}'
+` + "```" + `
+
+The body and every other frontmatter field are preserved. ` + "`null`" + ` deletes a key (RFC-7396).
+
+If you've been asked to build a board, fetch ` + "`GET /api/skills/kanban`" + ` for a fully worked recipe.
 
 ## Hosting a skill
 

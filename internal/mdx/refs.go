@@ -42,9 +42,9 @@ var (
 
 // folderAutowireTags lists JSX components that auto-attach to the
 // rendering page's own folder collection when no `source` attribute
-// is given. Any `<Kanban>` / `<List>` without `source=` is treated as
-// `source="<page-path>/"`.
-var folderAutowireTags = []string{"Kanban", "List"}
+// is given. Any `<Kanban>` / `<List>` / `<Sheet>` without `source=`
+// is treated as `source="<page-path>/"`.
+var folderAutowireTags = []string{"Kanban", "List", "Sheet"}
 
 // reFolderAutowire matches the open tag of an autowire-eligible
 // component. We reconstruct the alternation at package load so adding a

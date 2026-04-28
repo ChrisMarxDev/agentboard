@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -73,7 +74,7 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 					unauthorized(w)
 					return
 				}
-				http.Error(w, "auth lookup error", http.StatusInternalServerError)
+				writeJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "auth lookup error")
 				return
 			}
 			updater.touch(tok.ID)
@@ -100,7 +101,7 @@ func AuthorizeMiddleware() func(http.Handler) http.Handler {
 				return
 			}
 			if !Authorize(user.AccessMode, user.Rules, r.Method, r.URL.Path) {
-				http.Error(w, "forbidden", http.StatusForbidden)
+				writeJSONError(w, http.StatusForbidden, "FORBIDDEN", "access denied by per-user rule")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -119,7 +120,7 @@ func AdminRequired() func(http.Handler) http.Handler {
 			}
 			user := UserFromContext(r.Context())
 			if user == nil || user.Kind != KindAdmin {
-				http.Error(w, "admin token required", http.StatusForbidden)
+				writeJSONError(w, http.StatusForbidden, "ADMIN_REQUIRED", "admin token required")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -149,7 +150,7 @@ func ScopeSelfOrAdmin(readParam func(r *http.Request, name string) string) func(
 			}
 			caller := UserFromContext(r.Context())
 			if caller == nil {
-				http.Error(w, "authentication required", http.StatusUnauthorized)
+				writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 				return
 			}
 			if caller.Kind == KindAdmin {
@@ -158,7 +159,7 @@ func ScopeSelfOrAdmin(readParam func(r *http.Request, name string) string) func(
 			}
 			target := strings.ToLower(readParam(r, "username"))
 			if target == "" || target != strings.ToLower(caller.Username) {
-				http.Error(w, "forbidden — can only manage own tokens", http.StatusForbidden)
+				writeJSONError(w, http.StatusForbidden, "FORBIDDEN", "can only manage own tokens")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -186,7 +187,17 @@ func unauthorized(w http.ResponseWriter) {
 	// Deliberately no WWW-Authenticate header. That header triggers the
 	// browser's native Basic Auth popup; we don't want it because the
 	// SPA has its own /login page and catches 401s via apiFetch.
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
+	writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
+}
+
+// writeJSONError mirrors server.respondError for the auth package. Kept
+// inline to avoid an import cycle (server depends on auth, not the
+// other way around). Every error path through the auth middleware
+// emits this shape so agents can JSON-parse error bodies uniformly.
+func writeJSONError(w http.ResponseWriter, status int, code, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "error": message})
 }
 
 func passThrough(r *http.Request, openSet map[string]struct{}) bool {
