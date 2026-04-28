@@ -11,11 +11,9 @@ import (
 // purposes. The store doesn't branch on it internally; it's recorded
 // in events + the activity log for audit.
 const (
-	OpSet       = "SET"
-	OpMerge     = "MERGE"
-	OpDelete    = "DELETE"
-	OpIncrement = "INCREMENT"
-	OpCAS       = "CAS"
+	OpSet    = "SET"
+	OpMerge  = "MERGE"
+	OpDelete = "DELETE"
 )
 
 // ReadSingleton returns the on-disk envelope for a singleton key.
@@ -70,37 +68,11 @@ func (s *Store) Merge(key string, patch json.RawMessage, actor string) (*Envelop
 	})
 }
 
-// Increment adjusts a numeric singleton by the given delta. Creates the
-// key at `by` if it doesn't exist (so `INCREMENT new_key by 1` yields 1).
-// Returns ErrInvalidValue if the existing value isn't a JSON number.
-func (s *Store) Increment(key string, by float64, actor string) (*Envelope, error) {
-	return s.singletonWrite(key, OpIncrement, actor, "*", func(prev *Envelope) (json.RawMessage, error) {
-		var current float64
-		if prev != nil {
-			if err := json.Unmarshal(prev.Value, &current); err != nil {
-				return nil, fmt.Errorf("%w: existing value at %q is not a number", ErrInvalidValue, key)
-			}
-		}
-		current += by
-		return json.Marshal(current)
-	})
-}
-
-// CAS performs an atomic compare-and-swap on a singleton's value.
-// Returns CASError (current envelope embedded) when expected doesn't
-// equal the on-disk value.
-func (s *Store) CAS(key string, expected, next json.RawMessage, actor string) (*Envelope, error) {
-	return s.singletonWrite(key, OpCAS, actor, "*", func(prev *Envelope) (json.RawMessage, error) {
-		var prevVal json.RawMessage
-		if prev != nil {
-			prevVal = prev.Value
-		}
-		if !jsonDeepEqual(prevVal, expected) {
-			return nil, &CASError{Current: prev}
-		}
-		return next, nil
-	})
-}
+// Increment + CAS were removed in Cut 2 of the rewrite — agents do
+// read-modify-write against the file's _meta.version for atomicity,
+// and the file-level CAS at the Set/UpsertItem layer covers
+// concurrent races. High-frequency counters belong on streams, not
+// singleton numerics.
 
 // DeleteSingleton removes a singleton key. Idempotent — "already gone"
 // returns nil. CAS via version: "" disables the check, "*" force-deletes.
@@ -269,19 +241,6 @@ func checkVersion(prev *Envelope, expected string) error {
 	return nil
 }
 
-// jsonDeepEqual returns true iff two JSON byte slices represent the
-// same logical value (whitespace, key order, and trailing-newline
-// independent). Used by CAS — the spec says "same value", not "same
-// bytes".
-func jsonDeepEqual(a, b json.RawMessage) bool {
-	var av, bv any
-	if err := json.Unmarshal(a, &av); err != nil {
-		return false
-	}
-	if err := json.Unmarshal(b, &bv); err != nil {
-		return false
-	}
-	ab, _ := json.Marshal(av)
-	bb, _ := json.Marshal(bv)
-	return string(ab) == string(bb)
-}
+// jsonDeepEqual was the value-equality helper for CAS. CAS was
+// removed in Cut 2; the helper has no remaining callers and got
+// dropped along with it.

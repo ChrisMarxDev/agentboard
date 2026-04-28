@@ -60,10 +60,10 @@ func (s *Store) Search(opts SearchOpts) ([]SearchResult, error) {
 		case ShapeCollection:
 			items, _ := os.ReadDir(collectionDir(s.dataDir, e.Key))
 			for _, it := range items {
-				if it.IsDir() || !strings.HasSuffix(it.Name(), ".json") {
+				if it.IsDir() || !strings.HasSuffix(it.Name(), ".md") {
 					continue
 				}
-				id := strings.TrimSuffix(it.Name(), ".json")
+				id := strings.TrimSuffix(it.Name(), ".md")
 				if r, ok := scoreFile(filepath.Join(collectionDir(s.dataDir, e.Key), it.Name()), tokens); ok {
 					r.Key = e.Key
 					r.ID = id

@@ -56,7 +56,7 @@ func LoadCatalog(dataDir string) (*catalog, error) {
 			count := 0
 			latest := ""
 			for _, it := range items {
-				if it.IsDir() || !strings.HasSuffix(it.Name(), ".json") {
+				if it.IsDir() || !strings.HasSuffix(it.Name(), ".md") {
 					continue
 				}
 				count++
@@ -74,8 +74,8 @@ func LoadCatalog(dataDir string) (*catalog, error) {
 		}
 
 		switch {
-		case strings.HasSuffix(name, ".json"):
-			key := strings.TrimSuffix(name, ".json")
+		case strings.HasSuffix(name, ".md"):
+			key := strings.TrimSuffix(name, ".md")
 			fi, _ := e.Info()
 			env, err := readEnvelope(full)
 			if err != nil {
@@ -203,7 +203,7 @@ func (s *Store) touchCatalog(key string, shape string) {
 		count := 0
 		latest := ""
 		for _, it := range items {
-			if it.IsDir() || !strings.HasSuffix(it.Name(), ".json") {
+			if it.IsDir() || !strings.HasSuffix(it.Name(), ".md") {
 				continue
 			}
 			count++

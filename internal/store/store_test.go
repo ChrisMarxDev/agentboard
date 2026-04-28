@@ -98,57 +98,9 @@ func TestMergeNeverConflicts(t *testing.T) {
 	}
 }
 
-func TestIncrement(t *testing.T) {
-	s := newTestStore(t)
-	a, err := s.Increment("counter", 1, "alice")
-	if err != nil {
-		t.Fatalf("first increment: %v", err)
-	}
-	if string(a.Value) != "1" {
-		t.Fatalf("first: %s", a.Value)
-	}
-
-	b, err := s.Increment("counter", 41, "alice")
-	if err != nil {
-		t.Fatalf("second increment: %v", err)
-	}
-	if string(b.Value) != "42" {
-		t.Fatalf("after +41: %s", b.Value)
-	}
-}
-
-func TestIncrementOnNonNumber(t *testing.T) {
-	s := newTestStore(t)
-	_, _ = s.Set("k", json.RawMessage(`"hello"`), "", "alice")
-	_, err := s.Increment("k", 1, "alice")
-	if !errors.Is(err, ErrInvalidValue) {
-		t.Fatalf("want ErrInvalidValue, got %v", err)
-	}
-}
-
-func TestCASRoundtrip(t *testing.T) {
-	s := newTestStore(t)
-	_, _ = s.Set("k", json.RawMessage(`{"col":"todo"}`), "", "alice")
-
-	// Mismatch.
-	_, err := s.CAS("k", json.RawMessage(`{"col":"doing"}`), json.RawMessage(`{"col":"done"}`), "bob")
-	var casErr *CASError
-	if !errors.As(err, &casErr) {
-		t.Fatalf("want CASError on mismatch, got %v", err)
-	}
-	if casErr.Current == nil || !strings.Contains(string(casErr.Current.Value), "todo") {
-		t.Fatalf("CASError should embed current, got %+v", casErr.Current)
-	}
-
-	// Match.
-	env, err := s.CAS("k", json.RawMessage(`{"col":"todo"}`), json.RawMessage(`{"col":"doing"}`), "bob")
-	if err != nil {
-		t.Fatalf("CAS match: %v", err)
-	}
-	if !strings.Contains(string(env.Value), "doing") {
-		t.Fatalf("post-CAS: %s", env.Value)
-	}
-}
+// TestIncrement, TestIncrementOnNonNumber, TestCASRoundtrip removed
+// in Cut 2 — atomic ops were dropped in favour of file-level CAS via
+// _meta.version + agent-side read-modify-write.
 
 func TestWrongShape(t *testing.T) {
 	s := newTestStore(t)

@@ -50,10 +50,10 @@ func (s *Store) ListCollection(key string) ([]CollectionItem, error) {
 
 	items := make([]CollectionItem, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		id := strings.TrimSuffix(e.Name(), ".json")
+		id := strings.TrimSuffix(e.Name(), ".md")
 		env, err := readEnvelope(collectionItemPath(s.dataDir, key, id))
 		if err != nil {
 			// Skip unreadable items rather than failing the whole list —
@@ -113,21 +113,9 @@ func (s *Store) MergeItem(key, id string, patch json.RawMessage, actor string) (
 	})
 }
 
-// CASItem performs CAS on one collection item. Identical semantics to
-// the singleton CAS: returns CASError with current envelope on
-// expected-value mismatch.
-func (s *Store) CASItem(key, id string, expected, next json.RawMessage, actor string) (*Envelope, error) {
-	return s.itemWrite(key, id, OpCAS, actor, "*", func(prev *Envelope) (json.RawMessage, error) {
-		var prevVal json.RawMessage
-		if prev != nil {
-			prevVal = prev.Value
-		}
-		if !jsonDeepEqual(prevVal, expected) {
-			return nil, &CASError{Current: prev}
-		}
-		return next, nil
-	})
-}
+// CASItem was removed in Cut 2 — same reasoning as the singleton CAS.
+// Agents read-modify-write the whole item; the file-level _meta.version
+// CAS handles concurrent races.
 
 // DeleteItem removes one collection item. Idempotent.
 func (s *Store) DeleteItem(key, id, version, actor string) error {

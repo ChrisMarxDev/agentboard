@@ -87,16 +87,8 @@ assert_jq     "deep merge preserved b"    "/api/v2/data/smoke.cfg" ".value.b" "2
 assert_jq     "deep merge updated a"      "/api/v2/data/smoke.cfg" ".value.a" "99"
 assert_jq     "deep merge added c"        "/api/v2/data/smoke.cfg" ".value.c" "3"
 
-# --- Increment ---
-assert_status "INCREMENT first"          POST "/api/v2/data/smoke.counter?op=increment" 200 \
-  -H 'Content-Type: application/json' -d '{"by":1}'
-assert_status "INCREMENT again"          POST "/api/v2/data/smoke.counter?op=increment" 200 \
-  -H 'Content-Type: application/json' -d '{"by":41}'
-assert_jq     "counter is 42"             "/api/v2/data/smoke.counter" ".value" "42"
-
-# --- CAS action ---
-assert_status "CAS mismatch -> 409"      POST "/api/v2/data/smoke.counter?op=cas" 409 \
-  -H 'Content-Type: application/json' -d '{"expected":999,"new":0}'
+# Atomic increment + CAS removed in Cut 2 — agents do read-modify-write
+# under the file-level _meta.version CAS.
 
 # --- Collection ---
 assert_status "Upsert task-1"            PUT "/api/v2/data/smoke.kanban/task-1" 200 \

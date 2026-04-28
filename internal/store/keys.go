@@ -53,7 +53,7 @@ func ValidateID(id string) error {
 // directory separators. This avoids the "is dev.metrics a file or
 // directory?" ambiguity that hierarchical layouts force on us.
 func singletonPath(dataDir, key string) string {
-	return filepath.Join(dataDir, key+".json")
+	return filepath.Join(dataDir, key+".md")
 }
 
 // collectionDir returns the absolute directory for a collection key.
@@ -65,7 +65,7 @@ func collectionDir(dataDir, key string) string {
 // collectionItemPath returns the absolute path for one item in a
 // collection.
 func collectionItemPath(dataDir, key, id string) string {
-	return filepath.Join(dataDir, key, id+".json")
+	return filepath.Join(dataDir, key, id+".md")
 }
 
 // streamPath returns the absolute file path for a stream's active

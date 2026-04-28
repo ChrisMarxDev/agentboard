@@ -459,57 +459,12 @@ func (s *Server) handleV2Action(w http.ResponseWriter, r *http.Request, key, id 
 		}
 		writeJSON(w, http.StatusOK, line)
 
-	case "increment":
-		var body struct {
-			By float64 `json:"by"`
-		}
-		// Empty body → +1 by default.
-		if r.ContentLength > 0 {
-			if err := readJSONBody(r, &body); err != nil {
-				writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-				return
-			}
-		}
-		if body.By == 0 {
-			body.By = 1
-		}
-		env, err := s.FileStore.Increment(key, body.By, actor)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, env)
-
-	case "cas":
-		var body struct {
-			Expected json.RawMessage `json:"expected"`
-			New      json.RawMessage `json:"new"`
-		}
-		if err := readJSONBody(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-			return
-		}
-		if len(body.Expected) == 0 || len(body.New) == 0 {
-			writeError(w, http.StatusBadRequest, "missing_field",
-				`cas body needs {"expected": <current value>, "new": <next value>}`)
-			return
-		}
-		var env *store.Envelope
-		var err error
-		if id == "" {
-			env, err = s.FileStore.CAS(key, body.Expected, body.New, actor)
-		} else {
-			env, err = s.FileStore.CASItem(key, id, body.Expected, body.New, actor)
-		}
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, env)
-
 	default:
+		// `op=increment` and `op=cas` were removed in Cut 2 — agents
+		// do read-modify-write against the file's _meta.version. The
+		// only structured op now is `op=append` (streams).
 		writeError(w, http.StatusBadRequest, "unknown_op",
-			`?op must be one of: append, increment, cas`)
+			`?op must be one of: append (streams). Use PUT/PATCH for read-modify-write writes against the file-level CAS.`)
 	}
 }
 

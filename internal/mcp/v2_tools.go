@@ -92,32 +92,10 @@ func (s *Server) v2ToolDefs() []ToolDef {
 				"required": []string{"key"},
 			},
 		},
-		{
-			Name:        "agentboard_v2_increment",
-			Description: "Atomically add to a numeric singleton. Default `by` is 1. Conflict-free.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"key": map[string]string{"type": "string", "description": "Dotted key"},
-					"by":  map[string]string{"type": "number", "description": "Delta (positive or negative); default 1"},
-				},
-				"required": []string{"key"},
-			},
-		},
-		{
-			Name:        "agentboard_v2_cas",
-			Description: "Atomic test-and-set. Succeeds iff current value deeply equals `expected`; returns 409 with current value on mismatch.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"key":      map[string]string{"type": "string", "description": "Dotted key"},
-					"id":       map[string]string{"type": "string", "description": "Item ID (omit for singleton)"},
-					"expected": map[string]string{"description": "JSON value the current state must equal"},
-					"new":      map[string]string{"description": "JSON value to write on match"},
-				},
-				"required": []string{"key", "expected", "new"},
-			},
-		},
+		// agentboard_v2_increment + agentboard_v2_cas were removed in
+		// Cut 2 — atomic field-level ops are out, agents read-modify-
+		// write against the file's _meta.version. The file-level CAS
+		// at the write op layer handles concurrent races.
 		{
 			Name:        "agentboard_v2_delete",
 			Description: "Delete a key (any shape) or one collection item. Idempotent. Pass `confirm: true` to delete a non-empty collection.",
@@ -194,10 +172,7 @@ func (s *Server) dispatchV2(name string, args map[string]json.RawMessage) (any, 
 		return s.toolV2Merge(args)
 	case "agentboard_v2_append":
 		return s.toolV2Append(args)
-	case "agentboard_v2_increment":
-		return s.toolV2Increment(args)
-	case "agentboard_v2_cas":
-		return s.toolV2CAS(args)
+	// agentboard_v2_increment + _v2_cas dispatched here pre-Cut-2.
 	case "agentboard_v2_delete":
 		return s.toolV2Delete(args)
 	case "agentboard_v2_history":
@@ -384,49 +359,9 @@ func (s *Server) toolV2Append(args map[string]json.RawMessage) (any, *RPCError, 
 	return mcpJSON(line), nil, true
 }
 
-func (s *Server) toolV2Increment(args map[string]json.RawMessage) (any, *RPCError, bool) {
-	key := getString(args, "key")
-	if key == "" {
-		return nil, &RPCError{Code: -32602, Message: "key required"}, true
-	}
-	by := 1.0
-	if raw, ok := args["by"]; ok && len(raw) > 0 {
-		if err := json.Unmarshal(raw, &by); err != nil {
-			return nil, &RPCError{Code: -32602, Message: "`by` must be a number"}, true
-		}
-	}
-	env, err := s.FileStore.Increment(key, by, s.actor())
-	if err != nil {
-		return nil, storeRPCErr(err), true
-	}
-	return mcpJSON(env), nil, true
-}
-
-func (s *Server) toolV2CAS(args map[string]json.RawMessage) (any, *RPCError, bool) {
-	key := getString(args, "key")
-	if key == "" {
-		return nil, &RPCError{Code: -32602, Message: "key required"}, true
-	}
-	expected := args["expected"]
-	next := args["new"]
-	if len(expected) == 0 || len(next) == 0 {
-		return nil, &RPCError{Code: -32602, Message: "cas requires both `expected` and `new`"}, true
-	}
-	id := getString(args, "id")
-	actor := s.actor()
-
-	var env *store.Envelope
-	var err error
-	if id != "" {
-		env, err = s.FileStore.CASItem(key, id, expected, next, actor)
-	} else {
-		env, err = s.FileStore.CAS(key, expected, next, actor)
-	}
-	if err != nil {
-		return nil, storeRPCErr(err), true
-	}
-	return mcpJSON(env), nil, true
-}
+// toolV2Increment + toolV2CAS removed in Cut 2 — agents read-modify-
+// write against the file's _meta.version for atomicity, and the
+// file-level CAS at the Set/UpsertItem layer covers concurrent races.
 
 func (s *Server) toolV2Delete(args map[string]json.RawMessage) (any, *RPCError, bool) {
 	key := getString(args, "key")
