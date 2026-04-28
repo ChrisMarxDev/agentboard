@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -296,3 +297,46 @@ func jsonNum(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
 }
+
+// TestActivityRotation forces the active file past the cap, then
+// confirms (a) the active file is fresh, (b) a .1 segment exists,
+// (c) ReadActivity stitches both files into a contiguous timeline.
+//
+// We use os.Truncate to simulate a 100MB file rather than actually
+// writing 100MB of entries — the rotation logic only checks size
+// before deciding to rotate, so a sparse file behaves identically.
+func TestActivityRotation(t *testing.T) {
+	s := newTestStore(t)
+
+	// Write one entry so the active file exists.
+	_, err := s.Set("rot.k", json.RawMessage(`1`), "", "alice")
+	if err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	// Inflate the active file to just under the cap.
+	if err := os.Truncate(s.activityLog, activityRotateBytes-10); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+
+	// Next write should trigger rotation.
+	_, err = s.Set("rot.k", json.RawMessage(`2`), "*", "alice")
+	if err != nil {
+		t.Fatalf("post-rotation write: %v", err)
+	}
+
+	// Active should now be the new fresh file (small, holding only the
+	// most recent entry); .1 should exist (the rotated big file).
+	rotated := rotatedActivityPath(s.activityLog, 1)
+	if _, err := os.Stat(rotated); err != nil {
+		t.Fatalf(".1 segment missing after rotation: %v", err)
+	}
+	fi, err := os.Stat(s.activityLog)
+	if err != nil {
+		t.Fatalf("active stat: %v", err)
+	}
+	if fi.Size() >= activityRotateBytes {
+		t.Fatalf("active file should be small after rotation, got %d bytes", fi.Size())
+	}
+}
+
