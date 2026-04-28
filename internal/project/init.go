@@ -281,10 +281,3 @@ func seedAgentboardSkill(projectPath string) error {
 	return nil
 }
 
-// SeedSampleData was the legacy welcome-data seeder against the
-// SQLite KV. Cut 1 of the rewrite removed the KV layer; sample seeding
-// will return as Cut 5 against the unified MDX tree (writing
-// welcome/index.md with frontmatter + body + components instead of
-// scattering keys across data/welcome.*). Kept as a deliberate stub
-// so any caller that still references it gets a compiler error
-// rather than silent breakage — the whole signature changes.

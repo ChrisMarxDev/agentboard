@@ -73,15 +73,28 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve data keys in scope. Anything out-of-scope returns
-	// undefined to the client; not an error. The client was probably
-	// going to render an empty component and that's fine.
+	// Resolve data keys in scope. Two layered sources, in priority
+	// order:
 	//
-	// One backend now: the files-first store. The legacy SQLite KV
-	// was removed in Cut 1 of the rewrite. Envelope is unwrapped
-	// server-side so component code consumes the bare value.
+	//   1. The rendering page's own frontmatter — fields agents
+	//      authored alongside the body. `<Status source="col" />`
+	//      resolves to `frontmatter.col` without an external store
+	//      lookup. This is the primary data path in the rewrite:
+	//      data lives where it's displayed.
+	//   2. The files-first store — for cross-page references and
+	//      collection-shaped reads. Falls through when the page's
+	//      frontmatter doesn't have a matching top-level field.
 	dataOut := map[string]any{}
+	for k, v := range page.Frontmatter {
+		if !scope.CanReadData(k) {
+			continue
+		}
+		dataOut[k] = v
+	}
 	for key := range scope.DataKeys {
+		if _, already := dataOut[key]; already {
+			continue
+		}
 		if !scope.CanReadData(key) {
 			continue
 		}

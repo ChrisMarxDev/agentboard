@@ -74,6 +74,12 @@ type PageInfo struct {
 	// If-Match for optimistic concurrency.
 	Etag  string `json:"etag"`
 	Order int    `json:"order"`
+	// Frontmatter is the full YAML frontmatter as a generic map. Used
+	// by the view broker to splat user-authored fields into the page
+	// bundle so `<Status source="title">` resolves against the page's
+	// own frontmatter without an external store lookup. _meta is
+	// stripped during parse — server-owned, never agent-readable here.
+	Frontmatter map[string]any `json:"frontmatter,omitempty"`
 }
 
 // PageManager manages MDX pages for a project.
@@ -109,14 +115,15 @@ func (pm *PageManager) ScanPages() {
 			title = "Home"
 		}
 		pm.pages["index"] = &PageInfo{
-			Path:    "/",
-			File:    "index.md",
-			Title:   title,
-			Source:  source,
-			Summary: fm.Summary,
-			Tags:    fm.Tags,
-			Etag:    pageEtag(source),
-			Order:   0,
+			Path:        "/",
+			File:        "index.md",
+			Title:       title,
+			Source:      source,
+			Summary:     fm.Summary,
+			Tags:        fm.Tags,
+			Frontmatter: fm.All,
+			Etag:        pageEtag(source),
+			Order:       0,
 		}
 	}
 
@@ -166,13 +173,14 @@ func (pm *PageManager) ScanPages() {
 		collected = append(collected, scanned{
 			pagePath: pagePath,
 			info: &PageInfo{
-				Path:    urlPath,
-				File:    filepath.Join("content", relPath),
-				Title:   title,
-				Source:  source,
-				Summary: fm.Summary,
-				Tags:    fm.Tags,
-				Etag:    pageEtag(source),
+				Path:        urlPath,
+				File:        filepath.Join("content", relPath),
+				Title:       title,
+				Source:      source,
+				Summary:     fm.Summary,
+				Tags:        fm.Tags,
+				Frontmatter: fm.All,
+				Etag:        pageEtag(source),
 			},
 		})
 		return nil
@@ -336,15 +344,20 @@ func (pm *PageManager) MovePage(from, to string) error {
 // of them and the server won't reject it (per #8); search quality just
 // degrades for that page until a summary is filled in.
 type frontmatter struct {
-	Title   string   `yaml:"title"`
-	Summary string   `yaml:"summary"`
-	Tags    []string `yaml:"tags"`
+	Title   string         `yaml:"title"`
+	Summary string         `yaml:"summary"`
+	Tags    []string       `yaml:"tags"`
+	All     map[string]any `yaml:"-"` // full frontmatter for component source-resolution
 }
 
 // parseFrontmatter extracts the YAML frontmatter block and returns the
-// remaining source. Unrecognized fields are ignored; malformed YAML leaves
-// the returned struct zero-valued and passes the raw content through as
-// source so the page still renders.
+// remaining source. Unrecognized fields are ignored at the typed-struct
+// layer but preserved in `All` (full map[string]any) so components like
+// `<Status source="col" />` can resolve fields the page authored
+// without forcing every field into the typed struct.
+//
+// Malformed YAML leaves the returned struct zero-valued and passes the
+// raw content through as source so the page still renders.
 func parseFrontmatter(content string) (fm frontmatter, source string) {
 	if !strings.HasPrefix(content, "---\n") {
 		return fm, content
@@ -358,8 +371,15 @@ func parseFrontmatter(content string) (fm frontmatter, source string) {
 	block := content[4 : 4+end]
 	source = content[4+end+5:] // skip the closing ---\n
 
-	// Best-effort: ignore unmarshal errors so a typo'd frontmatter doesn't
-	// break the page. Title falls back to the filename-derived title upstream.
+	// Typed parse for the well-known fields.
 	_ = yaml.Unmarshal([]byte(block), &fm)
+	// Untyped parse so the broker can splat user-authored fields into
+	// the page bundle. _meta is dropped — server-owned, agents echo it
+	// only on writes.
+	all := map[string]any{}
+	if err := yaml.Unmarshal([]byte(block), &all); err == nil {
+		delete(all, "_meta")
+		fm.All = all
+	}
 	return fm, source
 }

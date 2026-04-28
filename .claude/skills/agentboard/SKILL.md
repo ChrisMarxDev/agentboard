@@ -76,45 +76,57 @@ The `admin` CLI resolves `--project` like `serve` does; forget the flag and you'
 
 ---
 
-## v2 store surface (files-first)
+## Store surface (files-first)
 
-A parallel data surface lives at `/api/*` backed by **files on disk** instead of SQLite. Full design in [`spec-file-storage.md`](spec-file-storage.md). Key points the agent needs to know:
+The data surface lives at `/api/*` and is backed by `.md` files on disk with YAML frontmatter. Full design in [`spec-rework.md`](../../../spec-rework.md). Key points:
 
-**Three immutable shapes** per key, set on first write:
-- **Singleton** — one value, atomic write. `data/<key>.json` on disk.
-- **Collection** — per-ID files. `data/<key>/<id>.json`. Siblings never contend.
-- **Stream** — append-only NDJSON. `data/<key>.ndjson`. Lock-free.
+**Two leaf types:**
+- **`.md` doc** — frontmatter holds structured fields, body holds optional prose + JSX. Used for singletons, collection items, and pages alike.
+- **`.ndjson` stream** — append-only logs / telemetry / activity. Lock-free for lines ≤ 4 KB.
 
-**Envelope format** every value is wrapped in:
-```json
-{"_meta": {"version", "created_at", "modified_by", "shape"}, "value": <...>}
+A folder of `.md` files is a collection. `tasks/index.md` is the page; `tasks/task-42.md` is one card. The shape (singleton vs collection) is implicit from "is there a folder at that path?".
+
+**On-disk format:**
+```mdx
+---
+_meta:
+  version: 2026-04-28T...
+  created_at: ...
+  modified_by: alice
+  shape: singleton
+title: Build the kanban       # user fields splat at top level
+col: in-progress
+priority: 2
+---
+
+Optional markdown body here, with JSX components inline.
 ```
-The `version` is a server-monotonic timestamp; agents echo it back on `PUT`/`PATCH` for optimistic CAS. Conflict responses (412) **embed the current envelope** — no follow-up `GET` needed.
+For primitives/arrays, use `value:` instead of splatting top-level keys.
 
-**Endpoints:**
-- `GET  /api/index` — Tier 1 catalog (every key, shape, version)
-- `GET  /api/search?q=…` — Tier 2 substring search across values
-- `GET  /api/data/<key>[/<id>]` — read; shape determined by catalog
-- `PUT  /api/data/<key>[/<id>]` — set/upsert; CAS via `_meta.version` or `If-Match` header
-- `PATCH /api/data/<key>[/<id>]` — RFC 7396 merge; never conflicts
-- `POST /api/data/<key>?op=append|increment|cas` — atomic ops
-- `DELETE /api/data/<key>[/<id>]` — idempotent
-- `GET  /api/data/<key>/history` — per-key NDJSON, last 100 entries
-- `GET  /api/activity` — global write log, filterable by actor/path/time
+**Endpoints (one namespace, no v2):**
+- `GET  /api/index` — flat catalog of every leaf
+- `GET  /api/search?q=…` — substring search across values
+- `GET  /api/data/<path>[/<id>]` — read doc, list collection, or tail stream
+- `PUT  /api/data/<path>[/<id>]` — full write, CAS via `_meta.version` or `If-Match`
+- `PATCH /api/data/<path>[/<id>]` — RFC 7396 merge on frontmatter
+- `POST /api/data/<path>?op=append` — stream append (the only `?op=` left)
+- `DELETE /api/data/<path>[/<id>]` — idempotent
+- `GET  /api/data/<path>/history` — per-doc NDJSON history
+- `GET  /api/activity` — global write log
 
-**Rate limit:** 200 writes/min sustained, 50/sec burst, per token. Reads bypass. `429` carries `Retry-After` + structured body. If you hit it in normal flow, switch to a batched op (`?by=N` increment, `items: [...]` append).
+**Atomic ops are gone** — no INCREMENT, no field-level CAS. Agents read-modify-write the whole doc; the file-level `_meta.version` CAS handles concurrent writers.
+
+**Rate limit:** 200 writes/min sustained, 50/sec burst per token. Reads bypass. `429` carries `Retry-After` and a structured body.
 
 **Binary uploads — kill base64:**
 - `POST /api/files/request-upload` mints a one-shot URL
-- Then `curl -X PUT --data-binary @file <upload_url>`
+- `curl -X PUT --data-binary @file <upload_url>`
 - Or via MCP: `agentboard_request_file_upload` returns the URL
 - Tokens are one-shot, TTL 5 min
 
-**Live mirror component:** `<DataView source="some.key" />` renders the envelope live in any MDX page. Updates on every SSE event. Read-only by design.
+**MCP tools (10):** `agentboard_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Plus the page-only legacy: `agentboard_search_pages`, `agentboard_list_pages`, `agentboard_read_page`, `agentboard_write_page`, `agentboard_delete_page`, `agentboard_list_components`, `agentboard_read_component`, `agentboard_grab`, `agentboard_list_skills`, `agentboard_get_skill`, `agentboard_list_errors`, `agentboard_clear_errors`, plus the team / lock / webhook tools.
 
-**MCP tools (12):** `agentboard_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_increment`, `_cas`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Prefer these over the legacy resource-CRUD tools — same data, smaller surface, conflict-aware errors.
-
-**Read path through the dashboard:** the view broker reads from BOTH stores (legacy SQLite first, files-first as fallback). Existing `<Status source="key" />` etc. on a page transparently picks up v2 keys. SSE events for v2 writes are re-shaped into the legacy `data` event so live updates work without component changes.
+**Backup:** `agentboard backup --to ./snapshot.tar.gz` and `agentboard restore --from ./snapshot.tar.gz`. Tar excludes SQLite WAL/SHM and the bootstrap-secret URL.
 
 ---
 

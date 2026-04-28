@@ -2,7 +2,7 @@
 
 > **Status**: Ready for implementation. Experimental phase — we are testing hypotheses, so expect iteration on specifics, but the architectural shape is locked.
 
-> **Update (2026-04-28)** — §5 (Data Layer) and §16 (SQLite Schema Reference) below describe the *legacy* SQLite-backed KV store. A files-first replacement is shipping in parallel under [`spec-file-storage.md`](spec-file-storage.md): three immutable shapes per key, server-monotonic timestamp versions, conflict responses with embedded current state, presigned uploads, rate-limited writes. Mounted at `/api/*` and exposed via the `agentboard_*` MCP tools. The dashboard view broker reads transparently from both stores during the migration window. **New work should target the v2 surface.**
+> **Update (2026-04-28)** — this spec is **superseded** by [`spec-rework.md`](spec-rework.md). The data layer described in §5 + §16 (SQLite KV) was deleted in the rewrite; the new contract is `.md` docs with YAML frontmatter, served at `/api/data/<path>` with `agentboard_*` MCP tools. [`concept.md`](concept.md) holds the product-level "what/why" companion. The sections below are retained for historical context only.
 
 ---
 
