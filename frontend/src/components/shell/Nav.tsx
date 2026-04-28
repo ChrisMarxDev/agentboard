@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Inbox as InboxIcon, LogOut, Magnet, Search, Users as UsersIcon, X } from 'lucide-react'
 import { clearToken, getToken, redirectToLogin } from '../../lib/session'
 import { ThemeSwitch } from './ThemeSwitch'
@@ -259,6 +259,9 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
         </div>
       </div>
 
+      <NewProjectButton />
+
+
       <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
         {titleMatchEmpty && !contentSearchReady && (
           <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -487,3 +490,147 @@ function TopNavItems({ activePath }: { activePath: string }) {
 // SystemNavItems is gone — Auth got renamed to "Members" and folded
 // into TopNavItems above. Inbox + Members are the only two non-content
 // destinations the shell exposes.
+
+// NewProjectButton creates a new project board under tasks/<slug>.md,
+// pre-seeded with a Kanban using the canonical column order. Click →
+// inline input → type project name → Enter creates the page and
+// navigates to it. The page tree picks up the new page via the usePages
+// SSE refresh; the user lands on an empty board ready to + New task.
+function NewProjectButton() {
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const navigate = useNavigate()
+
+  function slugify(s: string): string {
+    return s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'project'
+  }
+
+  async function pageExists(path: string): Promise<boolean> {
+    const res = await fetch(`/api/content/${path}`, {
+      method: 'HEAD',
+      headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+    })
+    return res.ok
+  }
+
+  async function uniqueSlug(base: string): Promise<string> {
+    let slug = base
+    for (let i = 2; await pageExists(`tasks/${slug}`); i++) {
+      slug = `${base}-${i}`
+      if (i > 200) throw new Error('too many name collisions')
+    }
+    return slug
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    const n = name.trim()
+    if (!n) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const slug = await uniqueSlug(slugify(n))
+      const body = `---
+title: ${JSON.stringify(n)}
+---
+
+# ${n}
+
+<Kanban groupBy="col" />
+`
+      const res = await fetch(`/api/content/tasks/${slug}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'text/markdown',
+          Authorization: `Bearer ${getToken() ?? ''}`,
+        },
+        body,
+      })
+      if (!res.ok) {
+        let msg = `create ${res.status}`
+        try {
+          const j = (await res.json()) as { error?: string; message?: string }
+          msg = j.error ?? j.message ?? msg
+        } catch { /* ignore */ }
+        throw new Error(msg)
+      }
+      setName('')
+      setOpen(false)
+      navigate(`/tasks/${slug}`)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'create failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="px-2 pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="w-full text-sm rounded-md py-1.5 px-2 inline-flex items-center gap-1.5"
+          style={{
+            background: 'transparent',
+            border: '1px dashed var(--border)',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          + New project
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="px-2 pb-2 flex gap-1.5">
+      <input
+        autoFocus
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            setOpen(false)
+            setName('')
+            setErr(null)
+          }
+        }}
+        placeholder="Project name…"
+        className="flex-1 text-sm rounded-md px-2 py-1"
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--accent)',
+          color: 'var(--text)',
+          outline: 'none',
+        }}
+      />
+      <button
+        type="submit"
+        disabled={busy || !name.trim()}
+        className="text-xs rounded-md px-2 py-1"
+        style={{
+          background: name.trim() ? 'var(--accent)' : 'var(--bg-secondary)',
+          color: name.trim() ? 'white' : 'var(--text-secondary)',
+          border: 'none',
+          cursor: name.trim() ? 'pointer' : 'default',
+        }}
+      >
+        {busy ? '…' : 'Create'}
+      </button>
+      {err && (
+        <span className="text-xs self-center" style={{ color: 'var(--error)' }}>
+          {err}
+        </span>
+      )}
+    </form>
+  )
+}

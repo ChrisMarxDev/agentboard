@@ -73,17 +73,17 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve data keys in scope. Two layered sources, in priority
+	// Resolve data keys in scope. Three layered sources, in priority
 	// order:
 	//
-	//   1. The rendering page's own frontmatter — fields agents
-	//      authored alongside the body. `<Status source="col" />`
-	//      resolves to `frontmatter.col` without an external store
-	//      lookup. This is the primary data path in the rewrite:
-	//      data lives where it's displayed.
-	//   2. The files-first store — for cross-page references and
-	//      collection-shaped reads. Falls through when the page's
-	//      frontmatter doesn't have a matching top-level field.
+	//   1. The rendering page's own frontmatter — `<Status source="col" />`
+	//      resolves to `frontmatter.col`. Primary path; data lives
+	//      where it's displayed.
+	//   2. Folder-source `source="path/"` (trailing slash) — walks the
+	//      page tree for children under `path/` and bundles each
+	//      child's frontmatter as a row. Powers `<Kanban source="tasks/">`
+	//      against a real folder of `.md` cards.
+	//   3. The files-first store — for store-only data keys.
 	dataOut := map[string]any{}
 	for k, v := range page.Frontmatter {
 		if !scope.CanReadData(k) {
@@ -97,6 +97,12 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		}
 		if !scope.CanReadData(key) {
 			continue
+		}
+		if strings.HasSuffix(key, "/") {
+			if rows, ok := folderChildren(s.Pages, key); ok {
+				dataOut[key] = rows
+				continue
+			}
 		}
 		if v, ok := readV2Unwrapped(s.FileStore, key); ok {
 			dataOut[key] = v
@@ -480,6 +486,74 @@ func unwrapV2ForBroadcast(fs *store.Store, payload []byte) ([]byte, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// folderChildren resolves a `source="path/"` reference against the
+// page tree. Walks pages whose path is rooted at `path/`, excluding
+// the index page itself, and returns one row per child with the
+// child's frontmatter splatted at the top + an `id` field derived
+// from the filename. Components like `<Kanban source="tasks/">` use
+// this to render a real folder of `.md` docs as cards.
+//
+// Pages whose name matches a sibling subfolder (the "folder-index"
+// pattern, where `tasks/concept-rollout.md` is the index of the
+// `tasks/concept-rollout/` folder) are skipped — they're navigation
+// landmarks, not collection items.
+//
+// Returns ok=false when the prefix has zero matches; caller falls
+// through to the file store.
+func folderChildren(pm *mdx.PageManager, key string) ([]map[string]any, bool) {
+	if pm == nil {
+		return nil, false
+	}
+	prefix := strings.TrimSuffix(key, "/")
+	prefix = strings.TrimPrefix(prefix, "/")
+	if prefix == "" {
+		return nil, false
+	}
+
+	// Pass 1: discover sub-folder names so we can skip their index
+	// pages in pass 2. A sub-folder exists wherever a page sits
+	// >1 level deep beneath `prefix/`.
+	subfolders := map[string]bool{}
+	for _, p := range pm.ListPages() {
+		path := strings.TrimPrefix(p.Path, "/")
+		if !strings.HasPrefix(path, prefix+"/") {
+			continue
+		}
+		rest := path[len(prefix)+1:]
+		if i := strings.Index(rest, "/"); i > 0 {
+			subfolders[rest[:i]] = true
+		}
+	}
+
+	// Pass 2: collect direct children that aren't folder indices.
+	rows := []map[string]any{}
+	for _, p := range pm.ListPages() {
+		path := strings.TrimPrefix(p.Path, "/")
+		if !strings.HasPrefix(path, prefix+"/") {
+			continue
+		}
+		rest := path[len(prefix)+1:]
+		if rest == "" || strings.Contains(rest, "/") {
+			continue
+		}
+		// Folder-index pages: `<prefix>/archive.md` is the index of
+		// `<prefix>/archive/` — show in the page tree, not in the
+		// collection feed.
+		if subfolders[rest] {
+			continue
+		}
+		row := map[string]any{"id": rest, "title": p.Title}
+		for k, v := range p.Frontmatter {
+			row[k] = v
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	return rows, true
 }
 
 // readV2Unwrapped pulls a key from the files-first store and returns

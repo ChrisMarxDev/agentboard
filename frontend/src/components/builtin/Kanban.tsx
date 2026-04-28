@@ -22,6 +22,30 @@ interface KanbanProps {
   titleField?: string
 }
 
+// KNOWN_COL_ORDER is the canonical workflow order for `col`-shaped
+// kanbans. Anything not in this list slots in alphabetically after the
+// known set. Set explicit `columns={[...]}` on the Kanban to override.
+const KNOWN_COL_ORDER = [
+  'backlog',
+  'todo',
+  'in-progress', 'in_progress', 'doing',
+  'review',
+  'done', 'shipped',
+  'cancelled', 'archive',
+]
+
+function defaultColOrder(present: string[], groupBy: string): string[] {
+  // Only apply the workflow heuristic when the page is grouped by the
+  // canonical "col" field; for other groupBy keys, fall back to the
+  // discovery order the items naturally produce (alphabetical).
+  if (groupBy !== 'col') return present
+  const set = new Set(present)
+  const known = KNOWN_COL_ORDER.filter(c => set.has(c))
+  const knownSet = new Set(known)
+  const others = present.filter(p => !knownSet.has(p)).sort()
+  return [...known, ...others]
+}
+
 // orderOf returns a comparable numeric key for sorting within a column.
 // Cards without an explicit `order` field are placed after ordered cards,
 // and the original array index is kept as a stable tiebreaker.
@@ -76,7 +100,7 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     })
   }
 
-  const colOrder = columns ?? Array.from(groups.keys())
+  const colOrder = columns ?? defaultColOrder(Array.from(groups.keys()), groupBy)
 
   const colLabels: Record<string, string> = {
     todo: 'To Do',
@@ -172,8 +196,15 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     }
   }
 
+  // Folder-collection boards (source ends with "/") are the only place
+  // the + New Task affordance makes sense — that's where each card is a
+  // real .md doc we can write to. For frontmatter-array boards (inline
+  // demo data), skip the button.
+  const isFolderBoard = effectiveSource.endsWith('/')
+
   return (
     <>
+      {isFolderBoard && <NewTaskBar source={effectiveSource} />}
       <div className="flex gap-4 overflow-x-auto my-4 pb-2">
         {colOrder.map(col => {
           const colItems = groups.get(col) ?? []
@@ -1625,6 +1656,174 @@ function BlockersBlock({
 // StatusPill renders a small colored pill for a column value. Reused
 // by the SubtasksBlock and BlockersBlock so both speak the same
 // vocabulary visually.
+// NewTaskBar renders an inline "+ New task" affordance above the
+// kanban. Click → input expands → type title → Enter posts a new
+// task .md to <source><slug>.md with frontmatter `{title, col: 'todo',
+// created: <today>}`. SSE refreshes the kanban automatically.
+//
+// Slug is derived from the title (lowercase, alphanumerics + hyphens).
+// Collisions are resolved by appending `-2`, `-3`, etc.
+function NewTaskBar({ source }: { source: string }) {
+  const [open, setOpen] = useState(false)
+  const [title, setTitle] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  function slugify(s: string): string {
+    return s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'task'
+  }
+
+  async function exists(path: string): Promise<boolean> {
+    const res = await apiFetch(`/api/content/${path}`, { method: 'HEAD' })
+    return res.ok
+  }
+
+  async function uniqueSlug(base: string): Promise<string> {
+    const folder = source.replace(/\/$/, '')
+    let slug = base
+    for (let i = 2; await exists(`${folder}/${slug}`); i++) {
+      slug = `${base}-${i}`
+      if (i > 200) throw new Error('too many name collisions')
+    }
+    return slug
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    const t = title.trim()
+    if (!t) return
+    setBusy(true)
+    setErr(null)
+    try {
+      const slug = await uniqueSlug(slugify(t))
+      const folder = source.replace(/\/$/, '')
+      const today = new Date().toISOString().slice(0, 10)
+      const body = `---
+title: ${JSON.stringify(t)}
+col: todo
+created: ${today}
+---
+
+# ${t}
+
+`
+      const res = await apiFetch(`/api/content/${folder}/${slug}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/markdown' },
+        body,
+      })
+      if (!res.ok) {
+        let msg = `create ${res.status}`
+        try {
+          const j = (await res.json()) as { error?: string; message?: string }
+          msg = j.error ?? j.message ?? msg
+        } catch { /* ignore */ }
+        throw new Error(msg)
+      }
+      setTitle('')
+      setOpen(false)
+      // SSE will broadcast the file-updated event; useData refetches.
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'create failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-sm inline-flex items-center gap-1.5 rounded-md px-3 py-1.5"
+        style={{
+          background: 'var(--bg)',
+          border: '1px dashed var(--border)',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+        }}
+      >
+        + New task
+      </button>
+    )
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className="flex items-center gap-2"
+      style={{
+        background: 'var(--bg)',
+        border: '1px solid var(--accent)',
+        borderRadius: '0.375rem',
+        padding: '0.4rem',
+      }}
+    >
+      <input
+        autoFocus
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') {
+            setOpen(false)
+            setTitle('')
+            setErr(null)
+          }
+        }}
+        placeholder="Task title…"
+        className="flex-1 text-sm"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          outline: 'none',
+          color: 'var(--text)',
+          padding: '0.25rem 0.5rem',
+        }}
+      />
+      <button
+        type="submit"
+        disabled={busy || !title.trim()}
+        className="text-sm inline-flex items-center rounded-md px-3 py-1"
+        style={{
+          background: title.trim() ? 'var(--accent)' : 'var(--bg-secondary)',
+          color: title.trim() ? 'white' : 'var(--text-secondary)',
+          border: 'none',
+          cursor: title.trim() ? 'pointer' : 'default',
+        }}
+      >
+        {busy ? 'Creating…' : 'Create'}
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(false)
+          setTitle('')
+          setErr(null)
+        }}
+        className="text-xs px-2"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+        }}
+      >
+        cancel
+      </button>
+      {err && (
+        <span className="text-xs" style={{ color: 'var(--error)' }}>
+          {err}
+        </span>
+      )}
+    </form>
+  )
+}
+
 function StatusPill({ col }: { col: string }) {
   const lower = col.toLowerCase()
   let color = 'var(--text-secondary)'
