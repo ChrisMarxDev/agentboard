@@ -17,10 +17,10 @@ interface ErrorsProps {
 }
 
 /**
- * Renders the recent-errors buffer from `/api/errors`. Lives alongside the
- * other built-ins but talks directly to the errors endpoint instead of going
- * through a data key — the buffer has dedupe/count semantics that don't fit
- * the key-value shape.
+ * Renders the recent-errors buffer from `/api/errors`. Talks directly to
+ * the errors endpoint instead of routing through a frontmatter `source=`
+ * — the buffer has dedupe/count + ring-buffer semantics that don't fit
+ * the doc model.
  *
  * Refreshes on `agentboard:error-reported` / `agentboard:error-cleared` SSE
  * events so the display matches the server within ~100 ms.

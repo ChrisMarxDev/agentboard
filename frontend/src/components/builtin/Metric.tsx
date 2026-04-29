@@ -7,8 +7,10 @@ interface MetricProps {
   trend?: number
   comparison?: string | number
   format?: 'number' | 'currency' | 'percent' | 'duration'
-  // Database-backed: pull from KV under this key. Value changes via
-  // `agentboard_set`/`/api/data/<key>` rebroadcast to subscribers.
+  // Source-backed: pull from a frontmatter field on this page (`source="rev"`),
+  // a folder collection (`source="tasks/"`), or a key on the files-first
+  // store (`source="sales.q3"`). Updates from `agentboard_write` /
+  // `PUT /api/data/<key>` rebroadcast over SSE to every subscriber.
   source?: string
 }
 
