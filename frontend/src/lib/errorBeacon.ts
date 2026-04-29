@@ -1,4 +1,4 @@
-import { apiFetch, getToken } from './session'
+import { apiFetch } from './session'
 
 /**
  * Beacon a render-time error to the server so agents can see what broke.
@@ -36,16 +36,11 @@ export function beaconError(payload: BeaconPayload): void {
   const body = JSON.stringify({ ...payload, page })
 
   try {
-    // Prefer sendBeacon so the post survives page navigation. Falls back
-    // to apiFetch. sendBeacon can't set headers, so we attach ?token= for
-    // authenticated instances — same fallback the SSE connection uses.
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      const tok = getToken()
-      const url = tok ? `/api/errors?token=${encodeURIComponent(tok)}` : '/api/errors'
-      const blob = new Blob([body], { type: 'application/json' })
-      navigator.sendBeacon(url, blob)
-      return
-    }
+    // sendBeacon would survive page navigation but it can't set
+    // the X-CSRF-Token header that the server requires for cookie-
+    // authenticated state-changing requests, so we always go via
+    // apiFetch. keepalive=true gives most browsers the same
+    // "survives nav" guarantee.
     apiFetch('/api/errors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

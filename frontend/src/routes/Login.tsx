@@ -1,14 +1,15 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ShieldCheck } from 'lucide-react'
-import { apiFetch, fetchSetupStatus, setToken } from '../lib/session'
+import { fetchSetupStatus, signInWithPassword } from '../lib/session'
 
-// /login — the token-paste surface.
+// /login — username + password sign-in surface.
 //
 // When the board is unclaimed AND an active first-admin invitation
-// exists, we show a hint linking to /invite/<id>. Otherwise the only
-// motion is: paste a token + click Sign in. Token validation calls
-// /api/me (moved from /api/admin/me so members + bots work too).
+// exists, we show a hint linking to /invite/<id>. Otherwise the
+// only motion is: type username + password + click Sign in. The
+// server sets the agentboard_session + agentboard_csrf cookies on
+// success; nothing is stored client-side.
 
 const CARD: CSSProperties = {
   background: 'var(--bg)',
@@ -63,7 +64,6 @@ function Page({ children }: { children: React.ReactNode }) {
   )
 }
 
-// Extended setup-status shape (v1 adds invite_url).
 interface SetupStatus {
   initialized: boolean
   invite_url?: string
@@ -100,36 +100,20 @@ function SignInForm({
   reason: string | null
   status: SetupStatus
 }) {
-  const [token, setTokenInput] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const unauthorized = reason === 'unauthorized'
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    const trimmed = token.trim()
-    if (!trimmed) return
+    if (!username.trim() || !password) return
     setBusy(true)
     setError(null)
     try {
-      const res = await apiFetch('/api/me', {
-        skipAuth: true,
-        headers: { Authorization: `Bearer ${trimmed}` },
-      })
-      if (res.ok) {
-        setToken(trimmed)
-        window.location.assign(next)
-        return
-      }
-      if (res.status === 401) {
-        setError('That token is invalid, revoked, or the user was deactivated.')
-      } else if (res.status === 403) {
-        // Edge: token valid but user was deactivated. Treat like 401.
-        setError('That token is no longer allowed.')
-      } else {
-        setError(`Unexpected response: ${res.status}`)
-      }
-      setBusy(false)
+      await signInWithPassword(username.trim(), password)
+      window.location.assign(next)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setBusy(false)
@@ -143,7 +127,7 @@ function SignInForm({
         <h1 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Sign in to AgentBoard</h1>
       </div>
       <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', margin: '0 0 1rem' }}>
-        Paste your access token below.
+        Enter your username and password.
       </p>
 
       {unauthorized && (
@@ -157,7 +141,7 @@ function SignInForm({
             fontSize: '0.8125rem',
           }}
         >
-          That token isn't valid here. Tokens never expire on their own — yours was revoked, never minted on this board, or your account was deactivated. Paste a working token, or ask an admin for an invitation.
+          Your session expired or was revoked. Sign in again to continue.
         </div>
       )}
 
@@ -182,14 +166,26 @@ function SignInForm({
       )}
 
       <form onSubmit={onSubmit}>
-        <label style={{ ...LABEL, display: 'block', marginBottom: '0.375rem' }}>Token</label>
+        <label style={{ ...LABEL, display: 'block', marginBottom: '0.375rem' }}>Username</label>
         <input
           autoFocus
+          type="text"
+          autoComplete="username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="alice"
+          style={INPUT}
+        />
+        <label style={{ ...LABEL, display: 'block', marginTop: '0.75rem', marginBottom: '0.375rem' }}>
+          Password
+        </label>
+        <input
           type="password"
-          value={token}
-          onChange={(e) => setTokenInput(e.target.value)}
-          placeholder="ab_…"
-          style={{ ...INPUT, fontFamily: 'ui-monospace, monospace' }}
+          autoComplete="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••"
+          style={INPUT}
         />
         {error && (
           <div
@@ -206,18 +202,19 @@ function SignInForm({
           </div>
         )}
         <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button type="submit" disabled={busy || !token.trim()} style={BTN_PRIMARY}>
+          <button type="submit" disabled={busy || !username.trim() || !password} style={BTN_PRIMARY}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
       </form>
 
       <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-        Don't have a token? Ask an admin to send you an invite. Lost an
-        existing one? Rotate on the host:{' '}
+        Don't have an account? Ask an admin to send you an invitation. Forgot
+        your password? An admin can reset it on the host with{' '}
         <code style={{ background: 'var(--bg-secondary)', padding: '0.1rem 0.3rem', borderRadius: '0.25rem' }}>
-          agentboard admin rotate &lt;user&gt; &lt;label&gt;
+          agentboard admin set-password &lt;you&gt;
         </code>
+        .
       </p>
     </Page>
   )

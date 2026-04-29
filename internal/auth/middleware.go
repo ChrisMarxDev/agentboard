@@ -17,7 +17,22 @@ const (
 	ctxUser ctxKey = iota + 1
 	ctxToken
 	ctxOAuth
+	ctxSession
 )
+
+// SessionCookieName is the cookie carrying the plaintext session
+// value. HttpOnly + SameSite=Lax + Path=/ — handlers set/clear it
+// when minting or revoking a session row.
+const SessionCookieName = "agentboard_session"
+
+// CSRFCookieName is the cookie used for double-submit CSRF
+// protection. Readable by the SPA so it can copy the value into the
+// X-CSRF-Token header on state-changing requests.
+const CSRFCookieName = "agentboard_csrf"
+
+// CSRFHeaderName is the header the CSRF middleware looks for on
+// state-changing requests when authentication came from a session.
+const CSRFHeaderName = "X-CSRF-Token"
 
 // UserFromContext returns the User attached to the request, or nil.
 func UserFromContext(ctx context.Context) *User {
@@ -37,6 +52,14 @@ func TokenFromContext(ctx context.Context) *UserToken {
 // the request, or nil. Populated only when the Bearer carried `oat_*`.
 func OAuthFromContext(ctx context.Context) *OAuthAccessRecord {
 	v, _ := ctx.Value(ctxOAuth).(*OAuthAccessRecord)
+	return v
+}
+
+// SessionFromContext returns the Session row that authenticated the
+// current request, or nil. Populated only when the request carried a
+// valid session cookie (no Authorization header).
+func SessionFromContext(ctx context.Context) *Session {
+	v, _ := ctx.Value(ctxSession).(*Session)
 	return v
 }
 
@@ -80,6 +103,27 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 			}
 			token := extractToken(r)
 			if token == "" {
+				// No bearer/basic/?token=. Try the session-cookie
+				// path. Session cookies authenticate browser users
+				// who logged in via /api/auth/login; on success the
+				// request continues with ctxUser set and ctxToken
+				// nil. The CSRF middleware further down the chain
+				// then enforces double-submit on state-changing
+				// requests, so a cross-origin form post can't ride
+				// the cookie.
+				if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+					user, sess, sErr := store.ResolveSession(cookie.Value)
+					if sErr == nil {
+						updater.touchSession(sess.ID)
+						ctx := context.WithValue(r.Context(), ctxUser, user)
+						ctx = context.WithValue(ctx, ctxSession, sess)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					// Fall through to the unauthorized handler;
+					// expired/revoked sessions look like missing
+					// auth to the rest of the stack.
+				}
 				unauthorized(w, r)
 				return
 			}
@@ -155,6 +199,52 @@ func AuthorizeMiddleware() func(http.Handler) http.Handler {
 			}
 			if !Authorize(user.AccessMode, user.Rules, r.Method, r.URL.Path) {
 				writeJSONError(w, http.StatusForbidden, "FORBIDDEN", "access denied by per-user rule")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// CSRFMiddleware enforces the double-submit cookie pattern on
+// state-changing requests authenticated by a session cookie. Bearer-
+// authenticated requests (PAT or OAuth access token) are exempt —
+// Bearer is not auto-attached by the browser, so cross-origin attacks
+// can't smuggle one along.
+//
+// Rule:
+//   - Method ∈ {GET, HEAD, OPTIONS} → pass.
+//   - SessionFromContext == nil → pass (request did not authenticate
+//     via cookie, so no CSRF risk to mitigate).
+//   - Otherwise: require X-CSRF-Token header equal to the
+//     CSRFCookieName cookie value, in constant time.
+//
+// The cookie itself is NOT HttpOnly (the SPA reads it via
+// document.cookie to populate the header). Mounted AFTER
+// TokenMiddleware so SessionFromContext is populated.
+func CSRFMiddleware() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Cookie-authenticated only; tokens skip.
+			if SessionFromContext(r.Context()) == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			cookie, err := r.Cookie(CSRFCookieName)
+			if err != nil || cookie.Value == "" {
+				writeJSONError(w, http.StatusForbidden, "CSRF_REQUIRED",
+					"missing CSRF cookie; reload the page")
+				return
+			}
+			header := r.Header.Get(CSRFHeaderName)
+			if !ConstantTimeStringEqual(cookie.Value, header) {
+				writeJSONError(w, http.StatusForbidden, "CSRF_MISMATCH",
+					"CSRF token mismatch; reload the page")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -306,6 +396,12 @@ func (u *usageUpdater) touch(tokenID string) {
 func (u *usageUpdater) touchOAuth(tokenID string) {
 	if u.shouldUpdate("oauth:" + tokenID) {
 		_ = u.store.TouchOAuthLastUsed(tokenID)
+	}
+}
+
+func (u *usageUpdater) touchSession(sessionID string) {
+	if u.shouldUpdate("sess:" + sessionID) {
+		_ = u.store.TouchSessionLastUsed(sessionID)
 	}
 }
 

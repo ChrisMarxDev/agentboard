@@ -500,16 +500,39 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// /api/introduction is always anonymous too: it's the
 		// paste-one-URL-to-teach-an-agent entry point. Under /api/ so a
 		// user page at "/introduction" can't collide.
-		OpenPaths: []string{"/api/setup/status", "/api/config", "/api/introduction", "/api/share/redeem"},
+		OpenPaths: []string{
+			"/api/setup/status",
+			"/api/config",
+			"/api/introduction",
+			"/api/share/redeem",
+			// /api/auth/login mints credentials, /api/auth/logout
+			// must succeed even when the cookie is invalid (so
+			// we can clear it). Both run anonymous; the handlers
+			// resolve the session themselves when relevant.
+			//
+			// /api/auth/me also runs anonymous so the SPA can
+			// probe sign-in status — the handler reads the
+			// session cookie directly and 401s when none is
+			// present, but no /login redirect is triggered.
+			"/api/auth/login",
+			"/api/auth/logout",
+			"/api/auth/me",
+		},
 	})
 	gatedAuth := publicroutes.Gate(s.ViewPublic, tokenMw, publicroutes.GateOptions{})
 	// Old share.Middleware was deleted — shares now redeem into a
 	// cookie (handleRedeemShare) and carry that cookie on every
 	// /api/view/* request. The view broker does its own authority
 	// resolution; this gated chain only covers bearer/public auth.
+	//
+	// CSRFMiddleware is mounted AFTER the auth chain so it can read
+	// SessionFromContext. It only fires on cookie-authenticated
+	// state-changing requests; bearer / OAuth-token requests pass
+	// through unchanged.
 	gated := func(r chi.Router) {
 		r.Use(gatedAuth)
 		r.Use(auth.AuthorizeMiddleware())
+		r.Use(auth.CSRFMiddleware())
 	}
 
 
@@ -630,6 +653,16 @@ func apiRoutes(s *Server) func(r chi.Router) {
 
 		// Per-user token management — self-or-admin scope.
 		s.registerUserTokenRoutes(r)
+
+		// Per-user password + session management — self-or-admin
+		// scope, mirroring the token surface.
+		s.registerUserPasswordRoutes(r)
+		s.registerUserSessionRoutes(r)
+
+		// Browser-session login surface (POST /login, /logout,
+		// GET /me). Open-listed in the middleware config above
+		// so they pass without a token.
+		s.registerAuthRoutes(r)
 
 		// Teams — readable by any authenticated token. Writes sit
 		// under /api/admin/teams (registerAdminTeamRoutes).

@@ -2,9 +2,11 @@
 
 ## Goals
 
-1. **One credential mechanism everywhere.** One token space, one HTTP auth
-   shape (`Authorization: Bearer`). No passwords, no sessions, no cookies,
-   no CSRF.
+1. **Two credentials by audience.** Bearer tokens (`ab_*`, `oat_*`) for
+   non-human callers (CLI, MCP clients, agents); a session cookie for
+   humans in a browser. Same identity behind both — the choice is purely
+   ergonomic: cookies get auto-attached + need CSRF, tokens are explicit +
+   need no CSRF.
 2. **Username is the identity.** Users are keyed by their username (not a
    UUID). `@alice` IS the user `alice` — no indirection.
 3. **Usernames are immutable and forever-reserved.** Normal edits can't
@@ -13,29 +15,33 @@
 4. **A user has many tokens.** Laptop, CI, Claude desktop — each labeled
    and individually rotatable. Rotating a token never changes attribution
    because writes record the username, not the token.
-5. **Hard door on who can manage users.** Only admin-kind tokens can hit
-   `/api/admin/*`. A member or bot token never grants user-management.
+5. **Hard door on who can manage users.** Only admin-kind tokens (or an
+   admin-kind session) can hit `/api/admin/*`. A member or bot never
+   grants user-management.
 6. **Emailless, filesystem-recoverable.** No SMTP, no recovery by email.
-   Lockout recovery is `agentboard admin rotate` on the host, or wiping
-   the DB so boot re-mints a first-admin invitation URL.
+   Lockout recovery is `agentboard admin rotate` (token) or
+   `agentboard admin set-password` / `revoke-sessions` (browser) on the
+   host, or wiping the DB so boot re-mints a first-admin invitation URL.
 7. **Per-user access scoping.** A user has an `access_mode` + `rules[]` that
-   apply to every token they own.
+   apply to every credential they own (token or session alike).
 
 ## Data model
 
-Two tables.
+Three tables: users, user_tokens, user_sessions.
 
 ```
 users
-  username        TEXT PRIMARY KEY COLLATE NOCASE  -- the identity
-  display_name    TEXT                             -- free-form, mutable
-  kind            TEXT NOT NULL                    -- 'admin' | 'agent'
-  avatar_color    TEXT                             -- deterministic HSL from username, stored
-  access_mode     TEXT NOT NULL                    -- 'allow_all' | 'restrict_to_list'
-  rules_json      TEXT NOT NULL DEFAULT '[]'
-  created_at      INTEGER NOT NULL
-  created_by      TEXT                             -- another username
-  deactivated_at  INTEGER                          -- soft delete; username stays reserved
+  username             TEXT PRIMARY KEY COLLATE NOCASE  -- the identity
+  display_name         TEXT                             -- free-form, mutable
+  kind                 TEXT NOT NULL                    -- 'admin' | 'member' | 'bot'
+  avatar_color         TEXT                             -- deterministic HSL from username, stored
+  access_mode          TEXT NOT NULL                    -- 'allow_all' | 'restrict_to_list'
+  rules_json           TEXT NOT NULL DEFAULT '[]'
+  created_at           INTEGER NOT NULL
+  created_by           TEXT                             -- another username
+  deactivated_at       INTEGER                          -- soft delete; username stays reserved
+  password_hash        TEXT                             -- argon2id; nullable (opt-in)
+  password_updated_at  INTEGER                          -- unix; nullable when no password
 
 user_tokens
   id              TEXT PRIMARY KEY                 -- uuid; tokens rotate so need their own id
@@ -45,6 +51,17 @@ user_tokens
   created_at      INTEGER NOT NULL
   last_used_at    INTEGER
   revoked_at      INTEGER                          -- soft delete per token
+
+user_sessions
+  id              TEXT PRIMARY KEY                 -- uuid; one row per browser sign-in
+  session_hash    TEXT UNIQUE NOT NULL             -- sha256(plaintext session value)
+  username        TEXT NOT NULL REFERENCES users(username)
+  created_at      INTEGER NOT NULL
+  last_used_at    INTEGER
+  expires_at      INTEGER NOT NULL                 -- absolute; default 30d after create
+  revoked_at      INTEGER                          -- soft delete per session
+  user_agent      TEXT                             -- captured at create, informational
+  ip              TEXT                             -- captured at create, informational
 ```
 
 Username rules: `^[a-z][a-z0-9_-]{0,31}$`. Lowercase letters, digits,
@@ -77,14 +94,31 @@ thereafter only the sha256 hash is stored.
 
 ## HTTP auth
 
-Non-open requests present a token via:
+Non-open requests present **either** a bearer token or a session
+cookie. Tried in priority order:
 
-- `Authorization: Bearer <token>` — agents, curl, MCP clients, the admin UI
-- HTTP Basic with `password=<token>` — browser prompt fallback
-- `?token=<token>` — EventSource bootstrap, one-click share links
+1. `Authorization: Bearer <token>` — agents, curl, MCP clients,
+   anything not running in a browser. Both PATs (`ab_*`) and OAuth
+   access tokens (`oat_*`) ride this path; the audience rule below
+   distinguishes them.
+2. HTTP Basic with `password=<token>` — browser prompt fallback for
+   directly-typed URLs.
+3. `?token=<token>` — EventSource bootstrap, one-click share links.
+4. `agentboard_session` cookie — the SPA + the OAuth consent page.
+   Triggered when no Authorization header is present and the cookie
+   resolves to a valid `user_sessions` row.
 
-`GET /api/health` stays open. Everything else resolves the token →
-`(User, UserToken)`. Missing/unknown/revoked/deactivated → 401.
+`GET /api/health` and `/api/setup/status` stay open; the public
+auth surface (`/api/auth/login`, `/api/auth/logout`, `/api/auth/me`)
+is also open so the login round-trip can complete before a session
+exists. Everything else resolves to `(User, UserToken)` or
+`(User, Session)`. Missing/unknown/revoked/deactivated → 401.
+
+Cookie-authenticated **state-changing** requests additionally pass
+through `CSRFMiddleware`: an `X-CSRF-Token` header MUST equal the
+`agentboard_csrf` cookie (constant-time compare). Missing or
+mismatched → 403 with `code=CSRF_REQUIRED` / `CSRF_MISMATCH`. Bearer
+requests skip — they're CSRF-immune by design.
 
 Every 401 carries an MCP-spec-compliant Bearer challenge so OAuth-aware
 clients (Claude.ai Custom Connectors, anything following the MCP
@@ -182,10 +216,76 @@ acquire a credential, so requiring one would deadlock.
 
 ### Bootstrap quirks
 
-The OAuth flow has one prerequisite: the user must already have a PAT
-to paste at the consent step. Fresh instances bootstrap admin via the
-first-admin invitation URL; everything else flows from there. There's
-no chicken-and-egg.
+The OAuth flow has one prerequisite: the user must already have a way
+to authenticate the consent step — either an `ab_*` PAT to paste, or
+a username + password (the new browser-friendly path). Fresh instances
+bootstrap admin via the first-admin invitation URL; the redeem flow
+also accepts an optional password and emits a session cookie, so a
+freshly-claimed admin can drive the connector flow without ever
+copying a token. There's no chicken-and-egg.
+
+## Browser sessions (passwords + cookies)
+
+Tokens are a great fit for agents and CLI but a clunky one for humans
+in a browser. AgentBoard's second credential mechanism — added on top
+of the token model, not in place of it — fixes that:
+
+- **Sign in**: `POST /api/auth/login` with `{username, password}`.
+  Server verifies via `argon2id`, mints a row in `user_sessions`,
+  returns the user record, and sets two cookies:
+  - `agentboard_session` — `HttpOnly`, `SameSite=Lax`, `Secure` when
+    the request was TLS, `Path=/`, ~30-day TTL. The plaintext is the
+    high-entropy random value from `auth.GenerateSessionPlaintext`
+    (`abs_<43 base64 chars>`). The DB stores `sha256(plaintext)`.
+  - `agentboard_csrf` — same shape, NOT HttpOnly. The SPA reads it
+    via `document.cookie` and copies into `X-CSRF-Token` on every
+    state-changing request.
+- **Verify**: middleware extracts the session cookie when there's no
+  `Authorization` header, runs `ResolveSession`, attaches the User
+  to context exactly as it would for a token.
+- **CSRF**: `CSRFMiddleware` runs after auth and enforces double-
+  submit on state-changing requests **only** when authentication came
+  from a session cookie. Bearer-authenticated requests skip — Bearer
+  is not auto-attached by the browser, so cross-origin attacks can't
+  smuggle one along.
+- **Sign out**: `POST /api/auth/logout` revokes the row and clears
+  both cookies. Idempotent — a stale cookie still triggers cookie-
+  clearing on the response.
+
+Where humans currently land: `/login` (username + password form) and
+`/oauth/authorize` (the consent page now branches on session — when
+present, "Logged in as @user · Allow / Deny"; when absent, password
++ token paste, in that order). Both unify the same lookup table.
+
+Setting + clearing passwords:
+
+- **Self-or-admin**: `POST /api/users/{u}/password` with
+  `{current_password?, new_password}`. A self-call without
+  `current_password` is rejected (proof-of-possession); admins
+  setting another user's password may omit it.
+- **CLI**: `agentboard admin set-password <u>` (interactive prompt,
+  or `--from-stdin` for scripts). Lockout-recovery hammer: file-
+  system access, no token required.
+- **Revocation**: per-row at `DELETE /api/users/{u}/sessions/{id}`,
+  bulk at `POST /api/users/{u}/sessions/revoke-all`, or CLI
+  `agentboard admin revoke-sessions <u>`. Bearer tokens are NOT
+  touched.
+
+Token vs session, side by side:
+
+| Property | PAT (`ab_*`) | Browser session (`abs_*`) |
+|---|---|---|
+| Minted by | `/api/users/{u}/tokens` or `agentboard admin rotate` | `/api/auth/login` after username + password |
+| Carrier | `Authorization: Bearer …` (header) | `agentboard_session` cookie |
+| Lifetime | until revoked | 30 days, refreshable by re-login |
+| CSRF protection | not required (header is opt-in per request) | required (`X-CSRF-Token` matched against `agentboard_csrf` cookie) |
+| Logout shape | revoke the token row | clear cookie + revoke session row |
+| Stored as | sha256 hash in `user_tokens` | sha256 hash in `user_sessions` |
+
+Passkeys / WebAuthn are still deferred. The session table shape was
+designed to accept a passkey factor as a second auth path without
+schema churn — adding `factor TEXT NOT NULL DEFAULT 'password'` (or
+similar) is the only change foreseen.
 
 ## Rules engine
 
@@ -322,9 +422,12 @@ token and continues.
 ## CLI
 
 ```
-agentboard admin list                    # users + token counts
-agentboard admin list-invitations        # active invite URLs (incl. the first-admin one)
-agentboard admin rotate <username> [label]  # rotate a token
+agentboard admin list                          # users + token counts
+agentboard admin list-invitations              # active invite URLs (incl. the first-admin one)
+agentboard admin invite [--role …]             # mint a new invite URL without a token
+agentboard admin rotate <username> [label]     # rotate a token
+agentboard admin set-password <username>       # set/replace browser password
+agentboard admin revoke-sessions <username>    # nuke every active browser session for a user
 agentboard admin rename-user <old> <new> [--yes]  # escape hatch
 ```
 
@@ -360,11 +463,13 @@ Nothing about the auth schema needs to change to support these.
 | Leaked viewer token | Read-only within allowlist. |
 | Leaked admin token | Full management access until revoked. Rotate regularly; keep admin tokens out of CI logs. |
 | Leaked bot token | Shared puppet; any admin rotates. |
+| Leaked session cookie | Same blast radius as the user's role; `agentboard admin revoke-sessions <u>` is the recovery hammer. HttpOnly + SameSite=Lax mitigates XSS leakage and cross-origin auto-submit. |
 | Leaked invitation URL | One-time use. Once redeemed it's dead; admins can revoke unredeemed invites from `/admin`. |
-| SSH / filesystem access | Total. Intended recovery layer — `admin rotate` + DB wipe-for-first-admin-reinvite both route through it. |
+| SSH / filesystem access | Total. Intended recovery layer — `admin rotate` + `admin set-password` + DB wipe-for-first-admin-reinvite all route through it. |
 | Malicious MCP tool added | Blocked by the privilege test in CI. |
-| CSRF | N/A — no cookies, no auto-attached credentials. |
+| CSRF on cookie auth | Double-submit `X-CSRF-Token` enforced on every state-changing route reachable via cookie; bearer skips. |
 | Token brute force | `sha256(32 bytes random)`. 2^256 attempts. |
+| Password brute force | `argon2id(time=1, memory=64MiB, threads=4)` per attempt. Slow enough that online brute-force is impractical; CLI lockout-recovery is the intended out-of-band path. |
 | Username confusion attacks | `COLLATE NOCASE` on the PK and Go-side lowercase-trim on every insert path. |
 
 ## Passkey / WebAuthn — deferred
@@ -378,14 +483,18 @@ No schema changes required.
 
 ```
 internal/auth/
-  schema.go         — users + user_tokens schema
+  schema.go         — users + user_tokens + user_sessions schema, v1→v2 migration
   username.go       — regex validator + avatar color deriver
   tokens.go         — GenerateToken, HashToken, TokensEqual
+  passwords.go      — argon2id HashPassword + VerifyPassword
+  sessions.go       — SetPassword, VerifyLogin, CreateSession, ResolveSession, Revoke*
   store.go          — Users + Tokens CRUD, RenameUser, ResolveToken, ResolveUsernames
   rules.go          — glob matcher + Authorize
   rules_test.go
   store_test.go
-  middleware.go     — TokenMiddleware (PAT + OAuth), AuthorizeMiddleware, AdminRequired, ScopeSelfOrAdmin
+  sessions_test.go
+  passwords_test.go
+  middleware.go     — TokenMiddleware (PAT + OAuth + session cookie), CSRFMiddleware, AuthorizeMiddleware, AdminRequired, ScopeSelfOrAdmin
   oauth.go          — RFC 9728/8414 discovery handlers + WWW-Authenticate helper
   oauth_schema.go   — oauth_clients, oauth_codes, oauth_tokens
   oauth_store.go    — DCR, code lifecycle, access-token + refresh rotation, PKCE verifier
@@ -399,20 +508,26 @@ internal/locks/
 
 internal/server/
   handlers_admin.go        — /api/admin/users/* routes
+  handlers_auth.go         — /api/auth/{login,logout,me} + /api/users/{u}/{password,sessions}
   handlers_tokens.go       — /api/users/{u}/tokens/* (self-or-admin)
-  handlers_invitations.go  — /api/admin/invitations + public /api/invitations/{id}[/redeem]
+  handlers_auth_test.go    — login / logout / me / CSRF coverage
+  handlers_invitations.go  — /api/admin/invitations + public /api/invitations/{id}[/redeem] (accepts an optional password)
   handlers_locks.go        — /api/locks CRUD + enforcePageLock helper
   handlers_users.go        — /api/users + /api/users/resolve (authed-read directory)
-  handlers_oauth.go        — /oauth/{register,authorize,authorize/decide,token}
-  handlers_oauth_test.go   — discovery + full PKCE flow + audience-scoping coverage
+  handlers_oauth.go        — /oauth/{register,authorize,authorize/decide,token} (consent accepts session cookie OR username+password OR pasted token)
+  handlers_oauth_test.go   — discovery + full PKCE flow + audience-scoping + session-consent coverage
 
 internal/cli/
-  admin.go        — list / list-invitations / rotate / rename-user
+  admin.go        — list / list-invitations / rotate / set-password / revoke-sessions / rename-user / invite
 
 internal/mcp/
   privilege_test.go
 
 frontend/src/
-  lib/auth.ts
-  routes/Admin.tsx
+  lib/session.ts  — apiFetch (cookie + CSRF), signInWithPassword, signOut, fetchSessionUser
+  lib/auth.ts     — token + invitation + session + password REST helpers
+  routes/Login.tsx       — username + password form
+  routes/InviteRedeem.tsx — invitation redeem also accepts a password + sets a cookie session
+  routes/Tokens.tsx      — per-user tokens + active sessions + change-password
+  routes/Admin.tsx       — admin user list with set-password / revoke-sessions controls
 ```

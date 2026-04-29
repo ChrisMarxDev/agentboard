@@ -52,9 +52,16 @@ is the supported path for browser-driven agents:
    localhost — Claude.ai's connector infrastructure can't reach it).
    Leave OAuth Client ID/Secret blank — DCR registers Claude.ai
    automatically.
-3. Click Add → browser pops the consent page → paste an AgentBoard
-   PAT (`ab_*`) → Allow. Claude.ai receives a scoped `oat_*` access
-   token bound to `<host>/mcp`. The PAT itself is never shared.
+3. Click Add → browser pops the consent page. Three ways to
+   authenticate the consent decision, in priority order:
+   - **Already signed in to AgentBoard in another tab?** The page
+     shows "Logged in as @you · Allow / Deny" — one click and
+     you're done.
+   - Type your username + password in the consent form.
+   - Or paste an AgentBoard PAT (`ab_*`) — the legacy path.
+   On Allow, Claude.ai receives a scoped `oat_*` access token
+   bound to `<host>/mcp`. Your credentials are never shared with
+   the client.
 
 Tokens minted via this path are audience-scoped — they work on `/mcp`
 only and 401 anywhere else. That's correct per the spec; if a connector
@@ -83,14 +90,15 @@ If `/tmp/agentboard-token` is missing or the token is 401'ing (rotated, revoked)
 ```bash
 ./agentboard --project agentboard-dev admin list                    # verify state
 ./agentboard --project agentboard-dev admin rotate chris <label>    # rotate existing token
+./agentboard --project agentboard-dev admin list-invitations        # shows active invite URLs
+./agentboard --project agentboard-dev admin invite --role member    # mint a new invite (no token needed)
 
 # If all admins are locked out entirely, wipe the DB so boot re-mints
 # a first-admin invitation URL to stdout. Destructive — only for the
 # dogfood project; ask the user first.
-./agentboard --project agentboard-dev admin list-invitations        # shows active invite URLs
 ```
 
-There is **no `mint-admin` CLI** in Auth v1. The first-admin path is an invitation URL printed at server boot when the users table is empty; additional users are added by admins creating invitations at `/admin`, not by CLI token minting.
+`admin invite` is the CLI escape hatch for minting invitations without an existing admin token (e.g. after a fresh deploy where the first-admin URL was lost, or when the user explicitly asks for a new invite link and rotating an existing token would log them out). It writes directly to the local SQLite DB, so it requires filesystem access to the project. There is **no `mint-admin` CLI** for tokens themselves — token minting still flows through invitation redemption.
 
 Whichever path, write the fresh token back to `/tmp/agentboard-token` (mode `600`) so the next session picks it up.
 

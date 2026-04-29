@@ -104,6 +104,13 @@ func (s *Server) handleOAuthRegister(w http.ResponseWriter, r *http.Request) {
 // ---------------- /oauth/authorize ----------------
 
 // authorizePageData is the template payload for the consent page.
+//
+// SignedInUser is set when the request carried a valid session
+// cookie — in that case the template renders the single-click
+// "Logged in as @user — [Allow] [Deny]" branch. When unset, the
+// template falls back to the username+password + paste-token form
+// pair so a user with neither a session nor a PAT in their hand
+// can still complete the flow.
 type authorizePageData struct {
 	ClientName          string
 	ClientID            string
@@ -114,6 +121,7 @@ type authorizePageData struct {
 	CodeChallenge       string
 	CodeChallengeMethod string
 	Error               string
+	SignedInUser        string // empty when not session-authenticated
 }
 
 var authorizeTmpl = template.Must(template.New("authorize").Parse(`<!doctype html>
@@ -146,6 +154,8 @@ button { flex: 1; padding: 11px 16px; border-radius: 8px; border: 0;
 .allow { background: #4a8eff; color: #fff; }
 .deny  { background: #2a2d36; color: #c5c8d2; }
 .error { background: #3a1f24; color: #f8b4b4; padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; font-size: 13px; }
+.signed-in { background: #1f2a1c; color: #b9e6a4; padding: 12px 14px; border-radius: 8px; margin: 18px 0; font-size: 14px; }
+.divider   { color: #5a5e69; font-size: 12px; text-align: center; margin: 22px 0 6px; letter-spacing: 0.04em; }
 </style>
 </head>
 <body>
@@ -157,6 +167,9 @@ button { flex: 1; padding: 11px 16px; border-radius: 8px; border: 0;
   <small>{{.ClientID}}</small>
 </div>
 {{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+{{if .SignedInUser}}
+<div class="signed-in">Signed in as <b>@{{.SignedInUser}}</b></div>
 <form method="POST" action="/oauth/authorize/decide">
   <input type="hidden" name="client_id" value="{{.ClientID}}">
   <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
@@ -165,15 +178,39 @@ button { flex: 1; padding: 11px 16px; border-radius: 8px; border: 0;
   <input type="hidden" name="resource" value="{{.Resource}}">
   <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
   <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
-  <label for="token">Sign in: paste an AgentBoard token (<code>ab_...</code>)</label>
-  <input id="token" name="token" type="password" autocomplete="off" autofocus
-         placeholder="ab_..." required>
-  <p><small style="color:#888c97">Your token authenticates this approval. It's not shared with the client; the client receives a separate, scoped credential.</small></p>
+  <input type="hidden" name="auth" value="session">
+  <p><small style="color:#888c97">The client receives a separate, scoped credential — your session is not shared.</small></p>
+  <div class="row">
+    <button type="submit" name="decision" value="deny" class="deny">Deny</button>
+    <button type="submit" name="decision" value="allow" class="allow" autofocus>Allow</button>
+  </div>
+</form>
+{{else}}
+<form method="POST" action="/oauth/authorize/decide">
+  <input type="hidden" name="client_id" value="{{.ClientID}}">
+  <input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+  <input type="hidden" name="state" value="{{.State}}">
+  <input type="hidden" name="scope" value="{{.Scope}}">
+  <input type="hidden" name="resource" value="{{.Resource}}">
+  <input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
+  <input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
+  <label for="username">Username</label>
+  <input id="username" name="username" type="text" autocomplete="username" autofocus
+         placeholder="alice">
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password"
+         placeholder="••••••••">
+  <div class="divider">— or sign in with a token —</div>
+  <label for="token">Token (<code>ab_...</code>)</label>
+  <input id="token" name="token" type="password" autocomplete="off"
+         placeholder="ab_...">
+  <p><small style="color:#888c97">Your credentials authenticate this approval. They're not shared with the client; the client receives a separate, scoped credential.</small></p>
   <div class="row">
     <button type="submit" name="decision" value="deny" class="deny">Deny</button>
     <button type="submit" name="decision" value="allow" class="allow">Allow</button>
   </div>
 </form>
+{{end}}
 </div>
 </body>
 </html>`))
@@ -222,6 +259,18 @@ func (s *Server) handleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the user is already signed into this AgentBoard via the SPA
+	// (session cookie present + valid), render the single-click
+	// "Logged in as @user — Allow / Deny" branch. The decision
+	// handler reads the same cookie and skips the password / token
+	// prompts.
+	signedIn := ""
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil && cookie.Value != "" {
+		if user, _, err := s.Auth.ResolveSession(cookie.Value); err == nil && user != nil {
+			signedIn = user.Username
+		}
+	}
+
 	_ = authorizeTmpl.Execute(w, authorizePageData{
 		ClientName:          client.ClientName,
 		ClientID:            client.ClientID,
@@ -231,6 +280,7 @@ func (s *Server) handleOAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		Resource:            resource,
 		CodeChallenge:       codeChallenge,
 		CodeChallengeMethod: codeChallengeMethod,
+		SignedInUser:        signedIn,
 	})
 }
 
@@ -248,6 +298,8 @@ func (s *Server) handleOAuthAuthorizeDecide(w http.ResponseWriter, r *http.Reque
 	codeChallengeMethod := r.FormValue("code_challenge_method")
 	decision := r.FormValue("decision")
 	tokenStr := strings.TrimSpace(r.FormValue("token"))
+	usernameForm := strings.TrimSpace(r.FormValue("username"))
+	passwordForm := r.FormValue("password")
 
 	client, err := s.Auth.GetOAuthClient(clientID)
 	if err != nil || !slices.Contains(client.RedirectURIs, redirectURI) {
@@ -276,8 +328,35 @@ func (s *Server) handleOAuthAuthorizeDecide(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	user, _, err := s.Auth.ResolveToken(auth.HashToken(tokenStr))
-	if err != nil || user == nil {
+	// Three auth signals, tried in priority order:
+	//   1. session cookie (the SPA-logged-in user — the
+	//      one-click "Logged in as @user" branch),
+	//   2. username + password (the new browser-friendly
+	//      sign-in path),
+	//   3. pasted PAT (the legacy paste-a-token path; kept
+	//      for users who only have a token in their hand).
+	//
+	// Whichever resolves the user first wins. The user-facing
+	// error never distinguishes which signal failed — same shape
+	// regardless, so a hostile observer can't tell from the
+	// rendered page whether @alice exists.
+	var user *auth.User
+	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil && cookie.Value != "" {
+		if u, _, err := s.Auth.ResolveSession(cookie.Value); err == nil {
+			user = u
+		}
+	}
+	if user == nil && usernameForm != "" && passwordForm != "" {
+		if u, err := s.Auth.VerifyLogin(usernameForm, passwordForm); err == nil {
+			user = u
+		}
+	}
+	if user == nil && tokenStr != "" {
+		if u, _, err := s.Auth.ResolveToken(auth.HashToken(tokenStr)); err == nil {
+			user = u
+		}
+	}
+	if user == nil {
 		// Re-render the page with an error rather than redirecting —
 		// this is an authentication failure, not an authorization
 		// decision. Sending an error back to the redirect_uri would
@@ -291,7 +370,7 @@ func (s *Server) handleOAuthAuthorizeDecide(w http.ResponseWriter, r *http.Reque
 			Resource:            resource,
 			CodeChallenge:       codeChallenge,
 			CodeChallengeMethod: codeChallengeMethod,
-			Error:               "Token not recognized.",
+			Error:               "Sign-in failed. Check your username + password, or paste a valid token.",
 		})
 		return
 	}

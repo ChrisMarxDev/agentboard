@@ -235,14 +235,73 @@ export async function redeemInvitation(
   id: string,
   username: string,
   displayName?: string,
+  password?: string,
 ): Promise<RedeemedInvitation> {
   const res = await fetch(`/api/invitations/${encodeURIComponent(id)}/redeem`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, display_name: displayName }),
+    credentials: 'include', // capture the session cookie set by the server
+    body: JSON.stringify({ username, display_name: displayName, password }),
   })
   if (!res.ok) throw await parseError(res)
   return (await res.json()) as RedeemedInvitation
+}
+
+// -------- sessions (browser cookie-backed) --------
+
+export interface SessionRow {
+  id: string
+  created_at: string
+  last_used_at?: string
+  expires_at: string
+  revoked_at?: string
+  user_agent?: string
+  ip?: string
+  current?: boolean
+}
+
+export async function listSessionsForUser(username: string): Promise<SessionRow[]> {
+  const data = await json<{ sessions: SessionRow[] }>(
+    await apiFetch(`/api/users/${encodeURIComponent(username)}/sessions`),
+  )
+  return data.sessions ?? []
+}
+
+export async function revokeSession(username: string, id: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/users/${encodeURIComponent(username)}/sessions/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
+  if (!res.ok) throw await parseError(res)
+}
+
+export async function revokeAllSessionsForUser(username: string): Promise<number> {
+  const res = await apiFetch(
+    `/api/users/${encodeURIComponent(username)}/sessions/revoke-all`,
+    { method: 'POST' },
+  )
+  if (!res.ok) throw await parseError(res)
+  const body = (await res.json()) as { count?: number }
+  return body.count ?? 0
+}
+
+// setUserPassword self-or-admin endpoint. CurrentPassword is required
+// when the caller is the user themselves; admins force-set by leaving
+// it empty. The server enforces the rule.
+export async function setUserPassword(
+  username: string,
+  newPassword: string,
+  currentPassword?: string,
+): Promise<void> {
+  const res = await apiFetch(`/api/users/${encodeURIComponent(username)}/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      new_password: newPassword,
+      current_password: currentPassword ?? '',
+    }),
+  })
+  if (!res.ok) throw await parseError(res)
 }
 
 // -------- page locks --------

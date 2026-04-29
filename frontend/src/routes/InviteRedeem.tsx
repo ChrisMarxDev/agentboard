@@ -6,7 +6,6 @@ import {
   redeemInvitation,
   type PublicInvitationView,
 } from '../lib/auth'
-import { setToken } from '../lib/session'
 import { copyToClipboard } from '../lib/clipboard'
 import { refreshMe } from '../hooks/useMe'
 
@@ -29,13 +28,15 @@ export default function InviteRedeem() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [password, setPassword] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   // After redeem succeeds, the page becomes a "hand this to your
   // agent" briefing instead of bouncing straight to the dashboard.
-  // Token is held in component state — already saved to localStorage
-  // and visible at /tokens once the user lands on the dashboard,
-  // but this is the one moment we can pre-bake a copyable prompt.
+  // Token is shown once for the agent-handoff prompt; it's also
+  // visible at /tokens once the user lands on the dashboard. The
+  // browser session is set via cookie by the redeem response, so
+  // navigation to / works without any client-side token storage.
   const [claimedToken, setClaimedToken] = useState<string | null>(null)
 
   useEffect(() => {
@@ -51,11 +52,18 @@ export default function InviteRedeem() {
       setSubmitError('Username must start with a letter and contain only a-z, 0-9, _ or - (max 32 chars)')
       return
     }
+    if (password && password.length < 10) {
+      setSubmitError('Password must be at least 10 characters.')
+      return
+    }
     setBusy(true)
     setSubmitError(null)
     try {
-      const result = await redeemInvitation(id, clean, displayName.trim() || undefined)
-      setToken(result.token)
+      const result = await redeemInvitation(id, clean, displayName.trim() || undefined, password || undefined)
+      // The server set the agentboard_session + agentboard_csrf
+      // cookies on the redeem response when a password was supplied,
+      // so the SPA is already signed in. refreshMe primes the
+      // useMe() hook for downstream components.
       refreshMe()
       // Show the agent-handoff briefing instead of navigating. The
       // user clicks "Continue" once they've copied the prompt.
@@ -215,6 +223,23 @@ export default function InviteRedeem() {
               placeholder="Dana Kim"
               style={input}
             />
+          </div>
+          <div>
+            <div style={label}>Password (min 10 chars)</div>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              minLength={10}
+              required
+              style={input}
+            />
+            <div style={{ marginTop: '0.375rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              Used to sign in to the dashboard at /login. Tokens for agents and CLI are
+              issued automatically — see the next screen.
+            </div>
           </div>
         </div>
 

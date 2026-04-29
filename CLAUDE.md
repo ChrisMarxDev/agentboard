@@ -100,8 +100,9 @@ $B screenshot /tmp/ab.png  # screenshot
 $B click @e3            # click an element
 $B snapshot -D          # diff vs previous snapshot
 
-# 5. Test live data updates — in another terminal/command:
-curl -X PUT http://localhost:3000/api/data/welcome.users -d '999'
+# 5. Test live page updates — in another terminal/command:
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: text/plain' \
+  http://localhost:3000/api/content/welcome -d '# Welcome\n\nUsers: 999'
 $B snapshot -D          # verify the UI updated
 
 # 6. Test navigation
@@ -122,7 +123,7 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 - **Frontend**: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation)
 - **Data model**: Key-value store with dotted paths. 7 write operations (SET, MERGE, UPSERT by ID, MERGE by ID, APPEND, DELETE, DELETE by ID)
 - **Realtime**: SSE broadcaster pushes data changes to all connected browsers
-- **MCP**: Streamable HTTP at /mcp with 13 tools for Claude integration
+- **MCP**: Streamable HTTP at /mcp with 38 tools for Claude integration
 - **Pages**: MDX files compiled client-side, served from project folder
 - **Components**: 9 built-in (Metric, Status, Progress, Table, Chart, TimeSeries, Log, List, Kanban) + user JSX in components/
 
@@ -131,7 +132,7 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 - `cmd/agentboard/` — CLI entry point
 - `internal/data/` — SQLite data store with all operations
 - `internal/server/` — HTTP handlers, SSE broadcaster
-- `internal/mcp/` — MCP protocol server + 13 tool definitions
+- `internal/mcp/` — MCP protocol server + 38 tool definitions
 - `internal/cli/` — Cobra commands (serve, set, get, list, etc.)
 - `internal/project/` — Project model, config, first-run init
 - `internal/mdx/` — Page management + file watcher
@@ -153,26 +154,38 @@ Full deploy guide, cost breakdown, and open decisions live in [`HOSTING.md`](./H
 
 ## Quick API test cheatsheet
 
+Every route except `/api/health`, `/api/setup/status`, and `/api/invitations/*` requires auth. Use `Authorization: Bearer ab_<43chars>`, HTTP Basic with the token as password, or `?token=<token>`.
+
 ```bash
-# Set data
-curl -X PUT localhost:3000/api/data/mykey -d '{"count":42}'
+TOKEN=ab_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# Get data
-curl localhost:3000/api/data/mykey
+# Health (no auth)
+curl localhost:3000/api/health
 
-# Merge
-curl -X PATCH localhost:3000/api/data/mykey -d '{"status":"done"}'
+# List pages
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/content
 
-# Append to array
-curl -X POST localhost:3000/api/data/events -d '{"msg":"hello"}'
+# Read a page
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/content/index
 
-# List all keys
-curl localhost:3000/api/data
+# Write/replace a page (body is raw MDX with optional YAML frontmatter)
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: text/plain' \
+  localhost:3000/api/content/notes -d '# Notes\n\nHello'
 
-# Schema
-curl localhost:3000/api/data/schema
+# Patch a page — RFC 7396 merge into frontmatter, optional body replacement.
+# Setting a frontmatter key to null deletes it.
+curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  localhost:3000/api/content/notes \
+  -d '{"frontmatter_patch":{"pinned":true},"body":"# Notes\n\nUpdated"}'
 
-# MCP tools list
-curl -X POST localhost:3000/mcp -H 'Content-Type: application/json' \
+# Delete a page
+curl -X DELETE -H "Authorization: Bearer $TOKEN" localhost:3000/api/content/notes
+
+# MCP tools list (38 tools — pages, files, components, kv data, search, webhooks, teams)
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  localhost:3000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
+
+**The legacy `/api/data/*` REST routes were removed in Cut 1 of the rewrite** (see `REWRITE.md`). Key-value data still exists, but is now only reachable via MCP tools (`agentboard_write`, `agentboard_read`, `agentboard_merge`, `agentboard_append`, `agentboard_delete`, `agentboard_grab`, `agentboard_index`, `agentboard_search`, `agentboard_history`).

@@ -23,9 +23,11 @@ import {
   listInvitations,
   listLocks,
   listUsers,
+  revokeAllSessionsForUser,
   revokeInvitation,
   revokeToken,
   rotateToken,
+  setUserPassword,
   updateUser,
   type AccessMode,
   type CreatedToken,
@@ -37,7 +39,7 @@ import {
   type User,
   type UserToken,
 } from '../lib/auth'
-import { apiFetch, clearToken, getToken, redirectToLogin } from '../lib/session'
+import { apiFetch, redirectToLogin, signOut } from '../lib/session'
 import { copyToClipboard } from '../lib/clipboard'
 
 // Admin page. Rendered inside Layout so the sidebar persists. Uses the
@@ -104,11 +106,11 @@ export default function Admin() {
   const [state, setState] = useState<'loading' | 'ok' | 'not-admin' | 'no-token'>('loading')
 
   useEffect(() => {
-    // Must have a token; if not, send to login.
-    if (!getToken()) {
-      redirectToLogin('missing')
-      return
-    }
+    // SessionGate higher up the tree already verified there's a
+    // signed-in user — fetchMe failing here means the cookie
+    // was revoked between gate + admin mount, in which case
+    // apiFetch's 401 handler bounces to /login. We only need to
+    // distinguish admin vs not-admin from a successful response.
     let cancelled = false
     fetchMe()
       .then((m) => {
@@ -117,9 +119,6 @@ export default function Admin() {
         setState(m.kind === 'admin' ? 'ok' : 'not-admin')
       })
       .catch(() => {
-        // fetchMe 403s when the current token is agent-kind. apiFetch doesn't
-        // treat 403 as auth-expired, so we surface it as not-admin. 401
-        // would have already been redirected by apiFetch.
         if (cancelled) return
         setState('not-admin')
       })
@@ -181,8 +180,8 @@ function NotAdmin() {
         </pre>
         <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
           <button
-            onClick={() => {
-              clearToken()
+            onClick={async () => {
+              await signOut()
               redirectToLogin()
             }}
             style={BTN_GHOST}
@@ -715,6 +714,38 @@ function UserCard({
     }
   }
 
+  async function onSetPassword() {
+    const pw = window.prompt(
+      `Set a new browser password for @${user.username}.\n` +
+        `Min 10 characters. Existing sessions stay valid until you revoke them separately.`,
+      '',
+    )
+    if (pw === null || pw === '') return
+    if (pw.length < 10) {
+      onError('Password must be at least 10 characters.')
+      return
+    }
+    try {
+      await setUserPassword(user.username, pw)
+      window.alert(`Password updated for @${user.username}.`)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function onRevokeAllSessions() {
+    if (!window.confirm(
+      `Revoke every active browser session for @${user.username}? ` +
+      `Bearer tokens are NOT touched.`,
+    )) return
+    try {
+      const n = await revokeAllSessionsForUser(user.username)
+      window.alert(`Revoked ${n} session(s) for @${user.username}.`)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   return (
     <div style={{ ...CARD, padding: 0, opacity: deactivated ? 0.6 : 1 }}>
       <div
@@ -771,11 +802,17 @@ function UserCard({
                 onError={onError}
               />
               {!deactivated && (
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                   <button onClick={() => setEditing(true)} style={BTN_GHOST}>Edit</button>
                   <button onClick={onAddToken} style={BTN_GHOST}>
                     <Plus size={14} />
                     Add token
+                  </button>
+                  <button onClick={onSetPassword} style={BTN_GHOST} title="Force-set the browser password for this user">
+                    Set password
+                  </button>
+                  <button onClick={onRevokeAllSessions} style={BTN_GHOST} title="Revoke every active browser session for this user">
+                    Revoke sessions
                   </button>
                   {!isSelf && (
                     <button onClick={onDeactivate} style={BTN_DANGER}>Deactivate</button>

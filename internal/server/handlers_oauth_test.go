@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -430,4 +431,147 @@ func httpPostFormNoFollow(t *testing.T, url string, form url.Values) *http.Respo
 		t.Fatal(err)
 	}
 	return resp
+}
+
+// TestOAuth_Consent_ViaSession proves the Claude.ai-shaped flow
+// works end-to-end without ever pasting a token: the user is
+// already logged into the SPA in another tab (their cookie jar
+// holds an agentboard_session cookie), so the consent decide
+// handler accepts the session as the auth signal and mints an
+// authorization code.
+func TestOAuth_Consent_ViaSession(t *testing.T) {
+	srv, ts := newTestServer(t)
+	// User has both a PAT (legacy) and a password (new path). We
+	// only hand the test a password — the cookie is what
+	// authenticates the consent.
+	if err := srv.Auth.SetPassword("test-agent", "session-password-1234"); err != nil {
+		t.Fatal(err)
+	}
+	clientID := dcrRegister(t, ts, "Session Consent Test")
+
+	// Build a cookie jar, log in via /api/auth/login.
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	body, _ := json.Marshal(map[string]string{
+		"username": "test-agent",
+		"password": "session-password-1234",
+	})
+	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/login", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	loginResp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginResp.Body.Close()
+	if loginResp.StatusCode != 200 {
+		t.Fatalf("login: %d", loginResp.StatusCode)
+	}
+
+	// Render the authorize page; expect "Logged in as @test-agent" branch.
+	verifier, challenge := pkcePair()
+	authURL := ts.URL + "/oauth/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientID},
+		"redirect_uri":          {"https://example.test/cb"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {"mcp"},
+		"state":                 {"abc"},
+		"resource":              {ts.URL + "/mcp"},
+	}.Encode()
+	pageReq, _ := http.NewRequest("GET", authURL, nil)
+	pageResp, err := c.Do(pageReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pageBody, _ := io.ReadAll(pageResp.Body)
+	pageResp.Body.Close()
+	if pageResp.StatusCode != 200 {
+		t.Fatalf("authorize page: %d", pageResp.StatusCode)
+	}
+	if !strings.Contains(string(pageBody), "@test-agent") {
+		t.Errorf("authorize page should show signed-in user; body=%s", string(pageBody))
+	}
+	if strings.Contains(string(pageBody), `name="password"`) {
+		t.Error("authorize page should not show password form when session-authenticated")
+	}
+
+	// Submit decide with NO token / username / password, just the
+	// cookie jar.
+	form := url.Values{
+		"client_id":             {clientID},
+		"redirect_uri":          {"https://example.test/cb"},
+		"state":                 {"abc"},
+		"scope":                 {"mcp"},
+		"resource":              {ts.URL + "/mcp"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"decision":              {"allow"},
+		"auth":                  {"session"},
+	}
+	decideReq, _ := http.NewRequest("POST", ts.URL+"/oauth/authorize/decide",
+		strings.NewReader(form.Encode()))
+	decideReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	decideResp, err := c.Do(decideReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decideResp.Body.Close()
+	if decideResp.StatusCode != http.StatusFound {
+		t.Fatalf("decide via session: %d, want 302", decideResp.StatusCode)
+	}
+	loc, _ := url.Parse(decideResp.Header.Get("Location"))
+	code := loc.Query().Get("code")
+	if code == "" {
+		t.Fatalf("no code in redirect: %s", decideResp.Header.Get("Location"))
+	}
+
+	// Exchange the code for an oat_ token to prove the flow finishes.
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"client_id":     {clientID},
+		"redirect_uri":  {"https://example.test/cb"},
+	}
+	out := postTokenEndpoint(t, ts, tokenForm)
+	access, _ := out["access_token"].(string)
+	if !strings.HasPrefix(access, auth.OAuthAccessPrefix) {
+		t.Errorf("access_token prefix: %q", access)
+	}
+}
+
+// TestOAuth_Consent_ViaPassword proves the username+password
+// branch of the consent form mints a code without needing a PAT.
+func TestOAuth_Consent_ViaPassword(t *testing.T) {
+	srv, ts := newTestServer(t)
+	if err := srv.Auth.SetPassword("test-agent", "consent-password-1234"); err != nil {
+		t.Fatal(err)
+	}
+	clientID := dcrRegister(t, ts, "Password Consent Test")
+
+	_, challenge := pkcePair()
+	form := url.Values{
+		"client_id":             {clientID},
+		"redirect_uri":          {"https://example.test/cb"},
+		"state":                 {"x"},
+		"scope":                 {"mcp"},
+		"resource":              {ts.URL + "/mcp"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"decision":              {"allow"},
+		"username":              {"test-agent"},
+		"password":              {"consent-password-1234"},
+	}
+	resp := httpPostFormNoFollow(t, ts.URL+"/oauth/authorize/decide", form)
+	if resp.StatusCode != http.StatusFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("decide via password: %d: %s", resp.StatusCode, body)
+	}
+	loc, _ := url.Parse(resp.Header.Get("Location"))
+	if loc.Query().Get("code") == "" {
+		t.Errorf("no code in redirect: %s", resp.Header.Get("Location"))
+	}
 }

@@ -74,6 +74,12 @@ func (s *Server) handleGetInvitationPublic(w http.ResponseWriter, r *http.Reques
 type redeemRequest struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name,omitempty"`
+	// Password is optional. When supplied, the redeem flow sets it
+	// on the user (argon2id-hashed) and mints a browser session,
+	// returning the cookie alongside the token. When omitted, only
+	// a token is minted — preserving the original v0 behaviour for
+	// scripted/curl-driven redeems.
+	Password string `json:"password,omitempty"`
 }
 
 type redeemResponse struct {
@@ -176,7 +182,9 @@ func (s *Server) handleRedeemInvitation(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Mint the first token.
+	// Mint the first token. Tokens stay the credential of choice
+	// for non-browser callers (CLI, MCP), so we always emit one,
+	// even when the redeemer also picked a password.
 	token, err := auth.GenerateToken()
 	if err != nil {
 		respondError(w, 500, "internal", "token gen failed")
@@ -191,6 +199,26 @@ func (s *Server) handleRedeemInvitation(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		respondError(w, 500, "internal", "token persist failed")
 		return
+	}
+
+	// If the redeemer set a password, store the argon2id hash and
+	// hand out a browser session in the same response so they're
+	// signed in to the SPA without an extra round-trip.
+	if req.Password != "" {
+		if err := s.Auth.SetPassword(user.Username, req.Password); err != nil {
+			if errors.Is(err, auth.ErrWeakPassword) {
+				respondError(w, 400, "weak_password", err.Error())
+				return
+			}
+			respondError(w, 500, "internal", "password persist failed")
+			return
+		}
+		_, plainSession, err := s.Auth.CreateSession(user.Username, r.UserAgent(), clientIP(r), 0)
+		if err == nil {
+			if csrf, err := auth.GenerateCSRFToken(); err == nil {
+				setSessionCookies(w, plainSession, csrf, auth.DefaultSessionTTL, r.TLS != nil)
+			}
+		}
 	}
 
 	pu := toPublic(user)

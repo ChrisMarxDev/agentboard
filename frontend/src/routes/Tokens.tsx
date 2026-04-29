@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
-import { Copy, Eye, EyeOff, KeyRound, Plus, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { Copy, KeyRound, Lock, Monitor, Plus, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
-import { getToken } from '../lib/session'
+import { apiFetch } from '../lib/session'
 import { copyToClipboard } from '../lib/clipboard'
 import {
   createTokenForUser,
+  listSessionsForUser,
   listTokensForUser,
+  revokeSession,
   revokeToken,
   rotateToken,
   type CreatedToken,
+  type SessionRow,
   type UserToken,
 } from '../lib/auth'
 
@@ -116,8 +119,13 @@ export default function Tokens() {
       {reveal && <RevealBanner token={reveal} onDismiss={() => setReveal(null)} />}
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
-        <div style={LABEL}>This browser&rsquo;s session token</div>
-        <CurrentSessionCard />
+        <div style={LABEL}>Browser sessions</div>
+        <SessionsCard username={me.username} />
+      </section>
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
+        <div style={LABEL}>Password</div>
+        <ChangePasswordCard username={me.username} />
       </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -287,72 +295,212 @@ function TokenRow({
   )
 }
 
-// CurrentSessionCard surfaces the bearer token already in localStorage
-// so a non-technical user can copy it into another tool (laptop env,
-// MCP client, curl) without opening DevTools. Hidden by default — a
-// shoulder-surf or screen-share shouldn't expose it. Anyone who already
-// has this browser already has the token; we're only removing friction,
-// not weakening the trust boundary.
-function CurrentSessionCard() {
-  const [visible, setVisible] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const tok = getToken()
+// SessionsCard lists every browser session that's ever been minted
+// for this user, active first. The "current" row gets a badge so the
+// user knows which one they'd be killing if they hit Revoke. Bearer
+// tokens are managed in the section below — sessions are exclusively
+// the cookie-based browser logins.
+function SessionsCard({ username }: { username: string }) {
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busyID, setBusyID] = useState<string | null>(null)
 
-  if (!tok) {
+  const refresh = useCallback(async () => {
+    try {
+      setSessions(await listSessionsForUser(username))
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }, [username])
+
+  useEffect(() => { void refresh() }, [refresh])
+
+  if (sessions === null) {
+    return <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>Loading sessions…</div>
+  }
+  if (sessions.length === 0) {
     return (
       <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>
-        No session token in this browser. (You shouldn&rsquo;t be seeing this page — sign in.)
+        No browser sessions yet — sign in via /login to create one.
       </div>
     )
   }
 
-  async function copy() {
-    if (!tok) return
-    if (await copyToClipboard(tok)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1200)
+  return (
+    <div style={CARD}>
+      {error && (
+        <div style={{ color: 'var(--error)', fontSize: '0.8125rem', marginBottom: '0.5rem' }}>{error}</div>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        {sessions.map((sess) => (
+          <div
+            key={sess.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr auto',
+              alignItems: 'center',
+              gap: '0.75rem',
+              padding: '0.5rem 0.625rem',
+              borderRadius: '0.375rem',
+              background: 'var(--bg-secondary)',
+              opacity: sess.revoked_at ? 0.5 : 1,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+              <Monitor size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.8125rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {sess.user_agent || 'Unknown browser'}
+                  {sess.current && (
+                    <span style={{
+                      marginLeft: '0.5rem',
+                      padding: '0.05rem 0.4rem',
+                      borderRadius: '0.25rem',
+                      background: 'color-mix(in srgb, var(--accent) 18%, transparent)',
+                      color: 'var(--accent)',
+                      fontSize: '0.6875rem',
+                      fontWeight: 600,
+                    }}>this browser</span>
+                  )}
+                  {sess.revoked_at && (
+                    <span style={{
+                      marginLeft: '0.5rem',
+                      padding: '0.05rem 0.4rem',
+                      borderRadius: '0.25rem',
+                      background: 'color-mix(in srgb, var(--error) 18%, transparent)',
+                      color: 'var(--error)',
+                      fontSize: '0.6875rem',
+                      fontWeight: 600,
+                    }}>revoked</span>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.6875rem', color: 'var(--text-secondary)' }}>
+                  {sess.ip ? `${sess.ip} · ` : ''}created {new Date(sess.created_at).toLocaleString()}
+                  {sess.last_used_at ? ` · last used ${new Date(sess.last_used_at).toLocaleString()}` : ''}
+                </div>
+              </div>
+            </div>
+            {!sess.revoked_at && (
+              <button
+                style={BTN}
+                disabled={busyID === sess.id}
+                onClick={async () => {
+                  setBusyID(sess.id)
+                  try {
+                    await revokeSession(username, sess.id)
+                    await refresh()
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : String(err))
+                  } finally {
+                    setBusyID(null)
+                  }
+                }}
+              >
+                <Trash2 size={12} />
+                Revoke
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ChangePasswordCard posts to /api/users/{me}/password. Self-scope
+// requires the current password as proof-of-possession; admins
+// changing their own password are no different from any other user.
+function ChangePasswordCard({ username }: { username: string }) {
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError(null)
+    setDone(false)
+    if (next !== confirm) {
+      setError('New password and confirmation do not match.')
+      return
+    }
+    setBusy(true)
+    try {
+      const res = await apiFetch(`/api/users/${encodeURIComponent(username)}/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: current, new_password: next }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+      setDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
     }
   }
 
-  const masked = `${tok.slice(0, 6)}${'•'.repeat(Math.max(8, tok.length - 9))}${tok.slice(-3)}`
-
   return (
-    <div style={CARD}>
-      <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.625rem' }}>
-        Paste this into any tool that needs to talk to AgentBoard from another machine —
-        a laptop env file, an MCP client config, a <code>curl -H &quot;Authorization: Bearer …&quot;</code> call.
-        Treat it like a password. If it leaks, rotate the matching token below.
+    <form onSubmit={onSubmit} style={CARD}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.625rem' }}>
+        <Lock size={14} style={{ color: 'var(--text-secondary)' }} />
+        <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+          Change the password used at /login. Sessions and tokens stay valid.
+        </div>
       </div>
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-        <code
-          style={{
-            flex: 1,
-            padding: '0.5rem 0.75rem',
-            borderRadius: '0.375rem',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
-            fontFamily: 'ui-monospace, monospace',
-            fontSize: '0.8125rem',
-            overflowX: 'auto',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {visible ? tok : masked}
-        </code>
-        <button
-          style={BTN}
-          onClick={() => setVisible((v) => !v)}
-          title={visible ? 'Hide' : 'Show'}
-        >
-          {visible ? <EyeOff size={12} /> : <Eye size={12} />}
-          {visible ? 'Hide' : 'Show'}
-        </button>
-        <button style={BTN} onClick={copy}>
-          <Copy size={12} />
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+      {error && (
+        <div style={{ color: 'var(--error)', fontSize: '0.8125rem', marginBottom: '0.5rem' }}>{error}</div>
+      )}
+      {done && (
+        <div style={{ color: 'var(--accent)', fontSize: '0.8125rem', marginBottom: '0.5rem' }}>
+          Password updated.
+        </div>
+      )}
+      <div style={{ display: 'grid', gap: '0.5rem' }}>
+        <input
+          type="password"
+          autoComplete="current-password"
+          placeholder="Current password"
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+          style={INPUT}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="New password (min 10 chars)"
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          style={INPUT}
+        />
+        <input
+          type="password"
+          autoComplete="new-password"
+          placeholder="Confirm new password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          style={INPUT}
+        />
+        <div>
+          <button
+            type="submit"
+            disabled={busy || !current || !next || !confirm}
+            style={BTN_PRIMARY}
+          >
+            {busy ? 'Updating…' : 'Update password'}
+          </button>
+        </div>
       </div>
-    </div>
+    </form>
   )
 }
 

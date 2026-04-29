@@ -8,7 +8,7 @@ import Login from './routes/Login'
 import InviteRedeem from './routes/InviteRedeem'
 import Tokens from './routes/Tokens'
 import InboxPage from './routes/Inbox'
-import { getToken, redirectToLogin, setPublicMode } from './lib/session'
+import { fetchSessionUser, redirectToLogin, setPublicMode } from './lib/session'
 import { matchPublic } from './lib/publicMatcher'
 
 export default function App() {
@@ -81,9 +81,9 @@ function ViewRouter() {
 
 // SessionGate: three entry flows, in priority order.
 //
-//   1. URL fragment carries a share token (`#share=sh_...`) → redeem it
-//      into a view-session cookie, strip the fragment, render.
-//   2. localStorage bearer present → render as that user.
+//   1. URL fragment carries a share token (`#share=sh_...`) → redeem
+//      it into a view-session cookie, strip the fragment, render.
+//   2. agentboard_session cookie present + valid → render as that user.
 //   3. Current path matches public.paths → render anonymously.
 //   4. Else → /login with a `next` hint.
 function SessionGate({ children }: { children: React.ReactNode }) {
@@ -113,8 +113,13 @@ function SessionGate({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 2. Bearer in localStorage.
-      if (getToken()) {
+      // 2. Session cookie probe. /api/auth/me returns 200 + the user
+      // shape when the agentboard_session cookie is valid; 401
+      // otherwise. We don't render content until this resolves so
+      // the shell never flashes signed-in state for a logged-out
+      // visitor.
+      const me = await fetchSessionUser()
+      if (me) {
         setReady(true)
         return
       }

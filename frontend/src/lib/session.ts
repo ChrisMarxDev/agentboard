@@ -1,17 +1,22 @@
-// Session = the bearer token this browser is signed in with.
+// Session = the cookie this browser is signed in with.
 //
-// One token per session — same one powers dashboards, data access, and the
-// /admin page. The server decides what the token can do based on the
-// user's kind + rules; the frontend just attaches it.
+// Browser sessions replaced the localStorage-bearer flow. The
+// agentboard_session cookie (HttpOnly, set by /api/auth/login) is
+// what authenticates every API call from the SPA; agentboard_csrf
+// (readable here) is copied into X-CSRF-Token on every state-
+// changing call so a cross-origin form post can't ride the cookie.
+//
+// PATs (`ab_*`) still exist as a separate non-browser credential,
+// minted from /tokens. The SPA never uses one — it always speaks
+// to the API as the cookie-authenticated user.
 
-const STORAGE_KEY = 'agentboard:token'
 export const LOGIN_PATH = '/login'
 
-// publicMode is a module-level flag set by SessionGate when an anonymous
-// visitor lands on a route that matches the project's public.paths
-// config. When on, apiFetch stops redirecting 401s to /login — the
-// visitor is expected to see a degraded (but functional) view and
-// explicitly click "Sign in" if they want more.
+// publicMode is set by SessionGate when an anonymous visitor
+// lands on a route that matches the project's public.paths
+// config. When on, apiFetch stops redirecting 401s to /login —
+// the visitor is expected to see a degraded (but functional)
+// view and explicitly click "Sign in" if they want more.
 let publicMode = false
 
 export function setPublicMode(on: boolean) {
@@ -22,11 +27,6 @@ export function isPublicMode(): boolean {
   return publicMode
 }
 
-// Share-token transport changed from URL query + header to fragment +
-// cookie. Fragment is read once in SessionGate, exchanged for an
-// HttpOnly cookie via POST /api/share/redeem, and never touches the
-// client-side state again. Nothing else to manage here.
-
 export interface SessionUser {
   username: string
   display_name?: string
@@ -34,27 +34,25 @@ export interface SessionUser {
   avatar_color?: string
 }
 
-export function getToken(): string | null {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
+// readCookie returns the value of a cookie set on the document, or
+// null. The CSRF cookie is the only one the SPA needs to read; the
+// session cookie is HttpOnly and so invisible from JS.
+function readCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const want = name + '='
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim()
+    if (trimmed.startsWith(want)) {
+      return decodeURIComponent(trimmed.substring(want.length))
+    }
   }
+  return null
 }
 
-export function setToken(token: string) {
-  window.localStorage.setItem(STORAGE_KEY, token)
-}
-
-export function clearToken() {
-  window.localStorage.removeItem(STORAGE_KEY)
-}
-
-// redirectToLogin hard-navigates to /login and remembers the current path
-// so we can bounce the user back after they sign in. Uses
-// window.location.assign rather than react-router Navigate so it works
-// from anywhere (hooks, event handlers, the apiFetch 401 branch) without
-// a component context.
+// redirectToLogin hard-navigates to /login and remembers the current
+// path so we can bounce the user back after they sign in. Uses
+// window.location.assign so it works from anywhere (hooks, event
+// handlers, the apiFetch 401 branch) without a component context.
 export function redirectToLogin(reason?: 'unauthorized' | 'missing') {
   if (typeof window === 'undefined') return
   const cur = window.location.pathname + window.location.search
@@ -65,22 +63,10 @@ export function redirectToLogin(reason?: 'unauthorized' | 'missing') {
   window.location.assign(qs ? `${LOGIN_PATH}?${qs}` : LOGIN_PATH)
 }
 
-// apiFetch wraps fetch with the bearer header + centralized 401 handling.
-//
-//   - If a token is stored, it's attached as Authorization: Bearer.
-//   - On a 401, the token is cleared and the user is redirected to /login
-//     with a `reason=unauthorized` marker. Tokens never expire on their
-//     own — a 401 means revoked, never-valid, or the user was deactivated.
-//   - 403 does NOT redirect — that means "you're signed in but can't touch
-//   - 403 does NOT redirect — that means "you're signed in but can't touch
-//     this". Callers decide how to render.
-//
-// The `skipAuth` option exists for /api/health and the login helpers that
-// happen before a token exists.
-// isSameOrigin returns true when url targets this page's origin. Relative
-// paths count as same-origin. We only attach the bearer for same-origin
-// requests so user-provided URLs (e.g. ApiList components pointing at
-// third-party JSON) can't leak the token.
+// isSameOrigin returns true when url targets this page's origin.
+// Relative paths count as same-origin. We only attach the CSRF
+// header for same-origin requests so user-provided URLs (e.g.
+// ApiList components pointing at third-party JSON) can't leak it.
 function isSameOrigin(url: string): boolean {
   if (!url) return true
   if (url.startsWith('/') && !url.startsWith('//')) return true
@@ -92,36 +78,50 @@ function isSameOrigin(url: string): boolean {
   }
 }
 
-export async function apiFetch(input: RequestInfo | URL, init: RequestInit & { skipAuth?: boolean } = {}): Promise<Response> {
-  const { skipAuth, headers, ...rest } = init
+// apiFetch wraps fetch with cookie-aware credentials + CSRF +
+// centralized 401 handling.
+//
+//   - credentials: 'include' so the agentboard_session cookie rides
+//     every same-origin request.
+//   - For non-GET/HEAD/OPTIONS calls we attach X-CSRF-Token from
+//     the agentboard_csrf cookie. The server enforces equality; a
+//     missing or mismatched value 403s with code=CSRF_REQUIRED.
+//   - On 401, redirect to /login (unless `skipAuth` or publicMode).
+//
+// `skipAuth` exists for /api/auth/login and the SessionGate's
+// /api/auth/me probe — both must be free to receive a 401 without
+// triggering the redirect.
+export async function apiFetch(
+  input: RequestInfo | URL,
+  init: RequestInit & { skipAuth?: boolean } = {},
+): Promise<Response> {
+  const { skipAuth, headers, credentials, ...rest } = init
   const merged = new Headers(headers || {})
   const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-  if (!skipAuth && isSameOrigin(urlStr)) {
-    const tok = getToken()
-    if (tok && !merged.has('Authorization')) merged.set('Authorization', `Bearer ${tok}`)
+  const sameOrigin = isSameOrigin(urlStr)
+  const method = (rest.method || 'GET').toUpperCase()
+  if (sameOrigin && method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const csrf = readCookie('agentboard_csrf')
+    if (csrf && !merged.has('X-CSRF-Token')) {
+      merged.set('X-CSRF-Token', csrf)
+    }
   }
-  const res = await fetch(input, { ...rest, headers: merged })
-  if (res.status === 401 && !skipAuth && isSameOrigin(urlStr) && !publicMode) {
-    // Token missing / invalid / revoked. Clear it so the login page shows
-    // a fresh prompt rather than re-submitting the dead one, and bounce.
-    // In publicMode we intentionally skip the redirect — an anonymous
-    // visitor landing on a public page can still see a 401 for a
-    // non-public data key, but we surface it as a missing-value render
-    // rather than kicking them to /login.
-    clearToken()
+  const res = await fetch(input, {
+    ...rest,
+    headers: merged,
+    credentials: credentials ?? 'include',
+  })
+  if (res.status === 401 && !skipAuth && sameOrigin && !publicMode) {
     redirectToLogin('unauthorized')
   }
   return res
 }
 
-// sseURL returns an EventSource URL with ?token= appended when a token is
-// stored. EventSource can't set Authorization headers, so the ?token=
-// query-param path (already supported by the middleware) is how SSE auths.
+// sseURL returns the path unchanged. EventSource sends cookies on
+// same-origin requests automatically, so the cookie-based session
+// authenticates SSE streams without any URL-side plumbing.
 export function sseURL(path: string): string {
-  const tok = getToken()
-  if (!tok) return path
-  const sep = path.includes('?') ? '&' : '?'
-  return `${path}${sep}token=${encodeURIComponent(tok)}`
+  return path
 }
 
 export interface SetupStatus {
@@ -129,11 +129,11 @@ export interface SetupStatus {
   invite_url?: string
 }
 
-// fetchSetupStatus asks the server whether the board has been claimed
-// and, when unclaimed, whether a bootstrap invitation is active.
-// Open endpoint — no token needed. Returns a permissive default on
-// network error so the UI falls through to the sign-in form rather
-// than showing "first setup" on a flaky connection.
+// fetchSetupStatus asks the server whether the board has been
+// claimed and, when unclaimed, whether a bootstrap invitation is
+// active. Open endpoint — no auth needed. Returns a permissive
+// default on network error so the UI falls through to the sign-
+// in form rather than showing "first setup" on a flaky connection.
 export async function fetchSetupStatus(): Promise<SetupStatus> {
   try {
     const res = await fetch('/api/setup/status')
@@ -141,5 +141,60 @@ export async function fetchSetupStatus(): Promise<SetupStatus> {
     return (await res.json()) as SetupStatus
   } catch {
     return { initialized: true }
+  }
+}
+
+// fetchSessionUser probes /api/auth/me. Returns null on 401 (not
+// signed in). The SPA's SessionGate uses this to decide whether
+// to render the protected shell or bounce to /login.
+export async function fetchSessionUser(): Promise<SessionUser | null> {
+  try {
+    const res = await apiFetch('/api/auth/me', { skipAuth: true })
+    if (res.status === 200) {
+      const body = (await res.json()) as { user: SessionUser }
+      return body.user
+    }
+  } catch {
+    // network error — treat as not signed in
+  }
+  return null
+}
+
+// signInWithPassword posts to /api/auth/login. The response sets
+// the agentboard_session + agentboard_csrf cookies; on success
+// the caller can navigate freely. Returns the user shape on 200,
+// or throws an Error on any non-200 with the server's message.
+export async function signInWithPassword(
+  username: string,
+  password: string,
+): Promise<SessionUser> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ username, password }),
+  })
+  if (res.ok) {
+    const body = (await res.json()) as { user: SessionUser }
+    return body.user
+  }
+  let msg = 'Sign-in failed.'
+  try {
+    const body = await res.json()
+    msg = body.error || body.message || msg
+  } catch {
+    // ignore body decode failure
+  }
+  throw new Error(msg)
+}
+
+// signOut posts to /api/auth/logout. Idempotent — the server
+// clears cookies and revokes the session row whether or not it
+// was already gone.
+export async function signOut(): Promise<void> {
+  try {
+    await apiFetch('/api/auth/logout', { method: 'POST', skipAuth: true })
+  } catch {
+    // best-effort
   }
 }

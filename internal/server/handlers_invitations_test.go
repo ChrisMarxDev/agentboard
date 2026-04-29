@@ -237,6 +237,76 @@ func TestInvitation_AdminBadRole(t *testing.T) {
 	r.Body.Close()
 }
 
+// TestInvitation_RedeemWithPassword proves the redeem flow accepts
+// an optional password, hashes it, and emits a session cookie in
+// the same response. Browser-driven invitees land on the dashboard
+// already signed in; agent-driven (no password) callers still
+// receive only the token, unchanged.
+func TestInvitation_RedeemWithPassword(t *testing.T) {
+	srv, ts := newAuthedTestServerWithSrv(t, "")
+	inv, _ := srv.Invitations.Create(invitations.CreateParams{
+		Role:      invitations.RoleMember,
+		CreatedBy: "alice",
+		ExpiresIn: 24 * time.Hour,
+	})
+	body, _ := json.Marshal(map[string]string{
+		"username": "dana",
+		"password": "redeem-password-1234",
+	})
+	r, err := bareClient().Post(
+		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 201 {
+		t.Fatalf("redeem with password = %d", r.StatusCode)
+	}
+	// Cookies were set on the response.
+	gotSession, gotCSRF := false, false
+	for _, c := range r.Cookies() {
+		if c.Name == auth.SessionCookieName {
+			gotSession = true
+		}
+		if c.Name == auth.CSRFCookieName {
+			gotCSRF = true
+		}
+	}
+	if !gotSession || !gotCSRF {
+		t.Errorf("missing cookies: session=%v csrf=%v", gotSession, gotCSRF)
+	}
+	// Password actually verifies.
+	if _, err := srv.Auth.VerifyLogin("dana", "redeem-password-1234"); err != nil {
+		t.Errorf("post-redeem login: %v", err)
+	}
+}
+
+// TestInvitation_RedeemRejectsWeakPassword guards the floor —
+// an 8-character password gets rejected with code=weak_password.
+func TestInvitation_RedeemRejectsWeakPassword(t *testing.T) {
+	srv, ts := newAuthedTestServerWithSrv(t, "")
+	inv, _ := srv.Invitations.Create(invitations.CreateParams{
+		Role:      invitations.RoleMember,
+		CreatedBy: "alice",
+		ExpiresIn: 24 * time.Hour,
+	})
+	body, _ := json.Marshal(map[string]string{
+		"username": "dana",
+		"password": "short", // < MinPasswordLen
+	})
+	r, err := bareClient().Post(
+		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		"application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 400 {
+		t.Errorf("weak password = %d, want 400", r.StatusCode)
+	}
+}
+
 func TestInvitation_NonAdminCannotCreate(t *testing.T) {
 	_, ts := newTestServer(t)
 	// default client is member-kind — 403 on admin subtree.

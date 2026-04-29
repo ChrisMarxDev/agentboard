@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronDown, KeyRound, ShieldCheck, LogOut } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
-import { clearToken, redirectToLogin } from '../../lib/session'
+import { redirectToLogin, signOut } from '../../lib/session'
 
 // UserMenu — persistent "signed in as" indicator anchored top-right of
 // the shell. Renders a pill with the user's avatar color + name, opens
@@ -152,8 +152,8 @@ export function UserMenu() {
           <div style={{ borderTop: '1px solid var(--border)', margin: '0.25rem 0' }} />
           <button
             style={{ ...item, color: 'var(--error)' }}
-            onClick={() => {
-              clearToken()
+            onClick={async () => {
+              await signOut()
               redirectToLogin()
             }}
           >

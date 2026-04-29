@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { Inbox as InboxIcon, LogOut, Magnet, Search, Users as UsersIcon, X } from 'lucide-react'
-import { clearToken, getToken, redirectToLogin } from '../../lib/session'
+import { redirectToLogin, signOut } from '../../lib/session'
+import { useMe } from '../../hooks/useMe'
 import { ThemeSwitch } from './ThemeSwitch'
 import Kbd from './Kbd'
 import ContentNav from './ContentNav'
@@ -401,15 +402,17 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
   )
 }
 
-// SignOutButton clears the stored token and redirects to /login. Hidden
-// when there's no token (open-mode / loopback install) so we don't show a
-// sign-out affordance that means nothing.
+// SignOutButton revokes the cookie session server-side and bounces
+// to /login. Hidden when no signed-in user is resolved (anonymous /
+// public-route visit) so we don't show a sign-out affordance that
+// means nothing.
 function SignOutButton() {
-  if (!getToken()) return null
+  const me = useMe()
+  if (!me) return null
   return (
     <button
-      onClick={() => {
-        clearToken()
+      onClick={async () => {
+        await signOut()
         redirectToLogin()
       }}
       aria-label="Sign out"
