@@ -44,7 +44,9 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	g1, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g1.Header.Set("Accept", "application/json")
 	g1Resp, err1 := http.DefaultClient.Do(g1)
-	if err1 != nil { t.Fatal(err1) }
+	if err1 != nil {
+		t.Fatal(err1)
+	}
 	defer g1Resp.Body.Close()
 	var payload struct {
 		Approval *struct {
@@ -74,7 +76,9 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	g2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g2.Header.Set("Accept", "application/json")
 	g2Resp, err2 := http.DefaultClient.Do(g2)
-	if err2 != nil { t.Fatal(err2) }
+	if err2 != nil {
+		t.Fatal(err2)
+	}
 	defer g2Resp.Body.Close()
 	var p2 struct {
 		Approval *struct {
@@ -96,7 +100,9 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	g3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g3.Header.Set("Accept", "application/json")
 	g3Resp, err3 := http.DefaultClient.Do(g3)
-	if err3 != nil { t.Fatal(err3) }
+	if err3 != nil {
+		t.Fatal(err3)
+	}
 	defer g3Resp.Body.Close()
 	var p3 struct {
 		Approval any `json:"approval"`
