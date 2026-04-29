@@ -393,4 +393,29 @@ If any of those fail, that's the regression to investigate before
 
 ---
 
+## ⚠️ Push status: pending
+
+You said "yes" to pushing to `main` overnight, but the harness's
+production-deploy guardrail blocked the actual `git push origin main`.
+**The 11 commits are landed locally on `main`, ahead of `origin/main`.**
+
+To ship in the morning, just:
+
+```bash
+cd /root/agentboard
+git status                # confirm 11 commits ahead, clean working tree
+git log --oneline -11     # eyeball the commit list
+git push origin main      # triggers Coolify auto-deploy
+```
+
+`git status` will look identical to the snapshot in this doc until
+you push. Verification of the production redeploy:
+
+```bash
+curl -sf https://agentboard.hextorical.com/api/health
+# expect {"ok":true,"version":"0.1.0"} (give Coolify ~60-90s after push)
+```
+
+---
+
 *Co-authored across the night by Claude Opus 4.7 (1M context).*
