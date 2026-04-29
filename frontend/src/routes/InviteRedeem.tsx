@@ -274,50 +274,37 @@ function ClaimedBriefing({
   const [target, setTarget] = useState<AgentTarget>('claude-code')
   const base = window.location.origin
 
-  const claudeCodePrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project. Run the following ONCE in your shell to wire AgentBoard as an MCP tool server (after that, the agentboard_* tools are available to you for the rest of this session and any future ones):
+  // The flow has two halves with two different audiences. Splitting
+  // them prevents the failure mode the user dogfooded: an agent that
+  // tries to self-bootstrap MCP fails because MCP servers register
+  // at session start, not mid-session. The HUMAN runs the setup; the
+  // agent only sees the post-setup prompt.
+  const setupCommand = target === 'claude-code'
+    ? `claude mcp add agentboard --transport http ${base}/mcp \\
+  --header "Authorization: Bearer ${token}"`
+    : `URL:     ${base}/mcp
+Header:  Authorization: Bearer ${token}`
 
-    claude mcp add agentboard --transport http ${base}/mcp \\
-      --header "Authorization: Bearer ${token}"
+  const setupNotes = target === 'claude-code'
+    ? `Run that on the machine where your Claude Code session lives, then restart Claude Code so the new MCP server is loaded. \`claude mcp list\` should show "agentboard" connected.`
+    : `Add it through your client's MCP connector UI (Cursor: Settings → MCP; Cody: settings.json mcpServers; Claude.ai: Settings → Connectors → Add custom). Then restart the session so the new tools register.`
 
-Server:    ${base}
-Username:  ${username} (role: ${role})
-Token:     ${token}   (already in the connector above; only needed for raw HTTP calls)
+  const agentPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
 
-Once the MCP server is added, your first action MUST be to fetch the skill manifest. It documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you are expected to follow:
-
-    agentboard_get_skill({ slug: "agentboard" })
-
-That single document is the contract. Read it once, then act.
-
-Never write directly to disk on the AgentBoard host — every change goes through MCP tools (or REST as a fallback). The skill manifest covers all of it.
-
-Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
-
-  const otherPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
-
-If your runtime supports remote MCP servers (Cursor, Cody, Continue, Claude.ai custom connector, etc.), wire AgentBoard as a tool server using these settings:
-
-    URL:     ${base}/mcp
-    Header:  Authorization: Bearer ${token}
-
-After that, the agentboard_* tools are available to you. Your first action MUST be to fetch the skill manifest:
+Your first action MUST be to fetch the skill manifest — it documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you must follow:
 
     agentboard_get_skill({ slug: "agentboard" })
 
-If your runtime CANNOT add MCP servers but CAN reach HTTP, the same skill is available via REST:
-
-    GET ${base}/api/skills/agentboard
-    with header: Authorization: Bearer ${token}
+If the agentboard_* tools aren't available to you, the MCP server hasn't been wired up yet — stop and tell the human "I don't see the agentboard MCP tools; please add the MCP server and restart this session." Do NOT try to add the MCP server yourself; that has to happen in the parent process before your session starts.
 
 Server:    ${base}
 Username:  ${username} (role: ${role})
-Token:     ${token}
 
-The skill manifest documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you are expected to follow. Read it once, then act. Never write directly to disk on the AgentBoard host — every change goes through MCP or REST.
+Read the manifest once, then act. Never write directly to disk on the AgentBoard host — every change goes through MCP tools (or REST if you can reach HTTP). The skill manifest covers all of it.
 
 Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
 
-  const promptText = target === 'claude-code' ? claudeCodePrompt : otherPrompt
+  const promptText = agentPrompt
 
   const copy = async () => {
     const ok = await copyToClipboard(promptText)
@@ -344,21 +331,6 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
     borderRadius: '0.75rem',
     padding: '2rem 2rem 1.75rem',
     boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
-  }
-  const promptArea: CSSProperties = {
-    width: '100%',
-    minHeight: '14rem',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-    fontSize: '0.78rem',
-    lineHeight: 1.5,
-    padding: '0.875rem 1rem',
-    border: '1px solid var(--border)',
-    borderRadius: '0.5rem',
-    background: 'var(--bg-secondary)',
-    color: 'var(--text)',
-    whiteSpace: 'pre',
-    overflow: 'auto',
-    resize: 'vertical',
   }
   const primaryBtn: CSSProperties = {
     display: 'inline-flex',
@@ -391,13 +363,13 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
           </h1>
         </div>
         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: 0 }}>
-          Your account is created and a token is saved in this browser.
-          The fastest way to get going is to wire AgentBoard into your
-          AI agent as an MCP tool server, then paste the briefing below
-          so the agent knows what to do next.
+          Two-step handoff: <b>you</b> wire AgentBoard as an MCP server
+          on the machine where your agent runs, then paste the agent
+          prompt into your chat. The agent can't bootstrap MCP itself —
+          MCP servers register at session start, not mid-session.
         </p>
 
-        <div style={{ display: 'flex', gap: '0.375rem', marginTop: '1.25rem', marginBottom: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.375rem', marginTop: '1.25rem', marginBottom: '1rem' }}>
           {(['claude-code', 'other'] as const).map((t) => {
             const active = target === t
             return (
@@ -422,34 +394,38 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
           })}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-          <div style={{
-            fontSize: '0.6875rem',
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: 'var(--text-secondary)',
-          }}>
-            Briefing for your agent
-          </div>
-          <button type="button" onClick={copy} style={primaryBtn}>
-            <Copy size={14} />
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-        </div>
-
-        <textarea
-          readOnly
-          value={promptText}
-          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
-          style={promptArea}
+        <StepBlock
+          number={1}
+          title="Set up MCP (once, for you to run)"
+          body={setupCommand}
+          note={setupNotes}
+          onCopy={async () => {
+            const ok = await copyToClipboard(setupCommand)
+            if (ok) {
+              setCopied(true)
+              setTimeout(() => setCopied(false), 1500)
+            }
+          }}
+          copyLabel={copied ? 'Copied!' : 'Copy command'}
+          monospace
         />
 
-        <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '0.875rem' }}>
-          Paste this into your agent's chat. It contains your token —
-          treat the message like a password. If you lose it, you can
-          rotate the token from <code>/tokens</code> on the dashboard.
-        </p>
+        <div style={{ height: '1.25rem' }} />
+
+        <StepBlock
+          number={2}
+          title="Paste this to your agent"
+          body={promptText}
+          note={
+            <>
+              Contains your token — treat like a password. If you lose
+              it, rotate from <code>/tokens</code> on the dashboard.
+            </>
+          }
+          onCopy={copy}
+          copyLabel={copied ? 'Copied!' : 'Copy prompt'}
+          monospace
+        />
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
           <button type="button" onClick={onContinue} style={ghostBtn}>
@@ -457,6 +433,114 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
             <ArrowRight size={14} />
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+
+// StepBlock renders one of the two halves of the post-claim briefing —
+// labeled with a step number so the human can see at a glance which
+// part is theirs to run vs which to paste into the agent. Each block
+// has its own copy button so the user does not accidentally copy the
+// whole card.
+function StepBlock({
+  number,
+  title,
+  body,
+  note,
+  onCopy,
+  copyLabel,
+  monospace,
+}: {
+  number: number
+  title: string
+  body: string
+  note: React.ReactNode
+  onCopy: () => void
+  copyLabel: string
+  monospace?: boolean
+}) {
+  return (
+    <div style={{
+      border: "1px solid var(--border)",
+      borderRadius: "0.6rem",
+      padding: "0.875rem 1rem 1rem",
+      background: "var(--bg)",
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: "0.5rem",
+      }}>
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+        }}>
+          <div style={{
+            width: "1.5rem",
+            height: "1.5rem",
+            borderRadius: "9999px",
+            background: "var(--accent)",
+            color: "white",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "0.75rem",
+            fontWeight: 600,
+          }}>
+            {number}
+          </div>
+          <div style={{ fontSize: "0.875rem", fontWeight: 500 }}>{title}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onCopy}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            padding: "0.35rem 0.75rem",
+            borderRadius: "0.4rem",
+            background: "transparent",
+            color: "var(--text-secondary)",
+            border: "1px solid var(--border)",
+            fontSize: "0.8125rem",
+            cursor: "pointer",
+          }}
+        >
+          <Copy size={12} />
+          {copyLabel}
+        </button>
+      </div>
+      <textarea
+        readOnly
+        value={body}
+        onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+        style={{
+          width: "100%",
+          minHeight: monospace && body.split("\n").length > 4 ? "10rem" : "4.5rem",
+          fontFamily: monospace ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" : "inherit",
+          fontSize: "0.78rem",
+          lineHeight: 1.5,
+          padding: "0.75rem 0.875rem",
+          border: "1px solid var(--border)",
+          borderRadius: "0.45rem",
+          background: "var(--bg-secondary)",
+          color: "var(--text)",
+          whiteSpace: "pre",
+          overflow: "auto",
+          resize: "vertical",
+        }}
+      />
+      <div style={{
+        fontSize: "0.78125rem",
+        color: "var(--text-secondary)",
+        marginTop: "0.5rem",
+      }}>
+        {note}
       </div>
     </div>
   )
