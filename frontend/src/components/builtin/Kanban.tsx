@@ -39,6 +39,11 @@ function defaultColOrder(present: string[], groupBy: string): string[] {
   // canonical "col" field; for other groupBy keys, fall back to the
   // discovery order the items naturally produce (alphabetical).
   if (groupBy !== 'col') return present
+  // Fresh boards with no cards yet still need columns to render against,
+  // otherwise the user lands on a Kanban-shaped void after creating a
+  // project. Seed the canonical workflow trio so the page is usable
+  // from the first second.
+  if (present.length === 0) return ['todo', 'in_progress', 'done']
   const set = new Set(present)
   const known = KNOWN_COL_ORDER.filter(c => set.has(c))
   const knownSet = new Set(known)
@@ -79,9 +84,16 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     return <div className="p-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
   }
 
-  if (!data || !Array.isArray(data)) return null
+  // Folder boards (source ends with "/") render an empty-but-usable
+  // board on first paint — the + New task affordance is the whole
+  // point of a fresh project page. Inline-array boards still need
+  // real data; bail to keep the legacy demo shape unchanged.
+  const isFolderBoard = effectiveSource.endsWith('/')
+  if (!data || !Array.isArray(data)) {
+    if (!isFolderBoard) return null
+  }
 
-  const items = data as Record<string, unknown>[]
+  const items = (Array.isArray(data) ? data : []) as Record<string, unknown>[]
 
   // Group cards by column, preserving the array index on each card so we
   // can both render a stable order AND compute new `order` values on drop.
@@ -196,11 +208,11 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     }
   }
 
-  // Folder-collection boards (source ends with "/") are the only place
-  // the + New Task affordance makes sense — that's where each card is a
-  // real .md doc we can write to. For frontmatter-array boards (inline
-  // demo data), skip the button.
-  const isFolderBoard = effectiveSource.endsWith('/')
+  // (Folder-collection boards (source ends with "/") are the only place
+  //  the + New Task affordance makes sense — that's where each card is a
+  //  real .md doc we can write to. For frontmatter-array boards (inline
+  //  demo data), skip the button. The flag is computed near the top of
+  //  the function alongside the empty-board early-render logic.)
 
   return (
     <>

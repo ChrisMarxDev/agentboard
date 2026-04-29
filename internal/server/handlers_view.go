@@ -562,9 +562,12 @@ func folderChildren(pm *mdx.PageManager, key string) ([]map[string]any, bool) {
 		}
 		rows = append(rows, row)
 	}
-	if len(rows) == 0 {
-		return nil, false
-	}
+	// Empty folder collections are a valid result, not a missing key.
+	// The trailing slash on `key` is the marker that the caller meant
+	// "give me a folder feed"; if the folder has no docs yet, return
+	// an empty array so components like <Kanban> render an empty board
+	// with the + New task affordance instead of falling back to a
+	// non-folder lookup and then a no-data render.
 	return rows, true
 }
 
