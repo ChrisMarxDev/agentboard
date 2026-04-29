@@ -66,6 +66,15 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "NOT_FOUND", "file not found: "+name)
 		return
 	}
+	if errors.Is(err, files.ErrIsDirectory) {
+		// /api/files/<path> targets file leaves only. A directory at
+		// the same path means "no file here" from the API's vantage —
+		// the SPA's fallback chain HEADs files first to disambiguate
+		// page vs file vs folder URLs and we mustn't poison it with
+		// a 500 just because the path is a folder.
+		respondError(w, http.StatusNotFound, "NOT_FOUND", "no file at this path (is a directory)")
+		return
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return

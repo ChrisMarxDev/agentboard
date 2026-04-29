@@ -190,8 +190,17 @@ export default function PageRenderer() {
       return
     }
     if (dataContext.error) {
-      // view/open came back 401/403/etc — surface the friendly panel.
-      setError('__AUTH__')
+      // DataContext classifies its errors:
+      //   "auth:..."      → 401/403, render AuthRequiredPanel
+      //   "transient:..." → 5xx, network blip, parse failure
+      // The transient bucket keeps the SPA from telling a logged-in
+      // user "auth required" every time SQLite has a hiccup or a
+      // concurrent write momentarily destabilises the bundle.
+      if (dataContext.error.startsWith('auth:')) {
+        setError('__AUTH__')
+      } else {
+        setError(dataContext.error.replace(/^transient:/, ''))
+      }
       setLoading(false)
       return
     }

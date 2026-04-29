@@ -86,35 +86,83 @@ export function DataProvider({ children, path }: DataProviderProps) {
 
   // Single round-trip page open. Replaces the old fetchAll() + per-key
   // calls. Data outside the view's scope simply isn't in the response.
+  //
+  // Error channel is classified, not free-form, because PageRenderer
+  // must tell auth-rejection apart from a transient 5xx. Conflating
+  // the two surfaced every SQLite hiccup as "Auth required" — the
+  // user thought the box was logging them out at random.
+  //
+  // 5xx + network → one inline retry after a brief delay. The
+  // common case is a sub-second blip (page tree mid-rescan, scope
+  // rebuild during a concurrent write); a single retry usually
+  // covers it without making the UI flash. If the retry also fails,
+  // surface error.kind='transient' so PageRenderer renders an
+  // inline "couldn't load" message that the user can dismiss
+  // by navigating, not the auth-required panel.
   const open = useCallback(async (p: string) => {
     setLoading(true)
     setError(null)
-    try {
-      const res = await apiFetch('/api/view/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: p }),
-      })
-      if (!res.ok) {
-        // 404 = page doesn't exist at this path. Not an error
-        // condition — let PageRenderer's fallback resolve to a folder
-        // landing or render the "page not found" affordance. Reserve
-        // the error channel for actual failures (5xx, network) and
-        // for auth (401/403, surfaced as the AuthRequiredPanel).
-        if (res.status === 404) {
-          setBundle(null)
-          return
-        }
-        setError(`view/open ${p} → ${res.status}`)
+
+    async function attempt(): Promise<Response | null> {
+      try {
+        return await apiFetch('/api/view/open', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: p }),
+        })
+      } catch {
+        return null
+      }
+    }
+
+    let res = await attempt()
+    if ((!res || res.status >= 500) && res?.status !== 503) {
+      // Network failure or 5xx other than the explicit transient
+      // signal — wait one tick and retry once. 503 is the deliberate
+      // "auth lookup mid-write, retry" code from view middleware;
+      // it gets the same treatment.
+    }
+    if (!res || res.status >= 500) {
+      await new Promise(r => setTimeout(r, 250))
+      res = await attempt()
+    }
+
+    if (!res) {
+      setError('transient:view/open network failure')
+      setBundle(null)
+      setLoading(false)
+      return
+    }
+    if (!res.ok) {
+      // 404 = page doesn't exist at this path. Not an error
+      // condition — let PageRenderer's fallback resolve to a folder
+      // landing or render the "page not found" affordance.
+      if (res.status === 404) {
         setBundle(null)
+        setLoading(false)
         return
       }
+      // 403 = signed in but blocked from this view (per-user rules).
+      // 401 is handled inside apiFetch (clears token + redirects),
+      // so anything 401 reaches here only if it slipped publicMode —
+      // treat it the same as 403 for UI purposes.
+      if (res.status === 401 || res.status === 403) {
+        setError('auth:view/open ' + res.status)
+      } else {
+        setError(`transient:view/open ${p} → ${res.status}`)
+      }
+      setBundle(null)
+      setLoading(false)
+      return
+    }
+
+    try {
       const b = (await res.json()) as ViewBundle
       setBundle(b)
       // Replay all initial values to existing subscribers.
       for (const [k, v] of Object.entries(b.data)) notify(k, v)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'view/open failed')
+      setError('transient:' + (e instanceof Error ? e.message : 'parse failed'))
     } finally {
       setLoading(false)
     }
@@ -157,9 +205,25 @@ export function DataProvider({ children, path }: DataProviderProps) {
         if (!cancelled) void open(path!)
       })
 
-      es.addEventListener('page-updated', () => {
-        if (!cancelled) void open(path!)
+      es.addEventListener('page-updated', (evt) => {
+        // Two consumers share this stream:
+        //   1. The shell sidebar (usePages) — wants every page
+        //      change globally to refresh its tree. Dispatched as
+        //      a window event regardless of relevance.
+        //   2. This DataContext — only re-opens when the changed
+        //      path is THIS view's path or one of its scope-tracked
+        //      subpages. Out-of-scope edits don't change our bundle,
+        //      so re-opening is wasteful and causes loading-flash
+        //      cascades during rapid edits elsewhere.
         window.dispatchEvent(new CustomEvent('agentboard:page-updated'))
+        if (cancelled || !path) return
+        let changed = ''
+        try {
+          changed = (JSON.parse((evt as MessageEvent).data) as { path?: string }).path ?? ''
+        } catch { /* ignore */ }
+        const norm = changed.replace(/\.md$/, '').replace(/^\//, '')
+        if (norm && norm !== path && !norm.startsWith(path + '/')) return
+        void open(path)
       })
 
       es.addEventListener('ready', () => {
