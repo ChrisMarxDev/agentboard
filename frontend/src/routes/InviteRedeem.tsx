@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { CheckCircle2, Mail } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Copy, Mail } from 'lucide-react'
 import {
   getInvitationPublic,
   redeemInvitation,
@@ -30,6 +30,12 @@ export default function InviteRedeem() {
   const [displayName, setDisplayName] = useState('')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // After redeem succeeds, the page becomes a "hand this to your
+  // agent" briefing instead of bouncing straight to the dashboard.
+  // Token is held in component state — already saved to localStorage
+  // and visible at /tokens once the user lands on the dashboard,
+  // but this is the one moment we can pre-bake a copyable prompt.
+  const [claimedToken, setClaimedToken] = useState<string | null>(null)
 
   useEffect(() => {
     getInvitationPublic(id)
@@ -50,7 +56,9 @@ export default function InviteRedeem() {
       const result = await redeemInvitation(id, clean, displayName.trim() || undefined)
       setToken(result.token)
       refreshMe()
-      navigate('/')
+      // Show the agent-handoff briefing instead of navigating. The
+      // user clicks "Continue" once they've copied the prompt.
+      setClaimedToken(result.token)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -147,6 +155,17 @@ export default function InviteRedeem() {
     )
   }
 
+  if (claimedToken) {
+    return (
+      <ClaimedBriefing
+        token={claimedToken}
+        username={username}
+        role={invite.role}
+        onContinue={() => navigate('/')}
+      />
+    )
+  }
+
   return (
     <div style={shell}>
       <form onSubmit={submit} style={card}>
@@ -218,6 +237,177 @@ export default function InviteRedeem() {
           {busy ? 'Claiming…' : 'Claim account'}
         </button>
       </form>
+    </div>
+  )
+}
+
+// ClaimedBriefing renders the post-redeem agent-handoff. The pitch:
+// the human just claimed an account; their actual job is to put an
+// AI agent in front of AgentBoard. We pre-bake a copy-paste prompt
+// that includes the token, server URL, and exact endpoints the agent
+// should hit first. The user pastes that into Claude / Cursor /
+// Cody / whatever and the agent takes over.
+function ClaimedBriefing({
+  token,
+  username,
+  role,
+  onContinue,
+}: {
+  token: string
+  username: string
+  role: string
+  onContinue: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+  const base = window.location.origin
+
+  // The text below is intentionally addressed in second person to
+  // the AGENT, not to the human. The human's job is to copy + paste;
+  // the agent reads the prompt and acts on it.
+  const promptText = `You are now using AgentBoard as the persistent knowledge base for this project. AgentBoard is a content surface for agent teams: agents write — pages, files, tasks, data — and humans read.
+
+Server:        ${base}
+Auth token:    ${token}
+Username:      ${username} (role: ${role})
+
+Treat the token like a password. Pass it on every request:
+
+    Authorization: Bearer ${token}
+
+Before doing anything else, fetch the skill manifest. It documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions agents are expected to follow:
+
+    curl -H "Authorization: Bearer ${token}" \\
+      ${base}/api/skills/agentboard
+
+That single document is the contract. Read it once, then act.
+
+Quick health checks:
+
+    curl -H "Authorization: Bearer ${token}" ${base}/api/health
+    curl -H "Authorization: Bearer ${token}" ${base}/api/me
+
+If your runtime supports MCP, AgentBoard exposes a tool server too. From Claude Code:
+
+    claude mcp add agentboard --transport http ${base}/mcp \\
+      --header "Authorization: Bearer ${token}"
+
+Never write directly to disk on the AgentBoard host — every change must go through REST or MCP. The skill manifest covers all of it.
+
+Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
+
+  const copy = () => {
+    void navigator.clipboard.writeText(promptText).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  const wideShell: CSSProperties = {
+    minHeight: '100dvh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '2rem',
+    background: 'var(--bg-secondary)',
+    color: 'var(--text)',
+  }
+  const wideCard: CSSProperties = {
+    width: '100%',
+    maxWidth: '44rem',
+    background: 'var(--bg)',
+    border: '1px solid var(--border)',
+    borderRadius: '0.75rem',
+    padding: '2rem 2rem 1.75rem',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.08)',
+  }
+  const promptArea: CSSProperties = {
+    width: '100%',
+    minHeight: '14rem',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontSize: '0.78rem',
+    lineHeight: 1.5,
+    padding: '0.875rem 1rem',
+    border: '1px solid var(--border)',
+    borderRadius: '0.5rem',
+    background: 'var(--bg-secondary)',
+    color: 'var(--text)',
+    whiteSpace: 'pre',
+    overflow: 'auto',
+    resize: 'vertical',
+  }
+  const primaryBtn: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '0.5rem',
+    padding: '0.55rem 1rem',
+    borderRadius: '0.5rem',
+    background: 'var(--accent)',
+    color: 'white',
+    border: 'none',
+    fontSize: '0.875rem',
+    fontWeight: 500,
+    cursor: 'pointer',
+  }
+  const ghostBtn: CSSProperties = {
+    ...primaryBtn,
+    background: 'transparent',
+    color: 'var(--text-secondary)',
+    border: '1px solid var(--border)',
+  }
+
+  return (
+    <div style={wideShell}>
+      <div style={wideCard}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', marginBottom: '0.5rem' }}>
+          <CheckCircle2 size={20} style={{ color: 'var(--accent)' }} />
+          <h1 style={{ fontSize: '1.125rem', margin: 0 }}>
+            You're in, @{username}
+          </h1>
+        </div>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: 0 }}>
+          Your account is created and a token is saved in this browser.
+          The fastest way to get going is to hand the briefing below to
+          your AI agent — it tells the agent how to authenticate, where
+          to find the AgentBoard skill, and how to start writing.
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1.25rem', marginBottom: '0.5rem' }}>
+          <div style={{
+            fontSize: '0.6875rem',
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            color: 'var(--text-secondary)',
+          }}>
+            Briefing for your agent
+          </div>
+          <button type="button" onClick={copy} style={primaryBtn}>
+            <Copy size={14} />
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
+        </div>
+
+        <textarea
+          readOnly
+          value={promptText}
+          onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+          style={promptArea}
+        />
+
+        <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginTop: '0.875rem' }}>
+          Paste this into your agent's chat. It contains your token —
+          treat the message like a password. If you lose it, you can
+          rotate the token from <code>/tokens</code> on the dashboard.
+        </p>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
+          <button type="button" onClick={onContinue} style={ghostBtn}>
+            Continue to dashboard
+            <ArrowRight size={14} />
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
