@@ -537,13 +537,23 @@ function NewProjectButton() {
     setErr(null)
     try {
       const slug = await uniqueSlug(slugify(n))
+      // Columns are explicit in the template so non-technical users
+      // can see — and edit — the workflow stages by opening the page
+      // in the editor. Default trio matches the Kanban's empty-state
+      // fallback so the board looks identical until the user changes
+      // it. Strings shorthand keeps the MDX human-readable; switch to
+      // [{id,label}] objects when relabelling without renaming the
+      // underlying field.
       const body = `---
 title: ${JSON.stringify(n)}
 ---
 
 # ${n}
 
-<Kanban groupBy="col" />
+<Kanban
+  groupBy="col"
+  columns={['todo', 'in_progress', 'done']}
+/>
 `
       const res = await fetch(`/api/content/tasks/${slug}`, {
         method: 'PUT',

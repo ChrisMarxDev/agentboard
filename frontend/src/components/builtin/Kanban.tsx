@@ -18,9 +18,16 @@ interface KanbanProps {
    *  the rendering page's own folder. */
   source?: string
   groupBy: string
-  columns?: string[]
+  /** Columns to render and their order. Either a list of column ids
+   *  (`['todo','doing','done']`) or a richer config with labels
+   *  (`[{id:'todo',label:'To Do'}, ...]`). When omitted, columns are
+   *  inferred from the data plus a sensible default trio for fresh
+   *  boards. */
+  columns?: ReadonlyArray<string | { id: string; label?: string }>
   titleField?: string
 }
+
+interface NormalizedColumn { id: string; label: string }
 
 // KNOWN_COL_ORDER is the canonical workflow order for `col`-shaped
 // kanbans. Anything not in this list slots in alphabetically after the
@@ -112,8 +119,6 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     })
   }
 
-  const colOrder = columns ?? defaultColOrder(Array.from(groups.keys()), groupBy)
-
   const colLabels: Record<string, string> = {
     todo: 'To Do',
     in_progress: 'In Progress',
@@ -122,6 +127,26 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     review: 'Review',
     blocked: 'Blocked',
   }
+
+  // Normalise the `columns` prop to {id, label} objects so authors
+  // can keep writing `columns={['todo','done']}` for the cheap case
+  // and still upgrade to `columns={[{id:'todo',label:'Inbox'}]}`
+  // when they want custom names without renaming the underlying
+  // data field.
+  function normalizeCol(c: string | { id: string; label?: string }): NormalizedColumn {
+    if (typeof c === 'string') return { id: c, label: colLabels[c] ?? prettify(c) }
+    return { id: c.id, label: c.label ?? colLabels[c.id] ?? prettify(c.id) }
+  }
+  function prettify(id: string): string {
+    return id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  }
+
+  const normalisedColumns: NormalizedColumn[] =
+    columns?.map(normalizeCol) ??
+    defaultColOrder(Array.from(groups.keys()), groupBy).map(id => normalizeCol(id))
+  const colOrder = normalisedColumns.map(c => c.id)
+  const labelFor = (id: string) =>
+    normalisedColumns.find(c => c.id === id)?.label ?? colLabels[id] ?? prettify(id)
 
   // computeInsertOrder returns an `order` value that places the dragged
   // card either before `beforeId` (if provided) or at the end of `colItems`.
@@ -217,7 +242,16 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
   return (
     <>
       {isFolderBoard && <NewTaskBar source={effectiveSource} />}
-      <div className="flex gap-4 overflow-x-auto my-4 pb-2">
+      {/* Trello-style horizontal lanes. Fixed-ish column width
+          (min 16rem, max 20rem) so:
+            - the board reads as a board, not a stretched table;
+            - many columns reliably overflow and trigger the
+              horizontal scroll on the wrapper;
+            - cards inside a column don't reflow as the viewport
+              changes width.
+          The wrapper sets `overflow-x-auto` and a small bottom
+          padding so the scrollbar doesn't clip the bottom card. */}
+      <div className="flex gap-3 overflow-x-auto my-4 pb-3" style={{ scrollbarGutter: 'stable' }}>
         {colOrder.map(col => {
           const colItems = groups.get(col) ?? []
           const isOver = dragOverCol === col
@@ -233,20 +267,23 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                 e.preventDefault()
                 void handleDrop(col)
               }}
-              className="min-w-[11rem] flex-1 rounded-lg p-3"
+              className="rounded-lg p-3 flex-shrink-0"
               style={{
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border)',
                 outline: isOver ? '2px solid var(--accent)' : undefined,
                 outlineOffset: isOver ? '-2px' : undefined,
                 transition: 'outline-color 120ms ease-out',
+                minWidth: '16rem',
+                maxWidth: '20rem',
+                width: '18rem',
               }}
             >
               <div
-                className="text-sm font-medium mb-3 flex items-center justify-between"
+                className="text-sm font-medium mb-3 flex items-center justify-between sticky top-0"
                 style={{ color: 'var(--text-secondary)' }}
               >
-                <span>{colLabels[col] ?? col.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</span>
+                <span>{labelFor(col)}</span>
                 <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--border)' }}>
                   {colItems.length}
                 </span>
