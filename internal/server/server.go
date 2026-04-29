@@ -535,6 +535,25 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	// token. The MINTING endpoint stays inside the auth group below.
 	r.Put("/api/upload/{token}", s.handleUploadWithToken)
 
+	// MCP / OAuth 2.1 discovery endpoints. MUST be reachable without
+	// authentication: a client doesn't have a token yet when it asks
+	// "where is your authorization server?". Published per
+	// RFC 9728 (Protected Resource Metadata) + RFC 8414 (Authorization
+	// Server Metadata), referenced by the WWW-Authenticate Bearer
+	// challenge that auth.unauthorized() emits on every 401.
+	r.Get("/.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata)
+	r.Get("/.well-known/oauth-authorization-server", auth.HandleAuthorizationServerMetadata)
+
+	// OAuth 2.1 authorization-server endpoints. Reachable anonymously
+	// for the same reason: the user is acquiring a credential via
+	// /oauth/authorize, then the client exchanges code → token at
+	// /oauth/token. Both paths do their own validation. /oauth/register
+	// is RFC 7591 Dynamic Client Registration.
+	r.Post("/oauth/register", s.handleOAuthRegister)
+	r.Get("/oauth/authorize", s.handleOAuthAuthorize)
+	r.Post("/oauth/authorize/decide", s.handleOAuthAuthorizeDecide)
+	r.Post("/oauth/token", s.handleOAuthToken)
+
 	// API routes
 	r.Group(func(r chi.Router) {
 		gated(r)

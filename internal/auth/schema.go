@@ -67,6 +67,9 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("auth migrate: %w", err)
 	}
+	if _, err := db.Exec(oauthSchemaSQL); err != nil {
+		return fmt.Errorf("auth migrate (oauth): %w", err)
+	}
 	_, err := db.Exec(
 		`INSERT OR REPLACE INTO meta (key, value) VALUES ('auth_schema_version', ?)`,
 		fmt.Sprintf("%d", schemaVersion),

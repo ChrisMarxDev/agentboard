@@ -16,6 +16,7 @@ type ctxKey int
 const (
 	ctxUser ctxKey = iota + 1
 	ctxToken
+	ctxOAuth
 )
 
 // UserFromContext returns the User attached to the request, or nil.
@@ -24,10 +25,18 @@ func UserFromContext(ctx context.Context) *User {
 	return v
 }
 
-// TokenFromContext returns the specific token row used to authenticate
-// the request, or nil.
+// TokenFromContext returns the specific PAT token row used to
+// authenticate the request, or nil. Returns nil when the request was
+// authenticated via an OAuth-issued access token (see OAuthFromContext).
 func TokenFromContext(ctx context.Context) *UserToken {
 	v, _ := ctx.Value(ctxToken).(*UserToken)
+	return v
+}
+
+// OAuthFromContext returns the OAuth access record used to authenticate
+// the request, or nil. Populated only when the Bearer carried `oat_*`.
+func OAuthFromContext(ctx context.Context) *OAuthAccessRecord {
+	v, _ := ctx.Value(ctxOAuth).(*OAuthAccessRecord)
 	return v
 }
 
@@ -47,8 +56,14 @@ type MiddlewareConfig struct {
 //  3. Otherwise a valid token is required. Missing/revoked/deactivated
 //     → 401. The SPA catches 401 via apiFetch and redirects to /login.
 //
+// Two token spaces are accepted: PATs (`ab_*`, the existing user_tokens
+// surface) and OAuth-issued access tokens (`oat_*`, minted via the
+// /oauth/* flow for Claude.ai-style Custom Connectors). OAuth tokens
+// are audience-bound — they're only valid against the MCP resource
+// they were issued for, enforced here.
+//
 // There is no "zero-users = open" shortcut — fresh instances route
-// through /api/setup to claim admin. The server never runs unauthed
+// through /invite/* to claim admin. The server never runs unauthed
 // except on explicitly open paths.
 //
 // last_used_at on the token row is bumped at most once per minute per
@@ -68,7 +83,38 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 				unauthorized(w, r)
 				return
 			}
-			user, tok, err := store.ResolveToken(HashToken(token))
+			hash := HashToken(token)
+
+			// OAuth-issued access tokens carry an explicit prefix so we
+			// can route them to the audience-aware resolver without a
+			// double DB hit on bogus credentials.
+			if strings.HasPrefix(token, OAuthAccessPrefix) {
+				rec, user, err := store.ResolveAccessToken(hash)
+				if err != nil {
+					if errors.Is(err, ErrOAuthTokenInvalid) || errors.Is(err, ErrUserDeactivated) {
+						unauthorized(w, r)
+						return
+					}
+					writeJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "auth lookup error")
+					return
+				}
+				// Per the MCP authorization spec (RFC 8707 + 9728), an
+				// OAuth access token is bound to a single MCP resource
+				// (its audience). Refuse to validate it for any other
+				// path or any other host this binary serves.
+				if !isMCPPath(r.URL.Path) || rec.Audience != CanonicalMCPResourceURL(r) {
+					unauthorized(w, r)
+					return
+				}
+				updater.touchOAuth(rec.ID)
+				ctx := context.WithValue(r.Context(), ctxUser, user)
+				ctx = context.WithValue(ctx, ctxOAuth, rec)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
+			// PAT path — unchanged.
+			user, tok, err := store.ResolveToken(hash)
 			if err != nil {
 				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrUserDeactivated) {
 					unauthorized(w, r)
@@ -84,6 +130,13 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// isMCPPath reports whether the request is targeting the MCP resource.
+// Kept narrow on purpose: OAuth tokens are bound to /mcp (canonical
+// resource) and must not unlock unrelated /api/* surfaces.
+func isMCPPath(p string) bool {
+	return p == "/mcp" || strings.HasPrefix(p, "/mcp/")
 }
 
 // AuthorizeMiddleware enforces per-user access_mode + rules. Reads the
@@ -184,20 +237,19 @@ func extractToken(r *http.Request) string {
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
-	// Emit WWW-Authenticate ONLY on top-level browser navigations.
-	// That's the case where someone typed `/api/files/foo.svg` into
-	// the address bar (or followed a link to a file) and gets the JSON
-	// 401 with no way to provide credentials. The browser's native
-	// Basic Auth prompt is the right UX there: paste the token as the
-	// password and the request retries via r.BasicAuth() → token.
-	//
-	// SPA fetch() calls go through apiFetch which has its own /login
-	// redirect on 401; we don't want the popup racing that flow. The
-	// Sec-Fetch-Mode header (sent by every modern browser) lets us
-	// tell the two apart — `navigate` for top-level, otherwise a
-	// programmatic call.
+	// Always emit a Bearer challenge with the protected-resource-metadata
+	// URL so OAuth-aware MCP clients (Claude.ai Custom Connectors, any
+	// client following the MCP authorization spec) can discover the
+	// authorization server from a bare 401. RFC 9728 §5.1.
+	w.Header().Add("WWW-Authenticate", BearerChallenge(r))
+
+	// Browser top-level navigations also get a Basic challenge so the
+	// native auth prompt fires — paste the token as the password and
+	// the request retries via r.BasicAuth() → token. Programmatic /
+	// fetch() callers (Sec-Fetch-Mode != "navigate") skip this; the SPA
+	// handles 401 via its /login redirect in apiFetch.
 	if r.Header.Get("Sec-Fetch-Mode") == "navigate" {
-		w.Header().Set("WWW-Authenticate", `Basic realm="AgentBoard"`)
+		w.Header().Add("WWW-Authenticate", `Basic realm="AgentBoard"`)
 	}
 	writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 }
@@ -246,13 +298,26 @@ func newUsageUpdater(store *Store) *usageUpdater {
 }
 
 func (u *usageUpdater) touch(tokenID string) {
-	u.mu.Lock()
-	last, ok := u.seen[tokenID]
-	if ok && time.Since(last) < time.Minute {
-		u.mu.Unlock()
-		return
+	if u.shouldUpdate(tokenID) {
+		_ = u.store.TouchTokenLastUsed(tokenID)
 	}
-	u.seen[tokenID] = time.Now()
-	u.mu.Unlock()
-	_ = u.store.TouchTokenLastUsed(tokenID)
+}
+
+func (u *usageUpdater) touchOAuth(tokenID string) {
+	if u.shouldUpdate("oauth:" + tokenID) {
+		_ = u.store.TouchOAuthLastUsed(tokenID)
+	}
+}
+
+// shouldUpdate is the coalescing gate: returns true at most once per
+// minute for any given key, so the hot path stays allocation-only.
+func (u *usageUpdater) shouldUpdate(key string) bool {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	last, ok := u.seen[key]
+	if ok && time.Since(last) < time.Minute {
+		return false
+	}
+	u.seen[key] = time.Now()
+	return true
 }

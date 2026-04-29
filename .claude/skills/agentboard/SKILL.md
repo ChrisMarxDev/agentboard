@@ -41,6 +41,30 @@ Never use `--project default`. Never use `~/.agentboard/default/`. This instance
 
 ---
 
+## Wiring AgentBoard into a Claude.ai Custom Connector
+
+The dev instance speaks the MCP authorization spec (OAuth 2.1 + PKCE +
+RFC 9728/8414/7591), so adding it as a Custom Connector in Claude.ai
+is the supported path for browser-driven agents:
+
+1. In Claude.ai → Settings → Connectors → **Add Custom Connector**.
+2. URL: `https://<your-public-host>/mcp` (Cloudflare-fronted; never
+   localhost — Claude.ai's connector infrastructure can't reach it).
+   Leave OAuth Client ID/Secret blank — DCR registers Claude.ai
+   automatically.
+3. Click Add → browser pops the consent page → paste an AgentBoard
+   PAT (`ab_*`) → Allow. Claude.ai receives a scoped `oat_*` access
+   token bound to `<host>/mcp`. The PAT itself is never shared.
+
+Tokens minted via this path are audience-scoped — they work on `/mcp`
+only and 401 anywhere else. That's correct per the spec; if a connector
+flow needs broader access, mint a PAT instead. See `AUTH.md` →
+"OAuth-issued tokens" for the full surface.
+
+For Claude Code on a laptop, **PATs remain the path** — the OAuth
+dance is overhead for a CLI that already has filesystem access. Only
+use OAuth where the hosting environment can't accept a pasted token.
+
 ## Authenticating against the dev instance
 
 The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health` returns `401 Unauthorized` without a Bearer token.
