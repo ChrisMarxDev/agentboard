@@ -2,11 +2,13 @@
 
 Single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST/MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
 
-> **Start with [`REWRITE.md`](./REWRITE.md).** AgentBoard went through a structural rewrite (cuts 1–4): SQLite KV gone, files-first MDX with YAML frontmatter, 8-tool MCP, single tree under the project root, no `v2`. The doc summarizes what changed, what got deleted, where things live now, and the gotchas that bit during the cuts.
+> **Start with [`REWRITE.md`](./REWRITE.md).** AgentBoard went through a structural rewrite (cuts 1–4): SQLite KV gone, files-first MDX with YAML frontmatter, `.md` + `.ndjson` as the only content leaf types, single tree under the project root, no `v2` framing. The doc summarizes what changed, what got deleted, where things live now, and the gotchas that bit during the cuts.
 >
-> **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the product invariants, the stable API/MCP/component contracts, what's in vs out of Phase 1 scope, and the pre-flight checklist for risky changes. The locked rewrite contract is in [`spec-rework.md`](./spec-rework.md); full design is in `spec.md`.
+> **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the 12 product invariants, the stable API/MCP/component contracts, what's in vs out of scope, and the pre-flight checklist for risky changes. The locked rewrite contract is in [`spec-rework.md`](./spec-rework.md); full design is in [`spec.md`](./spec.md); auth is in [`AUTH.md`](./AUTH.md).
 >
-> **Before widening the trust boundary** (binding to non-loopback, adding hosted mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
+> **Before widening the trust boundary** (binding to non-loopback, adding hosted multi-tenant mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
+>
+> **Aspirational / superseded specs** (drafts, brainstorms) live under [`docs/archive/`](./docs/archive/). Don't reference them from agent-facing code or skills; they exist for design history only.
 
 ## UI conventions
 
@@ -34,7 +36,7 @@ When you ship a feature, add/refresh its page and bump the relevant `dev.*` data
 
 **Reach for `go doc` and `gopls` before grepping vendored source.** For *running* code use `task` (above); for *understanding* code, these tools are faster and more accurate than reading files:
 
-- `go doc <pkg>` / `go doc <pkg>.<symbol>` — authoritative API + doc comments for a package or specific identifier. Works on stdlib, third-party deps, and our own packages (e.g. `go doc github.com/go-chi/chi/v5.Router`, `go doc ./internal/data.Store`).
+- `go doc <pkg>` / `go doc <pkg>.<symbol>` — authoritative API + doc comments for a package or specific identifier. Works on stdlib, third-party deps, and our own packages (e.g. `go doc github.com/go-chi/chi/v5.Router`, `go doc ./internal/store.Store`).
 - `gopls symbols <file>` — every symbol in a file with line numbers. Faster than reading the whole file when you just need the surface.
 - `gopls references <file>:<line>:<col>` — every call site of a symbol across the module. Replaces grep for "where is this used".
 - `gopls definition <file>:<line>:<col>` — jump to definition. Resolves across modules.
@@ -61,9 +63,10 @@ task dev                # Runs Vite HMR + Go --dev server in parallel
 
 ```bash
 task test               # All tests (Go + frontend)
-task test:go            # Go unit tests (data layer + API handlers)
+task test:go            # Go unit tests
 task test:frontend      # Frontend vitest
-task test:integration   # End-to-end: starts server, hits every endpoint
+task test:bruno         # Bruno contract test suite (bruno/tests/)
+task test:integration   # End-to-end: starts server, walks the bootstrap + auth flow, exercises every API
 ```
 
 ## Running
@@ -75,10 +78,13 @@ task run -- --project myproject
 ```
 
 ### Test coverage
-- `internal/data/store_test.go` — all 7 data operations, history, schema inference, subscriptions, merge patch
-- `internal/server/handlers_test.go` — all REST endpoints, MCP protocol, CORS, error cases
-- `frontend/src/components/builtin/*.test.tsx` — component rendering with mocked useData
-- `scripts/integration-test.sh` — 29 end-to-end API tests + optional browser tests via gstack
+
+- `internal/auth/` — token + password + session lifecycle, CSRF, middleware, OAuth.
+- `internal/server/` — every REST handler, MCP protocol, CORS, error cases.
+- `internal/store/` — files-first store envelope, CAS, history, activity, rate limiter.
+- `frontend/src/components/builtin/*.test.tsx` — component rendering with mocked DataContext.
+- `bruno/tests/` — headless contract test suite, run by `task test:bruno`.
+- `scripts/integration-test.sh` — 45-assertion end-to-end smoke from a fresh project.
 
 ## Debugging with the browser (gstack browse)
 
@@ -119,27 +125,33 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 
 ## Architecture
 
-- **Go backend**: chi router, SQLite (modernc.org/sqlite, pure Go), cobra CLI
-- **Frontend**: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation)
-- **Data model**: Key-value store with dotted paths. 7 write operations (SET, MERGE, UPSERT by ID, MERGE by ID, APPEND, DELETE, DELETE by ID)
-- **Realtime**: SSE broadcaster pushes data changes to all connected browsers
-- **MCP**: Streamable HTTP at /mcp with 38 tools for Claude integration
-- **Pages**: MDX files compiled client-side, served from project folder
-- **Components**: 9 built-in (Metric, Status, Progress, Table, Chart, TimeSeries, Log, List, Kanban) + user JSX in components/
+- **Go backend**: chi router, SQLite (modernc.org/sqlite, pure Go) for auth/teams/locks/invitations/inbox metadata, cobra CLI.
+- **Frontend**: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation), embedded into the Go binary at build time.
+- **Data model**: Files-first. `.md` docs (frontmatter holds structured fields, body holds MDX) + `.ndjson` streams + binaries. Folders are collections. Singletons live at `<key>.md`; collection items at `<key>/<id>.md`. Full-file CAS via `_meta.version`.
+- **Realtime**: SSE broadcaster pushes `data` and `page-updated` events to all connected browsers.
+- **MCP**: Streamable HTTP at `/mcp` with ~40 tools across store, pages, files, components, skills, errors, webhooks, teams, locks, and grab. `tools/list` enumerates the live set.
+- **Pages**: MDX files compiled client-side, served from project folder. Watcher rebuilds the catalog on disk changes.
+- **Components**: 32 built-ins, plus user `.jsx` files in `components/` (off by default, gated behind `--allow-component-upload`).
+- **Auth**: Two credential paths — bearer tokens (`ab_*`, `oat_*`) for non-human callers, browser sessions (cookie + CSRF) for humans. See [`AUTH.md`](./AUTH.md).
 
 ## Key directories
 
-- `cmd/agentboard/` — CLI entry point
-- `internal/data/` — SQLite data store with all operations
-- `internal/server/` — HTTP handlers, SSE broadcaster
-- `internal/mcp/` — MCP protocol server + 38 tool definitions
-- `internal/cli/` — Cobra commands (serve, set, get, list, etc.)
-- `internal/project/` — Project model, config, first-run init
-- `internal/mdx/` — Page management + file watcher
-- `internal/components/` — Component catalog + file watcher
-- `frontend/src/` — React app, hooks (useData, SSE), 9 built-in components
-- `landing/` — Astro + Tailwind 4 marketing site (separate CDN deploy, **not** embedded in the Go binary)
-- `scripts/` — integration test script
+- `cmd/agentboard/` — CLI entry point.
+- `internal/auth/` — users, tokens, passwords, sessions, OAuth, middleware.
+- `internal/store/` — files-first envelope + CAS + history + activity log + rate limiter.
+- `internal/server/` — HTTP handlers, SSE broadcaster, every gated route.
+- `internal/mcp/` — JSON-RPC protocol + tool definitions (store, pages, files, components, skills, errors, webhooks, teams, locks, grab).
+- `internal/cli/` — Cobra commands (`serve`, `init`, `version`, `projects`, `admin`, `backup`, `restore`).
+- `internal/project/` — Project model, config, first-run init.
+- `internal/mdx/` — Page manager, frontmatter parser, file watcher, FTS5 search index, refs.
+- `internal/components/` — Component catalog + file watcher.
+- `internal/files/` — File manager, name validation, presigned upload tokens.
+- `internal/grab/` — Materializer that turns a list of picks into agent-ready text.
+- `internal/invitations/`, `internal/locks/`, `internal/teams/`, `internal/inbox/`, `internal/share/`, `internal/view/`, `internal/webhooks/` — domain stores backing the matching admin / member surfaces.
+- `frontend/src/` — React app, hooks (`useData`, SSE), 32 built-in components.
+- `landing/` — Astro + Tailwind 4 marketing site (separate CDN deploy, **not** embedded in the Go binary).
+- `bruno/tests/` — Bruno contract test suite (run via `task test:bruno`).
+- `scripts/` — integration test + smoke test scripts.
 
 ## Deploying (Hetzner + Coolify)
 
@@ -147,14 +159,20 @@ Full deploy guide, cost breakdown, and open decisions live in [`HOSTING.md`](./H
 
 - Production (`agentboard.hextorical.com`) runs the multi-board Coolify path on a Hetzner CAX11. `Dockerfile` + per-app Coolify webhooks redeploy each board on push to `main`. `.github/workflows/redeploy-coolify.yml` is the manual fan-out fallback.
 - State is **ephemeral** today (`AGENTBOARD_PATH=/tmp/agentboard` on a sleeping machine) — data wipes on auto-stop/restart. `HOSTING.md` covers the persistent-volume fix (~$0.15/mo) when you want state to survive.
-- Auth: three user kinds (`admin`, `member`, `bot`), all token-based. Full design in [`AUTH.md`](./AUTH.md).
-  - **Tokens** are per-user; members manage their own via `/tokens`, admins manage anyone's via `/admin`, and `admin rotate <username> <label>` on the host rotates a specific token slot. Every route except `GET /api/health` + `/api/setup/status` + `/api/invitations/*` requires one (`Authorization: Bearer ab_<43 chars>`, HTTP Basic with password=token, or `?token=<token>`). Missing / revoked → 401.
-  - **Admin-kind tokens** additionally unlock `/api/admin/*`. Member and bot tokens don't.
-  - **Bootstrap order matters.** A fresh instance has zero users; on first boot the server prints a `/invite/<id>` URL to stdout and writes it to `<project>/.agentboard/first-admin-invite.url`. Open that URL in a browser, pick a username, get the first admin token. If you're an agent and can't authenticate, that's a config problem — stop and report it. **Do not route around it by writing to content files on disk** (the file watcher will accept the write, but you'll bypass auth, activity attribution, rate limits, content_history, and optimistic concurrency — direct disk writes are a product-violation, not a fallback).
+- Auth: three user kinds (`admin`, `member`, `bot`), each carrying zero-or-more bearer tokens **and** an optional password. Full design in [`AUTH.md`](./AUTH.md).
+  - **Bearer tokens** (`ab_*`, `oat_*`) authenticate non-human callers — agents, CLI, MCP. Members manage their own via `/tokens`, admins manage anyone's via `/admin`. Every gated route accepts `Authorization: Bearer …`, HTTP Basic with password=token, or `?token=…`.
+  - **Browser sessions** (`agentboard_session` HttpOnly cookie + `agentboard_csrf` companion cookie) authenticate humans. `POST /api/auth/login` mints them; `POST /api/auth/logout` revokes. Cookie-authenticated state-changing requests must carry the `X-CSRF-Token` header (double-submit cookie pattern).
+  - **Admin-kind credentials** additionally unlock `/api/admin/*`. Member and bot don't.
+  - **Bootstrap order matters.** A fresh instance has zero users; on first boot the server prints a `/invite/<id>` URL to stdout and writes it to `<project>/.agentboard/first-admin-invite.url`. Open that URL in a browser, pick a username + password, you're in. If you're an agent and can't authenticate, that's a config problem — stop and report it. **Do not route around it by writing to content files on disk** (the file watcher will accept the write, but you'll bypass auth, activity attribution, rate limits, content_history, and optimistic concurrency — direct disk writes are a product-violation, not a fallback).
+  - **Lockout recovery (filesystem access):**
+    - `agentboard admin rotate <user> [label]` — mint a fresh value into a token slot.
+    - `agentboard admin set-password <user>` — reset the browser password.
+    - `agentboard admin revoke-sessions <user>` — kill every active cookie session.
+    - `agentboard admin invite [--role …]` — print a fresh `/invite/<id>` URL.
 
 ## Quick API test cheatsheet
 
-Every route except `/api/health`, `/api/setup/status`, and `/api/invitations/*` requires auth. Use `Authorization: Bearer ab_<43chars>`, HTTP Basic with the token as password, or `?token=<token>`.
+Every route except `/api/health`, `/api/setup/status`, `/api/invitations/*`, and `/api/auth/{login,logout,me}` requires auth. Use a bearer token (`Authorization: Bearer ab_…`, HTTP Basic with the token as password, or `?token=…`) **or** a session cookie obtained from `/api/auth/login`.
 
 ```bash
 TOKEN=ab_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -162,7 +180,13 @@ TOKEN=ab_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # Health (no auth)
 curl localhost:3000/api/health
 
-# List pages
+# Sign in to a session cookie (humans)
+curl -c jar.txt -X POST -H 'Content-Type: application/json' \
+  localhost:3000/api/auth/login \
+  -d '{"username":"alice","password":"…"}'
+curl -b jar.txt localhost:3000/api/auth/me
+
+# List pages (bearer)
 curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/content
 
 # Read a page
@@ -178,14 +202,20 @@ curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/js
   localhost:3000/api/content/notes \
   -d '{"frontmatter_patch":{"pinned":true},"body":"# Notes\n\nUpdated"}'
 
-# Delete a page
-curl -X DELETE -H "Authorization: Bearer $TOKEN" localhost:3000/api/content/notes
+# Files-first store (singletons + collections + streams)
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  localhost:3000/api/data/sales.q3 -d '{"value":{"rev":42000}}'
+curl -H "Authorization: Bearer $TOKEN" \
+  "localhost:3000/api/data/sales.events?limit=10"
 
-# MCP tools list (38 tools — pages, files, components, kv data, search, webhooks, teams)
+# Catalog of every leaf
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/index
+
+# MCP tools list
 curl -X POST -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
   localhost:3000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-**The legacy `/api/data/*` REST routes were removed in Cut 1 of the rewrite** (see `REWRITE.md`). Key-value data still exists, but is now only reachable via MCP tools (`agentboard_write`, `agentboard_read`, `agentboard_merge`, `agentboard_append`, `agentboard_delete`, `agentboard_grab`, `agentboard_index`, `agentboard_search`, `agentboard_history`).
+The legacy SQLite KV / dotted-key write API is gone. Cross-page values now live at `/api/data/<key>` (files-first store); page-local values live as YAML frontmatter on the rendering page.

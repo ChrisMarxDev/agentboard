@@ -10,7 +10,7 @@ description: Dogfood AgentBoard on itself. Use this skill when working inside th
 The AgentBoard repo runs its own instance at `http://localhost:3000` using the named project **`agentboard-dev`** (NOT `default`). The dashboard hosts:
 
 - `/` — overview: status, component count, test metrics, recent shipped features
-- `/principles` — the 8 core product principles in readable form
+- `/principles` — the 12 core product principles in readable form (mirrors `CORE_GUIDELINES.md`)
 - `/architecture` — Mermaid diagrams of the data flow and package layout
 - `/seams` — known trust-boundary deferrals from `seams_to_watch.md`
 - `/features/<slug>` — one page per shipped feature
@@ -30,7 +30,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/health
 If it's not `200`, start it (background, so the session continues):
 
 ```bash
-cd /Users/christophermarx/dev/agentboard
+# from the repo root
 task build 2>&1 | tail -3
 ./agentboard --project agentboard-dev --port 3000 --no-open > /tmp/agentboard-dev.log 2>&1 &
 sleep 2
@@ -74,7 +74,10 @@ use OAuth where the hosting environment can't accept a pasted token.
 
 ## Authenticating against the dev instance
 
-The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health` returns `401 Unauthorized` without a Bearer token.
+The running `agentboard-dev` instance enforces auth. Every API call except `GET /api/health`, `/api/setup/status`, `/api/invitations/*`, and the `/api/auth/{login,logout,me}` trio returns `401 Unauthorized` without credentials. Two credential paths are accepted:
+
+- **Bearer token (the agent / CLI / MCP path).** `Authorization: Bearer ab_…`, HTTP Basic with the token as password, or `?token=…`. Audience-scoped OAuth tokens (`oat_…`, minted via `/oauth/authorize`) work on `/mcp` only.
+- **Browser session (the human path).** `POST /api/auth/login` with `{username, password}` mints an `agentboard_session` HttpOnly cookie + `agentboard_csrf` companion. Cookie-authenticated state-changing requests must echo the CSRF cookie value in the `X-CSRF-Token` header. Bearer requests skip CSRF by design.
 
 **The dev token lives at `/tmp/agentboard-token`.** It's a working admin token for `@chris` on the `agentboard-dev` project. Read it into the session and use it as a Bearer:
 
@@ -92,6 +95,8 @@ If `/tmp/agentboard-token` is missing or the token is 401'ing (rotated, revoked)
 ./agentboard --project agentboard-dev admin rotate chris <label>    # rotate existing token
 ./agentboard --project agentboard-dev admin list-invitations        # shows active invite URLs
 ./agentboard --project agentboard-dev admin invite --role member    # mint a new invite (no token needed)
+./agentboard --project agentboard-dev admin set-password chris      # reset the browser password
+./agentboard --project agentboard-dev admin revoke-sessions chris   # nuke active cookie sessions
 
 # If all admins are locked out entirely, wipe the DB so boot re-mints
 # a first-admin invitation URL to stdout. Destructive — only for the
@@ -156,7 +161,18 @@ For primitives/arrays, use `value:` instead of splatting top-level keys.
 - Or via MCP: `agentboard_request_file_upload` returns the URL
 - Tokens are one-shot, TTL 5 min
 
-**MCP tools (10):** `agentboard_index`, `_search`, `_read`, `_write`, `_merge`, `_append`, `_delete`, `_history`, `_activity`, `_request_file_upload`. Plus the page-only legacy: `agentboard_search_pages`, `agentboard_list_pages`, `agentboard_read_page`, `agentboard_write_page`, `agentboard_delete_page`, `agentboard_list_components`, `agentboard_read_component`, `agentboard_grab`, `agentboard_list_skills`, `agentboard_get_skill`, `agentboard_list_errors`, `agentboard_clear_errors`, plus the team / lock / webhook tools.
+**MCP tools (~40, run `tools/list` for the live set).** They split into:
+
+- **Store data plane (10).** `agentboard_index`, `_search`, `_read`, `_write` (PUT), `_merge` (PATCH), `_append` (stream), `_delete`, `_history`, `_activity`, `_request_file_upload`. Use these for any cross-page value.
+- **Pages (6).** `agentboard_list_pages`, `_read_page`, `_write_page`, `_patch_page`, `_delete_page`, `_search_pages`. MDX docs in the same single tree.
+- **Files (4).** `_write_file`, `_list_files`, `_delete_file`, plus `_request_file_upload` above for binary uploads.
+- **Components (4).** `_list_components`, `_read_component`, `_write_component`, `_delete_component` (write/delete gated by `--allow-component-upload`).
+- **Skills (2).** `_list_skills`, `_get_skill`.
+- **Errors (2).** `_list_errors`, `_clear_errors` — render-error beacons.
+- **Webhooks (4).** `_list_webhooks`, `_create_webhook`, `_revoke_webhook`, `_fire_event`.
+- **Teams (6).** `_list_teams`, `_get_team`, `_create_team`, `_delete_team`, `_add_team_member`, `_remove_team_member`.
+- **Locks (2).** `_lock_page`, `_unlock_page` (admin-only).
+- **Grab (1).** `_grab` materializer.
 
 **Backup:** `agentboard backup --to ./snapshot.tar.gz` and `agentboard restore --from ./snapshot.tar.gz`. Tar excludes SQLite WAL/SHM and the bootstrap-secret URL.
 
@@ -316,7 +332,6 @@ Keep the showcase folder's root page (`/showcase`) as an index that lists every 
 | `dev.tests.total` | number | Total test count; pair with passing for a Progress bar |
 | `dev.components.count` | number | Built-in component total (`GET /api/components | jq length`) |
 | `dev.mcp.tools` | number | Total MCP tool count advertised (`tools/list`) |
-| `dev.mcp.tools_v2` | number | Tier-shaped v2 tool subset (`agentboard_*`) |
 | `dev.stack.bundle_kb` | number | Frontend bundle size in KB |
 | `dev.stack.binary_mb` | number | Go binary size in MB |
 | `dev.features.shipped` | array of `{id, title, status, landed_at}` | Kanban/List input |
@@ -374,7 +389,7 @@ When the user says "record this metric" or "the test count changed":
 When the user asks what's currently on the dashboard:
 
 1. `GET /api/content` — lists all pages.
-2. `GET /api/data?prefix=dev.` — lists data keys (if the prefix query is supported; otherwise `/api/data` then filter).
+2. `GET /api/index` — flat catalog of every leaf in the project, including data keys.
 3. Return a short summary, not a dump.
 
 ---
@@ -413,8 +428,8 @@ code.
 Before marking a feature shipped, ask: does this change affect how an agent would talk to AgentBoard? If **yes**, edit this file in the same commit. Concretely:
 
 - **Added or removed a built-in component** → update the "Component choices" list and any data-key conventions for its typical `source`.
-- **Added or removed an MCP tool** → update any tool reference (including the "How to invoke" section) plus the `dev.mcp.tools` expected count in "Data-key conventions". For tier-shaped v2 tools, also bump `dev.mcp.tools_v2`.
-- **Touched the v2 store / surface** (new envelope field, new shape, new endpoint, new error code) → update the "v2 store surface" section. The v2 contract is the agent-facing contract for all new work; drift here is the highest-cost kind.
+- **Added or removed an MCP tool** → update any tool reference (including the "How to invoke" section) plus the `dev.mcp.tools` expected count in "Data-key conventions".
+- **Touched the store surface** (new envelope field, new shape, new endpoint, new error code) → update the "Store surface (files-first)" section. The store contract is the agent-facing contract for all new work; drift here is the highest-cost kind.
 - **Added or changed a REST route** → update curl examples and the endpoint references (e.g. the `PUT /api/content/...` line in "When the user ships a feature").
 - **Renamed or moved a `dev.*` key** → update the table in "Data-key conventions". Old keys left in the skill are worse than no keys; they send the next agent to a dead path.
 - **Changed a trigger phrase or a setup step** (e.g. new `--flag` on the binary, new port, new project name) → fix the YAML `description` up top AND any embedded command lines.
