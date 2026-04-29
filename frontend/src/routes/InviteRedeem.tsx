@@ -274,37 +274,66 @@ function ClaimedBriefing({
   const [target, setTarget] = useState<AgentTarget>('claude-code')
   const base = window.location.origin
 
-  // The flow has two halves with two different audiences. Splitting
-  // them prevents the failure mode the user dogfooded: an agent that
-  // tries to self-bootstrap MCP fails because MCP servers register
-  // at session start, not mid-session. The HUMAN runs the setup; the
-  // agent only sees the post-setup prompt.
-  const setupCommand = target === 'claude-code'
-    ? `claude mcp add agentboard --transport http ${base}/mcp \\
-  --header "Authorization: Bearer ${token}"`
-    : `URL:     ${base}/mcp
+  // Two flavors:
+  //
+  // Claude Code — single self-bootstrapping prompt. The local agent
+  // can shell out to `claude mcp add` itself, so we collapse setup
+  // and "first action" into one paste. The prompt also tells the
+  // agent how to recover from the one timing edge that can't be
+  // fixed mid-session: MCP servers register at session start, so if
+  // the tools don't appear after running `claude mcp add`, the agent
+  // surfaces "please restart Claude Code, then re-paste this" and
+  // stops. The user re-pastes after restart and the second run sees
+  // the server already registered → tools available → proceeds.
+  //
+  // Other — keep the two-step shape because Cursor/Cody/Claude.ai
+  // configure MCP via UI, not via a CLI an agent can run.
+  const claudeCodePrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project. Wire it up and use it.
+
+Step 1 — make sure the AgentBoard MCP server is registered. Run this exactly once in your shell (idempotent — safe to re-run):
+
+    claude mcp add agentboard --transport http ${base}/mcp \\
+      --header "Authorization: Bearer ${token}"
+
+Then check whether the agentboard_* tools are available to you in this session:
+
+  - If yes (you can see tools whose names start with "agentboard_"), continue with Step 2.
+  - If no, the server is registered but Claude Code only loads MCP servers at session start. Tell me: "I've registered the AgentBoard MCP server. Please restart Claude Code (or run \`/clear\` then re-paste this prompt) so the agentboard_* tools load." Then stop and wait — do NOT try to bootstrap them by other means; raw HTTP calls from the sandbox won't work either.
+
+Step 2 — once the tools are visible, your first call MUST be:
+
+    agentboard_get_skill({ slug: "agentboard" })
+
+That returns the skill manifest, which documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you must follow. Read it once, then act.
+
+Server:    ${base}
+Username:  ${username} (role: ${role})
+
+Never write directly to disk on the AgentBoard host — every change goes through MCP tools. The skill manifest covers all of it.
+
+Now proceed with whatever I asked you to do, using AgentBoard as the persistent knowledge base for this project.`
+
+  const otherSetupCommand = `URL:     ${base}/mcp
 Header:  Authorization: Bearer ${token}`
 
-  const setupNotes = target === 'claude-code'
-    ? `Run that on the machine where your Claude Code session lives, then restart Claude Code so the new MCP server is loaded. \`claude mcp list\` should show "agentboard" connected.`
-    : `Add it through your client's MCP connector UI (Cursor: Settings → MCP; Cody: settings.json mcpServers; Claude.ai: Settings → Connectors → Add custom). Then restart the session so the new tools register.`
+  const otherSetupNotes = `Add it through your client's MCP connector UI (Cursor: Settings → MCP; Cody: settings.json mcpServers; Claude.ai: Settings → Connectors → Add custom). Then restart the session so the new tools register.`
 
-  const agentPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
+  const otherAgentPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
 
 Your first action MUST be to fetch the skill manifest — it documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you must follow:
 
     agentboard_get_skill({ slug: "agentboard" })
 
-If the agentboard_* tools aren't available to you, the MCP server hasn't been wired up yet — stop and tell the human "I don't see the agentboard MCP tools; please add the MCP server and restart this session." Do NOT try to add the MCP server yourself; that has to happen in the parent process before your session starts.
+If the agentboard_* tools aren't available to you, the MCP server hasn't been wired up yet — stop and tell the human "I don't see the agentboard MCP tools; please add the MCP server and restart this session."
 
 Server:    ${base}
 Username:  ${username} (role: ${role})
 
-Read the manifest once, then act. Never write directly to disk on the AgentBoard host — every change goes through MCP tools (or REST if you can reach HTTP). The skill manifest covers all of it.
+Read the manifest once, then act. Never write directly to disk on the AgentBoard host — every change goes through MCP tools. The skill manifest covers all of it.
 
 Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
 
-  const promptText = agentPrompt
+  const promptText = target === 'claude-code' ? claudeCodePrompt : otherAgentPrompt
 
   const copy = async () => {
     const ok = await copyToClipboard(promptText)
@@ -363,10 +392,20 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
           </h1>
         </div>
         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: 0 }}>
-          Two-step handoff: <b>you</b> wire AgentBoard as an MCP server
-          on the machine where your agent runs, then paste the agent
-          prompt into your chat. The agent can't bootstrap MCP itself —
-          MCP servers register at session start, not mid-session.
+          {target === 'claude-code' ? (
+            <>
+              One copy-paste. Drop it into your Claude Code session and
+              the agent will register the MCP server, fetch the skill
+              manifest, and take over. If a session restart is needed,
+              the agent will tell you and stop cleanly.
+            </>
+          ) : (
+            <>
+              Two-step handoff: <b>you</b> wire AgentBoard as an MCP
+              server in your client's connector UI, then paste the agent
+              prompt into your chat.
+            </>
+          )}
         </p>
 
         <div style={{ display: 'flex', gap: '0.375rem', marginTop: '1.25rem', marginBottom: '1rem' }}>
@@ -394,38 +433,55 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
           })}
         </div>
 
-        <StepBlock
-          number={1}
-          title="Set up MCP (once, for you to run)"
-          body={setupCommand}
-          note={setupNotes}
-          onCopy={async () => {
-            const ok = await copyToClipboard(setupCommand)
-            if (ok) {
-              setCopied(true)
-              setTimeout(() => setCopied(false), 1500)
+        {target === 'claude-code' ? (
+          <StepBlock
+            number={1}
+            title="Paste this into Claude Code"
+            body={promptText}
+            note={
+              <>
+                Contains your token — treat like a password. If you lose
+                it, rotate from <code>/tokens</code> on the dashboard.
+              </>
             }
-          }}
-          copyLabel={copied ? 'Copied!' : 'Copy command'}
-          monospace
-        />
-
-        <div style={{ height: '1.25rem' }} />
-
-        <StepBlock
-          number={2}
-          title="Paste this to your agent"
-          body={promptText}
-          note={
-            <>
-              Contains your token — treat like a password. If you lose
-              it, rotate from <code>/tokens</code> on the dashboard.
-            </>
-          }
-          onCopy={copy}
-          copyLabel={copied ? 'Copied!' : 'Copy prompt'}
-          monospace
-        />
+            onCopy={copy}
+            copyLabel={copied ? 'Copied!' : 'Copy prompt'}
+            monospace
+          />
+        ) : (
+          <>
+            <StepBlock
+              number={1}
+              title="Set up MCP (once, for you to do in your client's UI)"
+              body={otherSetupCommand}
+              note={otherSetupNotes}
+              onCopy={async () => {
+                const ok = await copyToClipboard(otherSetupCommand)
+                if (ok) {
+                  setCopied(true)
+                  setTimeout(() => setCopied(false), 1500)
+                }
+              }}
+              copyLabel={copied ? 'Copied!' : 'Copy URL + header'}
+              monospace
+            />
+            <div style={{ height: '1.25rem' }} />
+            <StepBlock
+              number={2}
+              title="Paste this to your agent (after restart)"
+              body={promptText}
+              note={
+                <>
+                  Contains your token — treat like a password. If you lose
+                  it, rotate from <code>/tokens</code> on the dashboard.
+                </>
+              }
+              onCopy={copy}
+              copyLabel={copied ? 'Copied!' : 'Copy prompt'}
+              monospace
+            />
+          </>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '1.25rem' }}>
           <button type="button" onClick={onContinue} style={ghostBtn}>
