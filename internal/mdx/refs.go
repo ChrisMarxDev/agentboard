@@ -55,6 +55,7 @@ var reFolderAutowire = regexp.MustCompile(
 	`<(?:` + strings.Join(folderAutowireTags, "|") + `)\b([^>]*)>`,
 )
 var reExplicitSource = regexp.MustCompile(`\bsource\s*=`)
+var reKanbanTag = regexp.MustCompile(`<Kanban\b`)
 
 // ExtractRefs walks the MDX source of a page and returns the unique
 // set of data-key and file references.
@@ -82,6 +83,12 @@ func ExtractRefs(source, pagePath string) RefSet {
 	// Auto-attach: any folder-aware tag without an explicit source=
 	// resolves to the page's own folder. Powers the no-arg
 	// `<Kanban groupBy="col" />` form on a folder-index page.
+	//
+	// Kanban also reads its lane configuration from the page's own
+	// frontmatter.columns (so users can rename + add lanes inline,
+	// persisted to the page). Add `columns` as an implicit data key
+	// whenever <Kanban> appears so the broker's frontmatter splat
+	// surfaces it in the bundle.
 	if pagePath != "" {
 		for _, m := range reFolderAutowire.FindAllStringSubmatch(source, -1) {
 			body := m[1]
@@ -90,6 +97,9 @@ func ExtractRefs(source, pagePath string) RefSet {
 			}
 			dataSet[pagePath+"/"] = struct{}{}
 			break // one auto-attach key is enough; the page is its own folder
+		}
+		if reKanbanTag.MatchString(source) {
+			dataSet["columns"] = struct{}{}
 		}
 	}
 

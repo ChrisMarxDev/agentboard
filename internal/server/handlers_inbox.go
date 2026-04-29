@@ -42,6 +42,13 @@ func (s *Server) handleListInbox(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
 		return
 	}
+	// Always return [] not null on empty so the SPA can rely on the
+	// shape and not stay stuck on "Loading inbox…" — useState<null>
+	// is the SPA's loading sentinel, and a JSON `null` from this
+	// endpoint round-trips into that state.
+	if items == nil {
+		items = []*inbox.Item{}
+	}
 	respondJSON(w, http.StatusOK, items)
 }
 

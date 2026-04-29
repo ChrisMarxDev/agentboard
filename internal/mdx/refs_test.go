@@ -66,16 +66,20 @@ func TestExtractRefs_DedupesAndSorts(t *testing.T) {
 }
 
 func TestExtractRefs_KanbanAutoAttach(t *testing.T) {
-	// <Kanban> with no source on page "tasks" auto-attaches to "tasks/".
+	// <Kanban> with no source on page "tasks" auto-attaches to "tasks/"
+	// AND adds the implicit `columns` key so frontmatter.columns reaches
+	// the bundle (used for inline lane rename / + new lane writes).
 	got := ExtractRefs(`<Kanban groupBy="col" />`, "tasks")
-	if !reflect.DeepEqual(got.Data, []string{"tasks/"}) {
-		t.Errorf("autowire Data = %v, want [tasks/]", got.Data)
+	if !reflect.DeepEqual(got.Data, []string{"columns", "tasks/"}) {
+		t.Errorf("autowire Data = %v, want [columns tasks/]", got.Data)
 	}
 
-	// Explicit source disables auto-attach.
+	// Explicit source disables auto-attach to the page's own folder
+	// but the columns implicit key still rides along — column config
+	// is per-page regardless of where the cards come from.
 	got2 := ExtractRefs(`<Kanban source="other.tasks" groupBy="col" />`, "tasks")
-	if !reflect.DeepEqual(got2.Data, []string{"other.tasks"}) {
-		t.Errorf("explicit source Data = %v, want [other.tasks]", got2.Data)
+	if !reflect.DeepEqual(got2.Data, []string{"columns", "other.tasks"}) {
+		t.Errorf("explicit source Data = %v, want [columns other.tasks]", got2.Data)
 	}
 
 	// Empty pagePath disables auto-attach.

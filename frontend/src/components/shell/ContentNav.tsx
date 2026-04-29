@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
-import { Sparkles, SquareCheckBig } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import type { ContentTreeNode } from '../../lib/contentTree'
-import { NewProjectButton } from './Nav'
 
 interface ContentNavProps {
   nodes: ContentTreeNode[]
@@ -20,15 +19,21 @@ const CHEVRON_WIDTH = 20
 // icon. The order in the array IS the display order. Folders not in
 // this list fall back to alphabetical.
 //
-// Why: Tasks and Skills are first-level citizens per concept.md §4 but
-// they're also normal pages in the tree (a `tasks/` folder of cards, a
-// `skills/` folder of skill manifests). Hoisting them here gives the
-// "feels like a real destination" treatment without duplicating the
-// data — there's still only one tasks page on disk, the same one.
+// Skills stays hoisted — the skills folder IS the agent docs catalog
+// and benefits from a sticky top slot. Tasks used to be hoisted too
+// but lost its place: the `tasks/` tree was a placeholder destination
+// for kanban projects and cluttered the sidebar with implementation
+// detail. Project pages still live on disk under `tasks/`, just hidden
+// from the sidebar (see HIDDEN_ROOT_FOLDERS below) — the user can
+// reach them via direct URL or by surfacing them inside other pages.
 const HOISTED_FOLDERS: { name: string; icon: typeof Sparkles }[] = [
-  { name: 'tasks', icon: SquareCheckBig },
   { name: 'skills', icon: Sparkles },
 ]
+
+// HIDDEN_ROOT_FOLDERS are filtered out of the sidebar entirely at the
+// root level. The pages still exist and route normally — they just
+// don't appear in the navigation tree.
+const HIDDEN_ROOT_FOLDERS = new Set<string>(['tasks'])
 
 function hoistOrder(name: string): number {
   const i = HOISTED_FOLDERS.findIndex(h => h.name === name)
@@ -47,15 +52,18 @@ export default function ContentNav({
   onExpand,
   activePath,
 }: ContentNavProps) {
-  // At the root level only, pull HOISTED_FOLDERS to the top in declared
-  // order. Deeper levels render in whatever order materialize() chose.
+  // At the root level only, hide HIDDEN_ROOT_FOLDERS and pull
+  // HOISTED_FOLDERS to the top. Deeper levels render in whatever
+  // order materialize() chose.
   const ordered = depth === 0
-    ? [...nodes].sort((a, b) => {
-        const ai = a.kind === 'folder' ? hoistOrder(a.name) : Number.MAX_SAFE_INTEGER
-        const bi = b.kind === 'folder' ? hoistOrder(b.name) : Number.MAX_SAFE_INTEGER
-        if (ai !== bi) return ai - bi
-        return 0
-      })
+    ? [...nodes]
+        .filter(n => !(n.kind === 'folder' && HIDDEN_ROOT_FOLDERS.has(n.name)))
+        .sort((a, b) => {
+          const ai = a.kind === 'folder' ? hoistOrder(a.name) : Number.MAX_SAFE_INTEGER
+          const bi = b.kind === 'folder' ? hoistOrder(b.name) : Number.MAX_SAFE_INTEGER
+          if (ai !== bi) return ai - bi
+          return 0
+        })
     : nodes
   return (
     <div className="flex flex-col gap-1">
@@ -149,11 +157,6 @@ export default function ContentNav({
                 onExpand={onExpand}
                 activePath={activePath}
               />
-            )}
-            {isOpen && depth === 0 && node.name === 'tasks' && (
-              <div style={{ paddingLeft: ROW_PADDING_X + (depth + 1) * INDENT_STEP + CHEVRON_WIDTH }}>
-                <NewProjectButton />
-              </div>
             )}
           </div>
         )
