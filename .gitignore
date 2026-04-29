@@ -47,3 +47,7 @@ test_claude/.agentboard/
 
 # Bruno dotenv — holds the hosted-instance auth token (see bruno/.env.example)
 bruno/.env
+
+# Local dogfood / dev tokens — never commit
+.tokens.local
+*.token.local

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useData } from '../../hooks/useData'
 import { resolveFileUrl, type FileRef } from '../../lib/fileUrl'
 import { beaconError, resetBeacon } from '../../lib/errorBeacon'
+import { apiFetch } from '../../lib/session'
 
 type Radius = 'none' | 'sm' | 'md' | 'lg' | 'xl' | 'full' | number
 type Align = 'left' | 'center' | 'right'
@@ -43,8 +44,46 @@ export function Image({ source, src, alt, width, height, fit = 'contain', radius
     return () => window.removeEventListener('agentboard:file-updated', handler)
   }, [source, data])
 
+  // Same-origin file URLs go through apiFetch → blob URL because <img src=>
+  // can't attach a Bearer token. External URLs (https://…, data:…) pass
+  // through to the native <img src=> path unchanged.
+  const requiresAuth = !!resolved && resolved.startsWith('/')
+  const fetchSrc = resolved && nonce > 0 ? appendQuery(resolved, `_=${nonce}`) : resolved
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!requiresAuth || !fetchSrc) {
+      setBlobUrl(null)
+      return
+    }
+    let cancelled = false
+    let createdUrl: string | null = null
+    apiFetch(fetchSrc)
+      .then(res => {
+        if (!res.ok) throw new Error(`fetch ${fetchSrc} → ${res.status}`)
+        return res.blob()
+      })
+      .then(blob => {
+        if (cancelled) return
+        createdUrl = URL.createObjectURL(blob)
+        setBlobUrl(createdUrl)
+      })
+      .catch(err => {
+        if (cancelled) return
+        beaconError({
+          component: 'Image',
+          source: source ?? fetchSrc ?? '',
+          error: err instanceof Error ? err.message : 'fetch failed',
+        })
+      })
+    return () => {
+      cancelled = true
+      if (createdUrl) URL.revokeObjectURL(createdUrl)
+    }
+  }, [requiresAuth, fetchSrc, source])
+
   if (source && loading) return null
   if (!resolved) return null
+  if (requiresAuth && !blobUrl) return null
 
   // If the data shape carried alt/width/height, let component props still win.
   let dataAlt: string | undefined
@@ -60,7 +99,7 @@ export function Image({ source, src, alt, width, height, fit = 'contain', radius
   const finalAlt = alt ?? dataAlt ?? ''
   const finalWidth = width ?? dataWidth
   const finalHeight = height ?? dataHeight
-  const finalSrc = nonce > 0 ? appendQuery(resolved, `_=${nonce}`) : resolved
+  const finalSrc = requiresAuth ? blobUrl! : resolved
   const borderRadius = radiusToCss(radius)
   const [marginLeft, marginRight] =
     align === 'center' ? ['auto', 'auto'] :
