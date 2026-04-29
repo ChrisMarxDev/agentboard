@@ -65,13 +65,13 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 			}
 			token := extractToken(r)
 			if token == "" {
-				unauthorized(w)
+				unauthorized(w, r)
 				return
 			}
 			user, tok, err := store.ResolveToken(HashToken(token))
 			if err != nil {
 				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrUserDeactivated) {
-					unauthorized(w)
+					unauthorized(w, r)
 					return
 				}
 				writeJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "auth lookup error")
@@ -183,10 +183,22 @@ func extractToken(r *http.Request) string {
 	return r.URL.Query().Get("token")
 }
 
-func unauthorized(w http.ResponseWriter) {
-	// Deliberately no WWW-Authenticate header. That header triggers the
-	// browser's native Basic Auth popup; we don't want it because the
-	// SPA has its own /login page and catches 401s via apiFetch.
+func unauthorized(w http.ResponseWriter, r *http.Request) {
+	// Emit WWW-Authenticate ONLY on top-level browser navigations.
+	// That's the case where someone typed `/api/files/foo.svg` into
+	// the address bar (or followed a link to a file) and gets the JSON
+	// 401 with no way to provide credentials. The browser's native
+	// Basic Auth prompt is the right UX there: paste the token as the
+	// password and the request retries via r.BasicAuth() → token.
+	//
+	// SPA fetch() calls go through apiFetch which has its own /login
+	// redirect on 401; we don't want the popup racing that flow. The
+	// Sec-Fetch-Mode header (sent by every modern browser) lets us
+	// tell the two apart — `navigate` for top-level, otherwise a
+	// programmatic call.
+	if r.Header.Get("Sec-Fetch-Mode") == "navigate" {
+		w.Header().Set("WWW-Authenticate", `Basic realm="AgentBoard"`)
+	}
 	writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 }
 
