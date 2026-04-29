@@ -314,15 +314,24 @@ func shouldForward(evt SSEEvent, scope *view.Scope) (bool, string, []byte) {
 		}
 		return true, "data", evt.Data
 	case "page-updated":
+		// Forward every page-updated event regardless of scope. Two
+		// audiences need it:
+		//   1. The view's own DataContext, which maps in-scope edits
+		//      to scope-changed re-opens (and ignores out-of-scope
+		//      events because scopeEquivalent returns true).
+		//   2. The shell sidebar (usePages), which lists every page
+		//      and must learn about siblings created or deleted on
+		//      another route. Without global forwarding, "+ New
+		//      project" creates the file but the tree never refreshes
+		//      until the user reloads.
+		// Page existence is already public via /api/content for any
+		// authenticated caller, so widening the SSE filter doesn't
+		// disclose anything new.
 		var pu struct {
 			Path string `json:"path"`
 		}
 		_ = json.Unmarshal(evt.Data, &pu)
 		if pu.Path == "" {
-			return false, "", nil
-		}
-		norm := strings.TrimPrefix(strings.TrimSuffix(pu.Path, ".md"), "/")
-		if norm != scope.Path && !strings.HasPrefix(norm, scope.Path+"/") {
 			return false, "", nil
 		}
 		return true, "page-updated", evt.Data
