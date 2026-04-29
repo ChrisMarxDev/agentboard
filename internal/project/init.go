@@ -151,7 +151,23 @@ A folder of ` + "`.md`" + ` docs IS a collection. ` + "`content/tasks/<id>.md`" 
 
 **Auto-attach**: ` + "`<Kanban groupBy=\"col\" />`" + ` with **no source prop** on a page resolves to that page's own folder. The page is then the folder's index. This is the cleanest shape.
 
-To move a card across columns, ` + "`PATCH`" + ` only the field that changed:
+**Card shape.** Each card is a ` + "`.md`" + ` file under the board's folder. Frontmatter holds the structured fields the kanban groups / sorts / displays by; the MDX body is the free-form description.
+
+` + "```yaml" + `
+---
+title: "Ship v2"
+col: doing            # which lane
+order: 1.5            # within-lane sort (floats avoid renumbering)
+assignees: [chris]
+---
+
+Free-form description goes here. The card's detail-pane editor reads
+and writes this body via ` + "`PATCH /api/content/<path>` `{body: \"...\"}`" + `.
+Frontmatter and body are independent — patches to one don't touch the
+other.
+` + "```" + `
+
+To move a card across lanes, ` + "`PATCH`" + ` only the field that changed:
 
 ` + "```bash" + `
 curl -X PATCH "$B/api/content/tasks/ship-v2" \
@@ -160,6 +176,22 @@ curl -X PATCH "$B/api/content/tasks/ship-v2" \
 ` + "```" + `
 
 The body and every other frontmatter field are preserved. ` + "`null`" + ` deletes a key (RFC-7396).
+
+**Lane configuration.** Default lanes are TODO / DOING / DONE. Override per-board by setting ` + "`columns`" + ` in the *page's* frontmatter (not the cards'):
+
+` + "```yaml" + `
+---
+title: "Marketing roadmap"
+columns:
+  - {id: inbox,   label: Inbox}
+  - {id: review,  label: In review}
+  - {id: shipped, label: Shipped this week}
+---
+
+<Kanban groupBy="col" />
+` + "```" + `
+
+Renames are pure presentation: change the ` + "`label`" + ` and existing cards keep their ` + "`col`" + ` ids. Adding a lane = appending a ` + "`{id, label}`" + ` object via ` + "`PATCH /api/content/<board> {frontmatter_patch:{columns:[...]}}`" + `.
 
 If you've been asked to build a board, fetch ` + "`GET /api/skills/kanban`" + ` for a fully worked recipe.
 
