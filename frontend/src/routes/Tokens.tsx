@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from 'react'
-import { Copy, KeyRound, Plus, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { Copy, Eye, EyeOff, KeyRound, Plus, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
+import { getToken } from '../lib/session'
 import {
   createTokenForUser,
   listTokensForUser,
@@ -112,6 +113,11 @@ export default function Tokens() {
       )}
 
       {reveal && <RevealBanner token={reveal} onDismiss={() => setReveal(null)} />}
+
+      <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
+        <div style={LABEL}>This browser&rsquo;s session token</div>
+        <CurrentSessionCard />
+      </section>
 
       <section style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -276,6 +282,75 @@ function TokenRow({
         <Trash2 size={12} />
         Revoke
       </button>
+    </div>
+  )
+}
+
+// CurrentSessionCard surfaces the bearer token already in localStorage
+// so a non-technical user can copy it into another tool (laptop env,
+// MCP client, curl) without opening DevTools. Hidden by default — a
+// shoulder-surf or screen-share shouldn't expose it. Anyone who already
+// has this browser already has the token; we're only removing friction,
+// not weakening the trust boundary.
+function CurrentSessionCard() {
+  const [visible, setVisible] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const tok = getToken()
+
+  if (!tok) {
+    return (
+      <div style={{ ...CARD, color: 'var(--text-secondary)', fontSize: '0.8125rem' }}>
+        No session token in this browser. (You shouldn&rsquo;t be seeing this page — sign in.)
+      </div>
+    )
+  }
+
+  function copy() {
+    if (!tok) return
+    void navigator.clipboard.writeText(tok).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }
+
+  const masked = `${tok.slice(0, 6)}${'•'.repeat(Math.max(8, tok.length - 9))}${tok.slice(-3)}`
+
+  return (
+    <div style={CARD}>
+      <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', marginBottom: '0.625rem' }}>
+        Paste this into any tool that needs to talk to AgentBoard from another machine —
+        a laptop env file, an MCP client config, a <code>curl -H &quot;Authorization: Bearer …&quot;</code> call.
+        Treat it like a password. If it leaks, rotate the matching token below.
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <code
+          style={{
+            flex: 1,
+            padding: '0.5rem 0.75rem',
+            borderRadius: '0.375rem',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            fontFamily: 'ui-monospace, monospace',
+            fontSize: '0.8125rem',
+            overflowX: 'auto',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {visible ? tok : masked}
+        </code>
+        <button
+          style={BTN}
+          onClick={() => setVisible((v) => !v)}
+          title={visible ? 'Hide' : 'Show'}
+        >
+          {visible ? <EyeOff size={12} /> : <Eye size={12} />}
+          {visible ? 'Hide' : 'Show'}
+        </button>
+        <button style={BTN} onClick={copy}>
+          <Copy size={12} />
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
     </div>
   )
 }
