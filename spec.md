@@ -1734,7 +1734,7 @@ Aim for under 30 MB compressed. Main contributors:
 
 - Authentication: single-token mode + full user/role mode
 - User management CLI and REST API
-- Deploy-to-hosted story: documented Fly.io / Railway / VPS deploy guides
+- Deploy-to-hosted story: documented Hetzner/Coolify / Railway / VPS deploy guides
 - Optional Litestream for replication
 - Public read-only pages (for status page use case)
 

@@ -140,11 +140,11 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 - `landing/` — Astro + Tailwind 4 marketing site (separate CDN deploy, **not** embedded in the Go binary)
 - `scripts/` — integration test script
 
-## Deploying (Fly.io + GitHub Actions)
+## Deploying (Hetzner + Coolify)
 
 Full deploy guide, cost breakdown, and open decisions live in [`HOSTING.md`](./HOSTING.md). The short version:
 
-- `Dockerfile` + `fly.toml` + `.github/workflows/deploy.yml` ship with the repo; push to `main` redeploys to Fly.
+- Production (`agentboard.hextorical.com`) runs the multi-board Coolify path on a Hetzner CAX11. `Dockerfile` + per-app Coolify webhooks redeploy each board on push to `main`. `.github/workflows/redeploy-coolify.yml` is the manual fan-out fallback.
 - State is **ephemeral** today (`AGENTBOARD_PATH=/tmp/agentboard` on a sleeping machine) — data wipes on auto-stop/restart. `HOSTING.md` covers the persistent-volume fix (~$0.15/mo) when you want state to survive.
 - Auth: three user kinds (`admin`, `member`, `bot`), all token-based. Full design in [`AUTH.md`](./AUTH.md).
   - **Tokens** are per-user; members manage their own via `/tokens`, admins manage anyone's via `/admin`, and `admin rotate <username> <label>` on the host rotates a specific token slot. Every route except `GET /api/health` + `/api/setup/status` + `/api/invitations/*` requires one (`Authorization: Bearer ab_<43 chars>`, HTTP Basic with password=token, or `?token=<token>`). Missing / revoked → 401.

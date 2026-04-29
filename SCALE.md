@@ -4,7 +4,7 @@
 > (see [`CLAUDE.md`](./CLAUDE.md) and the product-vision memory). This file captures the thinking
 > so future-us can act on it without re-deriving the whole argument.
 
-Sibling docs: [`HOSTING.md`](./HOSTING.md) (today's Fly.io deploy), [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)
+Sibling docs: [`HOSTING.md`](./HOSTING.md) (today's Hetzner/Coolify deploy), [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)
 (what the product is/isn't), [`seams_to_watch.md`](./seams_to_watch.md) (security concerns we deferred).
 
 ## The model under consideration
@@ -140,7 +140,6 @@ Get 1–7 right = control-plane-callable. Add 8–12 = survivable in production 
 | **Hetzner Cloud** (CAX11, ARM) | €3.29/mo | included | included | **~$4/mo** |
 | DigitalOcean droplet | $4/mo | included | included | ~$5/mo |
 | AWS `t4g.nano` | ~$3/mo | $3.60/mo | ~$1/mo | ~$8/mo |
-| Fly.io shared-cpu-1x | ~$2/mo | included | $0.15/GB | ~$3–5/mo |
 
 **Hetzner is the right target** for the initial hosted offering. Clean API, same €/month
 whether the instance is busy or idle, generous free egress. AWS is the wrong cloud for this

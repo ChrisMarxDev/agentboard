@@ -40,13 +40,13 @@ Folders are ordered via `seq` in each `folder.yml`. Run them in order — each b
 | `file-upload/` | Uploads an SVG banner, a PDF, and a CSV; lists + fetches them; wires them into `demo.files.*` data keys; creates `/files` page showing `<Image>` + `<File>`; deletes one file at the end | Run in order → open `http://localhost:3000/files` in the browser. The inline SVG banner renders and the PDF/CSV become download cards. Fire `8-delete-csv` to see the file-updated SSE remove the CSV live. |
 | `errors/` | Negative paths: 404 on unknown key/id/content, 400 blocking index-page deletion | Bruno response panel — every request is expected to return a non-2xx status |
 | `showcase/` | One-click visual regression: seeds rich data for **every** built-in (Metric, Counter, Status, Badge, Progress, Chart, TimeSeries, Table, List, Log, Kanban, Markdown, Code, Mermaid, Image, File, Deck, Card, Stack), uploads sample PNG/PDF/CSV files, and writes a `/showcase` page that renders all 19 in themed sections | Run the folder once → open `http://localhost:3000/showcase`. Re-fire `03 Pulse counter` to watch Counter flash. |
-| `hosted/` | Exercises the token-gated public instance (Fly.io). Covers `Authorization: Bearer` and `?token=` auth paths, the 401 negative case, MCP tool list, and a full write/read/delete cycle. Uses the **Hosted** environment. See "Running against the hosted instance" below. (Basic Auth is proven by the Go unit test — Bruno's script API can't inject the header reliably.) | Bruno response panel |
+| `hosted/` | Exercises the token-gated public instance. Covers `Authorization: Bearer` and `?token=` auth paths, the 401 negative case, MCP tool list, and a full write/read/delete cycle. Uses the **Hosted** environment. See "Running against the hosted instance" below. (Basic Auth is proven by the Go unit test — Bruno's script API can't inject the header reliably.) | Bruno response panel |
 
 > **SSE coverage note:** The `/api/events` stream is not in Bruno (Bruno blocks on the long-lived connection). It's covered by `scripts/integration-test.sh`.
 
 ## Running against the hosted instance
 
-The `hosted/` folder points at the public Fly.io deploy (or any AgentBoard instance started with `AGENTBOARD_AUTH_TOKEN` set). The token never touches git — Bruno reads it from a local dotenv:
+The `hosted/` folder points at any public AgentBoard instance (today: the Hetzner/Coolify deploy at `agentboard.hextorical.com`, or any other instance started with `AGENTBOARD_AUTH_TOKEN` set). The token never touches git — Bruno reads it from a local dotenv:
 
 ```bash
 # One-time

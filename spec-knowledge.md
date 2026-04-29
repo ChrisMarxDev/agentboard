@@ -26,7 +26,7 @@
 
 ## 1. Motivation
 
-AgentBoard already has a folder of MDX pages served from the project dir. That tree is, structurally, already a content management system — files, folders, live reload. The gap is that it's only been used for *dashboards*, not *documentation*. There's no way for an agent to stash something it learned ("the PROD deploy script lives in `deploy/fly.sh`, uses env `$FLY_TOKEN`"), or for a human to drop a long-form runbook, and have either of them find it again later — especially not across thousands of docs.
+AgentBoard already has a folder of MDX pages served from the project dir. That tree is, structurally, already a content management system — files, folders, live reload. The gap is that it's only been used for *dashboards*, not *documentation*. There's no way for an agent to stash something it learned ("the PROD deploy script lives in `deploy/release.sh`, uses env `$DEPLOY_TOKEN`"), or for a human to drop a long-form runbook, and have either of them find it again later — especially not across thousands of docs.
 
 A knowledge repo on top of the existing pages tree closes this gap:
 
@@ -128,7 +128,7 @@ title: Rollback a Bad Release
 type: doc                    # "doc" | "dashboard" — defaults to "doc" for .md, "dashboard" for .mdx
 tags: [ops, incident]        # string[] — free-form
 summary: |                   # one-paragraph summary; used in search results + retrieval context
-  How to roll back a deploy on Fly.io in under 5 minutes.
+  How to roll back a deploy on Coolify in under 5 minutes.
 searchable: true             # bool — default true. Set false to exclude from search & RAG.
 order: 10                    # int — for explicit sidebar ordering. Lower = first. Default: alphabetical by filename.
 author: oncall@example.com   # optional free-form
@@ -254,20 +254,20 @@ Atomic where possible. Any URL redirects handled at the router level (optional 3
 ### 7.7 Search (lexical)
 
 ```
-GET /api/content/search?q=deploy+fly&type=doc&tag=ops&top_k=10
+GET /api/content/search?q=deploy+rollback&type=doc&tag=ops&top_k=10
 
 → 200 OK
 {
-  "query": "deploy fly",
+  "query": "deploy rollback",
   "results": [
     {
       "path": "runbooks/deploy.md",
       "title": "Deploy Guide",
-      "heading": "## Fly.io",
-      "excerpt": "...running `fly deploy` pushes the image to...",
+      "heading": "## Rollback",
+      "excerpt": "...redeploy the previous image tag with `coolify redeploy --image ...",
       "score": 0.87,
       "tags": ["ops"],
-      "url": "/runbooks/deploy#fly-io"
+      "url": "/runbooks/deploy#rollback"
     }
   ],
   "total": 3
@@ -309,7 +309,7 @@ Index rebuilds on file-watcher events. Full rescan on server startup. See §11.
 ```
 POST /api/content/retrieve
 {
-  "query": "how do I roll back a fly deploy",
+  "query": "how do I roll back a deploy",
   "top_k": 5,
   "filters": { "tags": ["ops"], "type": "doc" },
   "include_body": false      // true to get full doc content, not just chunks
@@ -322,10 +322,10 @@ POST /api/content/retrieve
       "doc_path": "runbooks/rollback.md",
       "chunk_id": "1",
       "title": "Rollback a Bad Release",
-      "heading": "## Fly.io",
-      "content": "Run `fly releases list`, find the last known-good version, then `fly deploy --image ...`",
+      "heading": "## Procedure",
+      "content": "List previous image tags, pick the last known-good one, redeploy via the Coolify API.",
       "score": 0.91,
-      "url": "/runbooks/rollback#fly-io",
+      "url": "/runbooks/rollback#procedure",
       "tags": ["ops", "incident"]
     }
   ]

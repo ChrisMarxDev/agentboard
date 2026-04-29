@@ -94,16 +94,16 @@ GOOS=windows GOARCH=amd64 task build     # Windows x86_64
 
 ## Self-hosting
 
-The binary is designed to run anywhere. An example Fly.io setup (Dockerfile + GitHub Actions) lives in the repo — see [`HOSTING.md`](./HOSTING.md) for a walk-through, cost breakdown, and first-time setup.
+The binary is designed to run anywhere — see [`HOSTING.md`](./HOSTING.md) for the supported deployment paths, cost breakdowns, and first-time setup. The current production reference is a Hetzner CAX11 running [Coolify](https://coolify.io) so multiple boards share one box for ~€3/mo.
 
-Nothing about AgentBoard is tied to Fly. It's one example; pick any host you like:
+Pick whatever host fits:
 
-- **Bare metal / VPS** (Hetzner, DigitalOcean, your homelab): copy the binary, run it behind a reverse proxy.
-- **Fly.io**: the bundled `Dockerfile` and `fly.toml` template deploy in ~30 seconds.
+- **Hetzner / DigitalOcean / your homelab**: `scripts/deploy-vps.sh` does a one-shot install behind Caddy with Let's Encrypt. ~€3–4/mo.
+- **Multi-tenant on one VPS**: install Coolify, then `scripts/new-board.sh` provisions per-friend boards with isolated containers + volumes.
 - **Render / Railway / Koyeb**: point at the Dockerfile; they'll build + run it.
 - **Raspberry Pi**: cross-compile for `linux/arm64`, `scp` the binary, run it.
 
-Auth for non-localhost deployments is a single shared token (`AGENTBOARD_AUTH_TOKEN` env var). See [`seams_to_watch.md`](./seams_to_watch.md) for the security model and what's explicitly deferred.
+Auth for non-localhost deployments is the user-token system documented in [`AUTH.md`](./AUTH.md): per-user tokens, plus an OAuth 2.1 + DCR surface for browser-driven MCP clients (e.g. Claude.ai Custom Connectors). See [`seams_to_watch.md`](./seams_to_watch.md) for the security model and what's explicitly deferred.
 
 ---
 

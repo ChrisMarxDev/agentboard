@@ -631,7 +631,7 @@ Batched ops (§8) convert tight-loop patterns from N calls into 1. The rate limi
 
 ### Hot-path write coalescing
 
-The pure "write tmp → fsync → rename" pattern costs ~3-10ms on a Fly volume. For metrics being incremented at 100/sec, that's wasteful. **Mitigation: in-memory write coalescing for INCREMENT and APPEND only.**
+The pure "write tmp → fsync → rename" pattern costs ~3-10ms on a cloud-attached volume. For metrics being incremented at 100/sec, that's wasteful. **Mitigation: in-memory write coalescing for INCREMENT and APPEND only.**
 
 - INCREMENT: hold new value in memory; flush to disk every 100ms or every Nth increment.
 - APPEND: buffer lines; flush on timer or when buffer crosses ~64KB.
@@ -748,7 +748,7 @@ If any of these is bargained away in implementation, **stop and reconsider wheth
 | Reimplement what SQLite gave free (per-path locking, version CAS, atomic rename, coalesced writes, search via Bleve, history) | Real — ~2-3 weeks careful work |
 | Maturity gap (SQLite is 25 years of bug fixes; we're new code) | Real, mitigated by simplicity (no joins, no transactions, no schemas) |
 | Many-small-files inode overhead | Negligible at ICP scale |
-| Per-write fsync cost on networked storage (~5ms on Fly volumes) | Real on hot path; mitigated by coalescing for INCREMENT/APPEND |
+| Per-write fsync cost on networked storage (~5ms on cloud-attached volumes) | Real on hot path; mitigated by coalescing for INCREMENT/APPEND |
 
 ### What we don't lose (commonly mistaken)
 

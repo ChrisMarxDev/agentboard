@@ -21,7 +21,7 @@ something that still ships.
 **Tour leftovers I seeded earlier as test data** (not real project content):
 
 - `/notes/2026-04-weekly` — fake meeting notes
-- `/runbooks/deploy-fly` — fake Fly.io runbook
+- `/runbooks/deploy-coolify` — fake Coolify deploy runbook
 - `/skills/campaign-brief/SKILL` + `/examples`
 - `/skills/readme-writer/SKILL` + `/examples`
 - `/skills/deploy-checklist/SKILL`
@@ -156,7 +156,7 @@ would close an obvious gap. Backend already supports it (`POST
 ### 12. The `find files for a term` hole
 
 Sidebar search filters titles + paths. Good. But it doesn't search
-*content* — if I type "Fly.io", I don't find the deleted runbook via its
+*content* — if I type "Coolify", I don't find the deleted runbook via its
 body. A tiny server-side `GET /api/search?q=...` that full-text-matches
 page sources would let the sidebar escalate beyond title match when needed.
 SQLite FTS5 was already called out in `spec-knowledge.md` §8 as the
