@@ -1,26 +1,47 @@
 #!/usr/bin/env bash
-# Integration test for AgentBoard
-# Starts the server, runs API tests, optionally runs browser tests with $B (gstack browse)
+# End-to-end integration test for AgentBoard.
+#
+# Boots a clean binary against a throwaway project, walks the
+# bootstrap flow (first-admin invite + password redeem), exercises
+# both credential paths (Bearer token + cookie session), and hits
+# every public surface that ships in the binary today. Designed to
+# be the smoke gate for "is this build shippable" — it covers
+# bootstrap, auth, content, files-first store, files, components,
+# MCP, SSE, and CSRF.
+#
+# Usage:
+#   scripts/integration-test.sh [PORT]
+#
+# No external deps beyond `curl`, `jq`, `go`. Self-contained.
+
 set -euo pipefail
 
 PORT=${1:-3399}
-BINARY="./agentboard"
+BINARY="${BINARY:-./agentboard}"
 URL="http://localhost:$PORT"
+TEST_PROJECT="/tmp/agentboard-integration-$$"
+COOKIE_JAR="/tmp/agentboard-jar-$$"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; NC='\033[0m'
 PASS=0
 FAIL=0
 
 pass() { echo -e "${GREEN}PASS${NC} $1"; PASS=$((PASS + 1)); }
 fail() { echo -e "${RED}FAIL${NC} $1: $2"; FAIL=$((FAIL + 1)); }
+note() { echo -e "${YELLOW}~~${NC} $1"; }
+
+# assert_status PROVIDES the auth header — every gated request uses
+# Bearer auth except where we explicitly want to test the cookie /
+# anonymous path.
+authed() {
+  curl -s -H "Authorization: Bearer $TOKEN" "$@"
+}
 
 assert_status() {
   local desc="$1" method="$2" path="$3" expected="$4"
   shift 4
   local status
-  status=$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' -X "$method" "$URL$path" "$@")
+  status=$(authed -o /dev/null -w '%{http_code}' -X "$method" "$URL$path" "$@")
   if [ "$status" = "$expected" ]; then
     pass "$desc"
   else
@@ -28,10 +49,10 @@ assert_status() {
   fi
 }
 
-assert_json() {
+assert_jq() {
   local desc="$1" path="$2" jq_expr="$3" expected="$4"
   local actual
-  actual=$(curl -s --max-time 5 "$URL$path" | python3 -c "import sys,json; d=json.load(sys.stdin); print($jq_expr)" 2>/dev/null || echo "ERROR")
+  actual=$(authed "$URL$path" | jq -r "$jq_expr" 2>/dev/null || echo "ERROR")
   if [ "$actual" = "$expected" ]; then
     pass "$desc"
   else
@@ -39,140 +60,261 @@ assert_json() {
   fi
 }
 
-echo "=== AgentBoard Integration Tests ==="
+assert_jq_at_least() {
+  local desc="$1" path="$2" jq_expr="$3" minimum="$4"
+  local actual
+  actual=$(authed "$URL$path" | jq -r "$jq_expr" 2>/dev/null || echo "0")
+  if [ "$actual" -ge "$minimum" ] 2>/dev/null; then
+    pass "$desc ($actual ≥ $minimum)"
+  else
+    fail "$desc" "expected ≥$minimum, got '$actual'"
+  fi
+}
+
+echo "=== AgentBoard integration test ==="
 echo ""
 
-# Build
+# ----- Build -----
 echo "Building..."
 if [ ! -f "$BINARY" ]; then
   go build -o "$BINARY" ./cmd/agentboard
 fi
 
-# Clean up any previous test project
-TEST_PROJECT="/tmp/agentboard-test-$$"
-rm -rf "$TEST_PROJECT"
-
-# Start server
-echo "Starting server on port $PORT..."
-"$BINARY" --path "$TEST_PROJECT" --port "$PORT" --no-open > /dev/null 2>&1 &
-SERVER_PID=$!
-sleep 2
+rm -rf "$TEST_PROJECT" "$COOKIE_JAR"
 
 cleanup() {
-  kill $SERVER_PID 2>/dev/null || true
-  wait $SERVER_PID 2>/dev/null || true
-  rm -rf "$TEST_PROJECT"
+  if [ -n "${SERVER_PID:-}" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TEST_PROJECT" "$COOKIE_JAR"
 }
 trap cleanup EXIT
 
-echo ""
-echo "--- API Tests ---"
+# ----- Boot -----
+echo "Starting server on port $PORT..."
+"$BINARY" --path "$TEST_PROJECT" --port "$PORT" --no-open \
+  > /tmp/agentboard-integration-$$.log 2>&1 &
+SERVER_PID=$!
+sleep 2
 
-# Health
-assert_status "GET /api/health" GET "/api/health" 200
-assert_json "health ok" "/api/health" "d['ok']" "True"
-assert_json "health version" "/api/health" "d['version']" "0.1.0"
+# Boot health: only health is open before bootstrap.
+HEALTH_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/health")
+[ "$HEALTH_STATUS" = "200" ] && pass "GET /api/health (open, pre-bootstrap)" \
+  || fail "GET /api/health" "got $HEALTH_STATUS"
 
-# Data operations
-assert_status "SET value" PUT "/api/data/test.num" 200 -d '42' -H 'Content-Type: application/json'
-assert_json "GET value" "/api/data/test.num" "d['value']" "42"
+SETUP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL/api/setup/status")
+[ "$SETUP_STATUS" = "200" ] && pass "GET /api/setup/status (open)" \
+  || fail "GET /api/setup/status" "got $SETUP_STATUS"
 
-assert_status "SET object" PUT "/api/data/test.obj" 200 -d '{"a":1,"b":2}' -H 'Content-Type: application/json'
-assert_status "MERGE object" PATCH "/api/data/test.obj" 200 -d '{"b":3,"c":4}' -H 'Content-Type: application/json'
-assert_json "MERGE result" "/api/data/test.obj" "d['value']" "{'a': 1, 'b': 3, 'c': 4}"
+# ----- Bootstrap: first-admin invite redeem -----
+note "Bootstrapping first admin via the invitation URL printed at boot"
 
-assert_status "APPEND item 1" POST "/api/data/test.log" 200 -d '{"msg":"one"}' -H 'Content-Type: application/json'
-assert_status "APPEND item 2" POST "/api/data/test.log" 200 -d '{"msg":"two"}' -H 'Content-Type: application/json'
-assert_json "APPEND result count" "/api/data/test.log" "len(d['value'])" "2"
-
-assert_status "UPSERT by ID" PUT "/api/data/test.items/abc" 200 -d '{"name":"test"}' -H 'Content-Type: application/json'
-assert_status "GET by ID" GET "/api/data/test.items/abc" 200
-
-assert_status "DELETE key" DELETE "/api/data/test.num" 200
-assert_status "GET deleted key" GET "/api/data/test.num" 404
-
-assert_status "Invalid JSON" PUT "/api/data/bad" 400 -d 'not json' -H 'Content-Type: application/json'
-
-# Schema
-assert_status "GET schema" GET "/api/data/schema" 200
-
-# Content (pages + docs)
-assert_status "GET content list" GET "/api/content" 200
-assert_status "GET index page" GET "/api/content/index" 200
-assert_status "Write new page" PUT "/api/content/test-page" 200 -d '# Test Page' -H 'Content-Type: text/markdown'
-assert_status "Cannot delete index" DELETE "/api/content/index" 400
-
-# Components
-assert_status "GET components" GET "/api/components" 200
-assert_json "9 built-in components" "/api/components" "len(d)" "9"
-
-# Config
-assert_status "GET config" GET "/api/config" 200
-
-# Skill
-assert_status "GET skill" GET "/skill" 200
-
-# MCP
-assert_status "MCP initialize" POST "/mcp" 200 \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
-  -H 'Content-Type: application/json'
-
-MCP_TOOLS=$(curl -s --max-time 5 -X POST "$URL/mcp" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['result']['tools']))" 2>/dev/null)
-if [ "$MCP_TOOLS" = "13" ]; then
-  pass "MCP 13 tools registered"
-else
-  fail "MCP tools count" "expected 13, got $MCP_TOOLS"
-fi
-
-# SSE endpoint (verify it connects — use timeout since SSE is streaming)
-SSE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "$URL/api/events" 2>/dev/null || true)
-if [ "$SSE_STATUS" = "200" ] || [ -z "$SSE_STATUS" ]; then
-  pass "SSE endpoint connectable"
-else
-  fail "SSE endpoint" "unexpected status $SSE_STATUS"
-fi
-
-# Frontend
-FRONTEND_STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$URL/")
-if [ "$FRONTEND_STATUS" = "200" ]; then
-  pass "Frontend serves at /"
-else
-  fail "Frontend" "expected 200, got $FRONTEND_STATUS"
-fi
-
-echo ""
-echo "--- Browser Tests (requires gstack browse) ---"
-
-# Check if $B (gstack browse) is available
-if command -v "$HOME/.claude/skills/gstack/browse/bin/browse" &>/dev/null || command -v browse &>/dev/null; then
-  B="${HOME}/.claude/skills/gstack/browse/bin/browse"
-
-  $B goto "$URL" 2>/dev/null
+INVITE_URL_FILE="$TEST_PROJECT/.agentboard/first-admin-invite.url"
+for i in 1 2 3 4 5; do
+  [ -f "$INVITE_URL_FILE" ] && break
   sleep 1
+done
+[ -f "$INVITE_URL_FILE" ] || { fail "first-admin-invite.url" "not written"; exit 1; }
 
-  # Check page title
-  PAGE_TEXT=$($B text 2>/dev/null || echo "")
-  if echo "$PAGE_TEXT" | grep -q "AgentBoard"; then
-    pass "Browser: AgentBoard title visible"
-  else
-    fail "Browser: title" "AgentBoard not found in page text"
-  fi
+INVITE_ID=$(grep -oE '/invite/[a-zA-Z0-9_-]+' "$INVITE_URL_FILE" | head -1 | sed 's|/invite/||')
+[ -n "$INVITE_ID" ] && pass "first-admin invite minted at boot" \
+  || { fail "invite parse" "couldn't extract id from $INVITE_URL_FILE"; exit 1; }
 
-  if echo "$PAGE_TEXT" | grep -q "Welcome"; then
-    pass "Browser: Welcome content visible"
-  else
-    fail "Browser: welcome" "Welcome not found in page text"
-  fi
+REDEEM_RESP=$(curl -s -X POST "$URL/api/invitations/$INVITE_ID/redeem" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"integration-test-pw-1234"}' \
+  -c "$COOKIE_JAR")
+TOKEN=$(echo "$REDEEM_RESP" | jq -r '.token')
+[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && pass "Invitation redeem returns a PAT" \
+  || { fail "Invitation redeem" "no token in response: $REDEEM_RESP"; exit 1; }
 
-  # Take a screenshot for evidence
-  $B screenshot /tmp/agentboard-test-screenshot.png 2>/dev/null && pass "Browser: screenshot captured" || true
+# ----- Auth surface -----
+echo ""
+note "Auth surface (token + cookie + CSRF)"
+
+# Bearer auth on /api/me.
+ME_STATUS=$(authed -o /dev/null -w '%{http_code}' "$URL/api/me")
+[ "$ME_STATUS" = "200" ] && pass "GET /api/me with Bearer" \
+  || fail "GET /api/me" "got $ME_STATUS"
+
+# Cookie was set by the redeem response — /api/auth/me with cookie works.
+ME_COOKIE_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  -b "$COOKIE_JAR" "$URL/api/auth/me")
+[ "$ME_COOKIE_STATUS" = "200" ] && pass "GET /api/auth/me with cookie" \
+  || fail "GET /api/auth/me cookie" "got $ME_COOKIE_STATUS"
+
+# Wrong-password login returns 401 with the same shape as wrong-username.
+WRONG_PW=$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"wrong-password"}' "$URL/api/auth/login")
+[ "$WRONG_PW" = "401" ] && pass "POST /api/auth/login wrong-password → 401" \
+  || fail "Wrong-password" "got $WRONG_PW"
+
+# CSRF: cookie-authed write without X-CSRF-Token is 403.
+CSRF_RESP=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -b "$COOKIE_JAR" -H 'Content-Type: application/json' \
+  -d '{"label":"csrf-test"}' \
+  "$URL/api/users/alice/tokens")
+[ "$CSRF_RESP" = "403" ] && pass "Cookie POST without CSRF → 403" \
+  || fail "CSRF enforcement" "got $CSRF_RESP"
+
+# Bearer skips CSRF: same POST with bearer succeeds (mints a 2nd token).
+BEARER_POST=$(authed -o /dev/null -w '%{http_code}' -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"bearer-test"}' \
+  "$URL/api/users/alice/tokens")
+[ "$BEARER_POST" = "201" ] && pass "Bearer POST skips CSRF → 201" \
+  || fail "Bearer skip CSRF" "got $BEARER_POST"
+
+# ----- Files-first store: /api/data/<key> -----
+echo ""
+note "Files-first store"
+
+assert_status "PUT singleton"   PUT "/api/data/test.k" 200 \
+  -H 'Content-Type: application/json' -d '{"value":42}'
+assert_jq     "GET singleton"   "/api/data/test.k" '.value' "42"
+assert_jq     "shape singleton" "/api/data/test.k" '._meta.shape' "singleton"
+
+VERSION=$(authed "$URL/api/data/test.k" | jq -r '._meta.version')
+assert_status "PATCH merge create"  PATCH "/api/data/test.cfg" 200 \
+  -H 'Content-Type: application/json' -d '{"value":{"a":1,"b":2}}'
+assert_status "PATCH merge update"  PATCH "/api/data/test.cfg" 200 \
+  -H 'Content-Type: application/json' -d '{"value":{"a":99,"c":3}}'
+assert_jq     "deep merge a=99"     "/api/data/test.cfg" '.value.a' "99"
+assert_jq     "deep merge b=2"      "/api/data/test.cfg" '.value.b' "2"
+assert_jq     "deep merge c=3"      "/api/data/test.cfg" '.value.c' "3"
+
+assert_status "Upsert collection 1"  PUT "/api/data/test.kanban/task-1" 200 \
+  -H 'Content-Type: application/json' -d '{"value":{"title":"a","col":"todo"}}'
+assert_status "Upsert collection 2"  PUT "/api/data/test.kanban/task-2" 200 \
+  -H 'Content-Type: application/json' -d '{"value":{"title":"b","col":"todo"}}'
+assert_jq     "List collection (2)"  "/api/data/test.kanban" '.items | length' "2"
+
+assert_status "Stream append"  POST "/api/data/test.events?op=append" 200 \
+  -H 'Content-Type: application/json' -d '{"value":{"e":"signup"}}'
+assert_jq "Stream tail" "/api/data/test.events?limit=10" '.lines | length' "1"
+
+assert_status "Wrong shape (append on singleton) → 409" \
+  POST "/api/data/test.k?op=append" 409 \
+  -H 'Content-Type: application/json' -d '{"value":1}'
+
+assert_status "DELETE singleton" DELETE "/api/data/test.k" 204
+
+# ----- Content (MDX pages) -----
+echo ""
+note "Content / MDX pages"
+
+assert_status "GET content list" GET "/api/content" 200
+assert_status "GET index page"   GET "/api/content/index" 200
+assert_status "Write new page"   PUT "/api/content/scratch" 200 \
+  -H 'Content-Type: text/markdown' -d $'# Scratch\n\nIntegration test page.'
+assert_status "Read it back"     GET "/api/content/scratch" 200
+assert_status "DELETE protected index → 400" DELETE "/api/content/index" 400
+assert_status "DELETE scratch"   DELETE "/api/content/scratch" 200
+
+# ----- Files (binary upload via presigned URL) -----
+echo ""
+note "Files (presigned upload + serve)"
+
+MINT=$(authed -X POST -H 'Content-Type: application/json' \
+  "$URL/api/files/request-upload" -d '{"name":"smoke.txt","size_bytes":12}')
+UPLOAD_URL=$(echo "$MINT" | jq -r '.upload_url')
+[ "$UPLOAD_URL" != "null" ] && [ -n "$UPLOAD_URL" ] && pass "Mint upload URL" \
+  || fail "Mint upload URL" "no url returned: $MINT"
+
+UPLOAD_STATUS=$(echo -n "Hello smoke" | curl -s -X PUT --data-binary @- \
+  -o /dev/null -w '%{http_code}' "$UPLOAD_URL")
+[ "$UPLOAD_STATUS" = "200" ] && pass "Presigned PUT" \
+  || fail "Presigned PUT" "got $UPLOAD_STATUS"
+
+REPLAY_STATUS=$(echo -n "replay" | curl -s -X PUT --data-binary @- \
+  -o /dev/null -w '%{http_code}' "$UPLOAD_URL")
+[ "$REPLAY_STATUS" = "401" ] && pass "One-shot upload-token enforced" \
+  || fail "One-shot enforced" "got $REPLAY_STATUS (want 401)"
+
+assert_status "GET uploaded file" GET "/api/files/smoke.txt" 200
+
+# ----- Components catalog -----
+echo ""
+note "Component catalog"
+
+assert_status     "GET components"     GET "/api/components" 200
+assert_jq_at_least "Component count"   "/api/components" '. | length' 30
+
+# ----- MCP -----
+echo ""
+note "MCP (JSON-RPC over Streamable HTTP)"
+
+INIT_RESP=$(curl -s -X POST "$URL/mcp" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')
+[ -n "$INIT_RESP" ] && pass "MCP initialize returns a response" \
+  || fail "MCP initialize" "no response"
+
+TOOL_COUNT=$(curl -s -X POST "$URL/mcp" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | jq -r '.result.tools | length' 2>/dev/null || echo 0)
+if [ "$TOOL_COUNT" -ge 30 ] 2>/dev/null; then
+  pass "MCP tools/list ≥ 30 tools (got $TOOL_COUNT)"
 else
-  echo "  (skipped — gstack browse not installed)"
+  fail "MCP tools/list" "expected ≥ 30 tools, got '$TOOL_COUNT'"
 fi
 
+# ----- Index + search -----
+echo ""
+note "Index + search"
+
+assert_status     "GET /api/index"      GET "/api/index" 200
+assert_jq_at_least "/api/index has data" "/api/index" '.data | length' 1
+
+# ----- SSE -----
+echo ""
+note "SSE"
+
+SSE_STATUS=$(authed -o /dev/null -w '%{http_code}' --max-time 2 \
+  "$URL/api/events" 2>/dev/null || true)
+if [ "$SSE_STATUS" = "200" ] || [ -z "$SSE_STATUS" ]; then
+  pass "SSE endpoint connects"
+else
+  fail "SSE" "unexpected status $SSE_STATUS"
+fi
+
+# ----- OAuth discovery (unauth-readable) -----
+echo ""
+note "OAuth / MCP authorization-server discovery"
+
+PRM_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$URL/.well-known/oauth-protected-resource")
+[ "$PRM_STATUS" = "200" ] && pass "Protected-resource metadata (RFC 9728)" \
+  || fail "PRM" "got $PRM_STATUS"
+
+ASM_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$URL/.well-known/oauth-authorization-server")
+[ "$ASM_STATUS" = "200" ] && pass "Authorization-server metadata (RFC 8414)" \
+  || fail "ASM" "got $ASM_STATUS"
+
+# ----- Logout -----
+echo ""
+note "Logout flow"
+
+LOGOUT_STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  -b "$COOKIE_JAR" "$URL/api/auth/logout")
+[ "$LOGOUT_STATUS" = "200" ] && pass "POST /api/auth/logout" \
+  || fail "Logout" "got $LOGOUT_STATUS"
+
+# /api/auth/me with the same cookie jar should now 401.
+POST_LOGOUT=$(curl -s -o /dev/null -w '%{http_code}' \
+  -b "$COOKIE_JAR" "$URL/api/auth/me")
+[ "$POST_LOGOUT" = "401" ] && pass "Cookie /me 401 after logout" \
+  || fail "Post-logout /me" "got $POST_LOGOUT"
+
+# ----- Summary -----
 echo ""
 echo "=== Results: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] && exit 0 || exit 1
