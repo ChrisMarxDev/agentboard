@@ -119,23 +119,31 @@ What's already in the binary and running on the dogfood instance.
 
 ### Core
 - Single binary, zero runtime deps. VPS deploy script (`task deploy:vps`). Coolify control plane wired (`scripts/new-board.sh`, `.github/workflows/redeploy-coolify.yml`) per `SCALE.md`.
-- One-tree content model (§9 consolidation). `content/` holds pages + files; every folder is routable. Generic FileViewer fallback.
-- KV data store with 7 write ops, SSE broadcaster, `data_history` retention (the model we'll mirror for `content_history`).
-- 21 built-in components. ApiList as the generic `/api/*` list renderer (§9).
+- Files-first storage (one tree under the project root). Pages + collection items are `.md` with YAML frontmatter; streams are `.ndjson`; binaries are files. Folders are collections. Full-file CAS via `_meta.version`. Activity log + per-doc history NDJSON.
+- 32 built-in components. ApiList as the generic `/api/*` list renderer (§9).
 - Grab (cards + headings + whole-page picks, three output formats).
 - Skills hosting (`content/skills/*/SKILL.md` + `GET /api/skills`).
-- 19 MCP tools.
+- ~40 MCP tools (store data plane, pages, files, components, skills, errors, webhooks, teams, locks, grab).
+- SSE broadcaster pushes data + page-updated events to connected browsers.
 - Sidebar with unified content tree + client-side search (`/` shortcut).
-- 10 principles codified in `CORE_GUIDELINES.md`, mirrored at `/principles`.
+- 12 principles codified in `CORE_GUIDELINES.md`, mirrored at `/principles`.
 
-### Auth (just landed)
+### Auth (shipped)
 - Username is identity. `@alice` IS the user. Immutable + reserved forever.
-- One credential class: bearer tokens (`ab_...`). No sessions, no passwords.
-- `kind: admin | member | bot`. Admin unlocks `/api/admin/*`; members manage
-  own tokens; bots are shared puppets any admin can rotate.
-- Onboarding via invitation URLs (`/invite/<id>`); first admin is bootstrapped
-  automatically on fresh `serve`. CLI: `agentboard admin list / list-invitations
-  / rotate / rename-user`.
+- Two credential paths by audience: bearer tokens (`ab_…`, plus `oat_…`
+  audience-scoped tokens minted via OAuth 2.1 + DCR for browser-driven MCP
+  clients) for non-human callers, browser session cookies for humans.
+  Cookie-authed state-changing requests carry `X-CSRF-Token` (double-
+  submit cookie pattern); bearer skips CSRF by design.
+- Passwords hashed with argon2id; never stored or logged in plaintext.
+- `kind: admin | member | bot`. Admin unlocks `/api/admin/*`; members
+  manage own tokens + sessions + password; bots are shared puppets any
+  admin can rotate.
+- Onboarding via invitation URLs (`/invite/<id>`); first admin is
+  bootstrapped automatically on fresh `serve`. The redeem flow accepts
+  an optional password — supplying one signs the new user into the SPA
+  immediately. CLI: `agentboard admin list / list-invitations / invite /
+  rotate / set-password / revoke-sessions / rename-user`.
 
 ### Docs
 - `CLAUDE.md`, `CORE_GUIDELINES.md`, `AUTH.md`, `HOSTING.md`, `SCALE.md`, `spec-plugins.md`, `DOGFOOD_NOTES.md` — all in sync with shipped code.

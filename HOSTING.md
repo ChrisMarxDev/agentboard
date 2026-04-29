@@ -106,9 +106,10 @@ export BOARDS_DOMAIN=boards.example.com
 ```
 
 The script creates a Coolify application called `agentboard-alice`, sets its
-env vars (`AGENTBOARD_AUTH_TOKEN`, `AGENTBOARD_PROJECT=alice`,
-`AGENTBOARD_PATH=/data`), and triggers the first deploy. DM the printed URL
-+ token to Alice.
+env vars (`AGENTBOARD_PROJECT=alice`, `AGENTBOARD_PATH=/data`), and triggers
+the first deploy. The first boot prints a `/invite/<id>` URL — DM the
+printed URL to Alice; she opens it, picks a username and password, and
+becomes the first admin on her board.
 
 **One-time UI step per board** (~10 seconds): once the first deploy finishes,
 open the board's Coolify page → **Storages** → **Add** → Persistent Storage,
@@ -161,20 +162,28 @@ no SaaS fees on top.
 
 ### Trust-boundary caveats (read before inviting friends)
 
-`seams_to_watch.md` flags that AgentBoard's auth model was designed for
-"you, alone, on localhost." Running it multi-tenant on a shared box is fine
-for friends who already trust each other and trust you, but note:
+`seams_to_watch.md` flags concerns AgentBoard hasn't fully closed for
+multi-tenant deployments. Running boards for friends-who-trust-friends is
+fine; running on a shared box for an organisation that doesn't already
+trust each other isn't yet the right shape. Specifically:
 
-- Each board has one shared auth token — anyone with the token is an admin
-  on that board. No user accounts, no per-route authz, no rate limiting.
-- Board-to-board isolation comes from Docker containers + separate volumes.
-  A kernel or Docker escape would cross that boundary; don't put anything
-  truly sensitive on a shared box.
-- Token rotation is manual: generate a new one, `PATCH` the env var via
-  Coolify API or UI, redeploy, re-DM the new token.
+- Within a board, AgentBoard has real per-user accounts (admin / member /
+  bot kinds, individually rotatable tokens, browser sessions with CSRF,
+  audience-scoped OAuth tokens for MCP). Lockout recovery is filesystem-
+  level via `agentboard admin set-password`, `admin rotate`, or
+  `admin invite`. See `AUTH.md` for the full design.
+- Board-to-board isolation comes from Docker containers + separate
+  volumes. A kernel or Docker escape would cross that boundary; don't put
+  anything truly sensitive on a shared box.
+- Component upload (`--allow-component-upload`) is OFF by default. If you
+  turn it on, every authenticated caller can plant arbitrary JS that runs
+  in every visitor's browser — keep it off unless you fully trust every
+  caller. `seams_to_watch.md §"User components run with full page
+  privileges"` covers the deferred sandboxing options.
 
-If a friend wants to invite *their* coworker, either give them their own
-board or wait for a real multi-user auth story.
+If a friend wants to invite *their* coworker on the same board, the auth
+model already supports that (admin invites them via `/admin → New
+invitation`); board-level isolation is what they'd lose by sharing.
 
 ---
 
@@ -197,6 +206,6 @@ None of these are committed. Public repo is safe.
 - `scripts/list-boards.sh` — list all boards running on the Coolify host
 - `scripts/redeploy-boards.sh` — redeploy one or every Coolify board via API
 - `scripts/deploy-vps.sh` — single-board install on a raw Debian/Ubuntu VPS (no Coolify)
-- `internal/auth/` — the token + OAuth surface (see `AUTH.md`)
-- `bruno/hosted/` — Bruno collection that exercises the live instance
-- `seams_to_watch.md` §"Single-token auth gate" — what the token does and doesn't protect against
+- `internal/auth/` — the per-user token + password + session + OAuth surface (see `AUTH.md`)
+- `bruno/tests/` — contract test suite (run `task test:bruno`)
+- `seams_to_watch.md` — what the auth model does and doesn't protect against
