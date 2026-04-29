@@ -245,9 +245,20 @@ export default function InviteRedeem() {
 // ClaimedBriefing renders the post-redeem agent-handoff. The pitch:
 // the human just claimed an account; their actual job is to put an
 // AI agent in front of AgentBoard. We pre-bake a copy-paste prompt
-// that includes the token, server URL, and exact endpoints the agent
-// should hit first. The user pastes that into Claude / Cursor /
-// Cody / whatever and the agent takes over.
+// that the user drops into their agent.
+//
+// MCP is the primary path — most modern agents (Claude.ai, Cursor,
+// Cody, Continue) call out through their host's network proxy with
+// allowlists, so raw curl to a self-hosted IP often fails ("host
+// blocked by network policy"). MCP-via-connector goes through the
+// host's tool layer and just works once configured.
+//
+// The selector at the top picks the agent runtime; the prompt body
+// updates accordingly. We focus on Claude Code (the CLI) and
+// "Other / Generic MCP" — the latter covers Cursor/Cody/Continue
+// and any future client that takes a URL + bearer header.
+type AgentTarget = 'claude-code' | 'other'
+
 function ClaimedBriefing({
   token,
   username,
@@ -260,41 +271,53 @@ function ClaimedBriefing({
   onContinue: () => void
 }) {
   const [copied, setCopied] = useState(false)
+  const [target, setTarget] = useState<AgentTarget>('claude-code')
   const base = window.location.origin
 
-  // The text below is intentionally addressed in second person to
-  // the AGENT, not to the human. The human's job is to copy + paste;
-  // the agent reads the prompt and acts on it.
-  const promptText = `You are now using AgentBoard as the persistent knowledge base for this project. AgentBoard is a content surface for agent teams: agents write — pages, files, tasks, data — and humans read.
-
-Server:        ${base}
-Auth token:    ${token}
-Username:      ${username} (role: ${role})
-
-Treat the token like a password. Pass it on every request:
-
-    Authorization: Bearer ${token}
-
-Before doing anything else, fetch the skill manifest. It documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions agents are expected to follow:
-
-    curl -H "Authorization: Bearer ${token}" \\
-      ${base}/api/skills/agentboard
-
-That single document is the contract. Read it once, then act.
-
-Quick health checks:
-
-    curl -H "Authorization: Bearer ${token}" ${base}/api/health
-    curl -H "Authorization: Bearer ${token}" ${base}/api/me
-
-If your runtime supports MCP, AgentBoard exposes a tool server too. From Claude Code:
+  const claudeCodePrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project. Run the following ONCE in your shell to wire AgentBoard as an MCP tool server (after that, the agentboard_* tools are available to you for the rest of this session and any future ones):
 
     claude mcp add agentboard --transport http ${base}/mcp \\
       --header "Authorization: Bearer ${token}"
 
-Never write directly to disk on the AgentBoard host — every change must go through REST or MCP. The skill manifest covers all of it.
+Server:    ${base}
+Username:  ${username} (role: ${role})
+Token:     ${token}   (already in the connector above; only needed for raw HTTP calls)
+
+Once the MCP server is added, your first action MUST be to fetch the skill manifest. It documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you are expected to follow:
+
+    agentboard_get_skill({ slug: "agentboard" })
+
+That single document is the contract. Read it once, then act.
+
+Never write directly to disk on the AgentBoard host — every change goes through MCP tools (or REST as a fallback). The skill manifest covers all of it.
 
 Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
+
+  const otherPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
+
+If your runtime supports remote MCP servers (Cursor, Cody, Continue, Claude.ai custom connector, etc.), wire AgentBoard as a tool server using these settings:
+
+    URL:     ${base}/mcp
+    Header:  Authorization: Bearer ${token}
+
+After that, the agentboard_* tools are available to you. Your first action MUST be to fetch the skill manifest:
+
+    agentboard_get_skill({ slug: "agentboard" })
+
+If your runtime CANNOT add MCP servers but CAN reach HTTP, the same skill is available via REST:
+
+    GET ${base}/api/skills/agentboard
+    with header: Authorization: Bearer ${token}
+
+Server:    ${base}
+Username:  ${username} (role: ${role})
+Token:     ${token}
+
+The skill manifest documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you are expected to follow. Read it once, then act. Never write directly to disk on the AgentBoard host — every change goes through MCP or REST.
+
+Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
+
+  const promptText = target === 'claude-code' ? claudeCodePrompt : otherPrompt
 
   const copy = async () => {
     const ok = await copyToClipboard(promptText)
@@ -369,12 +392,37 @@ Now proceed with whatever the user asked you to do, using AgentBoard as the pers
         </div>
         <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: 0 }}>
           Your account is created and a token is saved in this browser.
-          The fastest way to get going is to hand the briefing below to
-          your AI agent — it tells the agent how to authenticate, where
-          to find the AgentBoard skill, and how to start writing.
+          The fastest way to get going is to wire AgentBoard into your
+          AI agent as an MCP tool server, then paste the briefing below
+          so the agent knows what to do next.
         </p>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '1.25rem', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.375rem', marginTop: '1.25rem', marginBottom: '0.75rem' }}>
+          {(['claude-code', 'other'] as const).map((t) => {
+            const active = target === t
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTarget(t)}
+                style={{
+                  padding: '0.4rem 0.85rem',
+                  borderRadius: '0.45rem',
+                  fontSize: '0.8125rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  background: active ? 'var(--accent)' : 'transparent',
+                  color: active ? 'white' : 'var(--text-secondary)',
+                  border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                }}
+              >
+                {t === 'claude-code' ? 'Claude Code' : 'Other (Cursor, Cody, Claude.ai…)'}
+              </button>
+            )
+          })}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
           <div style={{
             fontSize: '0.6875rem',
             fontWeight: 600,
