@@ -1,5 +1,5 @@
 // Package grab collects Card, heading, or whole-page sections across MDX
-// pages into a single agent-ready payload. See spec-grab.md for the full
+// pages into a single agent-ready payload. See docs/archive/spec-grab.md for the full
 // design.
 //
 // The materializer is deliberately regex-based: AgentBoard authors already
@@ -237,7 +237,7 @@ func (m *Materializer) materializeOne(p Pick) (Section, int, int) {
 
 // cardRegex matches a top-level <Card …>…</Card> block. Non-greedy body so
 // multiple Cards on a page don't merge. Does NOT handle nested <Card> (rare
-// in our authoring convention; documented limitation in spec-grab.md).
+// in our authoring convention; documented limitation in docs/archive/spec-grab.md).
 var cardRegex = regexp.MustCompile(`(?s)<Card\s([^>]*?)>(.*?)</Card>`)
 
 // titleAttrRegex pulls the title="..." attr out of Card's attribute list.

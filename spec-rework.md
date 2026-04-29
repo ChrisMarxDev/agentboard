@@ -1,6 +1,6 @@
 # AgentBoard — Rewrite Spec
 
-> **Status**: Implementation contract for the rewrite that supersedes `spec-file-storage.md`. Locks the design decisions reached in the planning conversation. **Pre-launch — no backward compatibility, no migrators.** The legacy SQLite KV, `/api/data/*` routes, dual-store fallback, `v2` framing, and `<DataView>` escape hatch all get deleted.
+> **Status**: Implementation contract for the rewrite that supersedes the older `docs/archive/spec-file-storage.md`. Locks the design decisions reached in the planning conversation. **Pre-launch — no backward compatibility, no migrators.** The legacy SQLite KV, the parallel `/api/v2/*` namespace, the `agentboard_v2_*` MCP tools, and the `<DataView>` escape hatch all got deleted in cuts 1–4.
 
 ## 1. Thesis
 
@@ -164,7 +164,7 @@ Each cut is one PR. Cut 1 is destructive but bounded — the rest of the system 
 
 ## 12. Open questions
 
-None. Every load-bearing decision is locked. Concrete coding decisions (route paths, error code strings, exact JSON shapes) are settled by spec-file-storage.md §B; this doc just supersedes the framing.
+None. Every load-bearing decision is locked. Concrete coding decisions (route paths, error code strings, exact JSON shapes) are settled by `docs/archive/spec-file-storage.md` §B; this doc supersedes its framing.
 
 ---
 

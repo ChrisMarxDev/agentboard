@@ -136,7 +136,7 @@ frontend uses the sidebar tree to render both uniformly — good — but an
 agent fetching the manifest has no way to say "give me only skills" without
 knowing the `content/skills/` prefix convention. `GET /api/skills` handles
 that one case; generalising to `/api/search?type=skill` or frontmatter
-`type:` field (per spec-knowledge §2) would scale.
+`type:` field (per docs/archive/spec-knowledge §2) would scale.
 
 ### 10. No visual "orphan" flag on data keys
 
@@ -159,7 +159,7 @@ Sidebar search filters titles + paths. Good. But it doesn't search
 *content* — if I type "Coolify", I don't find the deleted runbook via its
 body. A tiny server-side `GET /api/search?q=...` that full-text-matches
 page sources would let the sidebar escalate beyond title match when needed.
-SQLite FTS5 was already called out in `spec-knowledge.md` §8 as the
+SQLite FTS5 was already called out in `docs/archive/spec-knowledge.md` §8 as the
 v1 approach. Small add.
 
 ## What to implement next (ranked by leverage)

@@ -24,7 +24,7 @@ Each entry follows the same shape:
   - Reject `image/svg+xml` at upload time (`--reject-svg` flag or config).
   - Serve SVG with `Content-Security-Policy: sandbox`.
   - Rewrite via a sanitizer (DOMPurify on the server via goja is overkill; simpler to reject).
-- **Logged.** `spec-files.md` §9.
+- **Logged.** `docs/archive/spec-files.md` §9.
 
 ### HTML phishing via uploaded files
 
@@ -34,7 +34,7 @@ Each entry follows the same shape:
 - **Mitigation options.**
   - Force `Content-Disposition: attachment` for `text/html`, `text/xml`, `application/xhtml+xml`.
   - Serve uploaded files from a separate origin (subdomain) so the main app's cookies aren't in scope.
-- **Logged.** `spec-files.md` §9.
+- **Logged.** `docs/archive/spec-files.md` §9.
 
 ### User components run with full page privileges
 

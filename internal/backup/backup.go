@@ -1,6 +1,6 @@
 // Package backup ships the project-folder tarball implementation
 // behind the `agentboard backup` and `agentboard restore` CLI commands
-// (spec-file-storage.md §20). The ICP doesn't install rclone or
+// (docs/archive/spec-file-storage.md §20). The ICP doesn't install rclone or
 // aws-cli; we ship the tool.
 //
 // Phase 1: local tarball (.tar.gz). Phase 2 (deferred): S3 destination

@@ -260,7 +260,7 @@ func loadSkillSummary(root, slug string) (SkillSummary, bool) {
 }
 
 // buildSkillFile decides whether a file should be returned as text or base64
-// and builds the SkillFile. Text detection mirrors spec-files.md: trust common
+// and builds the SkillFile. Text detection mirrors docs/archive/spec-files.md: trust common
 // text extensions, otherwise check for valid UTF-8 without null bytes.
 func buildSkillFile(relPath string, body []byte, size int64) SkillFile {
 	if isTextual(relPath, body) {

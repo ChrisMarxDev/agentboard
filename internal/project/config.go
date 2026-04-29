@@ -42,7 +42,7 @@ type Config struct {
 	// as arbitrary JavaScript in every dashboard visitor's browser.
 	AllowComponentUpload bool `yaml:"allow_component_upload" json:"allow_component_upload"`
 	// MaxFileSizeMB caps per-file uploads to /api/files/:name. Default 50,
-	// hard upper bound 500 (enforced by internal/files). See spec-files.md §5.
+	// hard upper bound 500 (enforced by internal/files). See docs/archive/spec-files.md §5.
 	MaxFileSizeMB int `yaml:"max_file_size_mb" json:"max_file_size_mb"`
 	// Public exposes selected read endpoints without auth. Empty = fully
 	// private instance (default).

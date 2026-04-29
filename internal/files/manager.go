@@ -1,6 +1,6 @@
 // Package files manages user-uploaded binary artifacts (images, PDFs, CSVs,
 // etc.) served at /api/files/*. Files live in <project>/files/ on disk — see
-// spec-files.md for the full design.
+// docs/archive/spec-files.md for the full design.
 package files
 
 import (
@@ -86,7 +86,7 @@ func (m *Manager) FilesDir() string {
 	return m.project.FilesDir()
 }
 
-// ValidateName enforces the naming rules documented in spec-files.md §5:
+// ValidateName enforces the naming rules documented in docs/archive/spec-files.md §5:
 //   - One or more `/`-separated segments, no leading slash
 //   - Each segment matches [A-Za-z0-9][A-Za-z0-9._ -]{0,127}
 //   - Never contains "..", backslash, or null bytes

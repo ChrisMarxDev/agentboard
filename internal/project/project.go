@@ -59,7 +59,7 @@ func (p *Project) PagesDir() string {
 
 // MigrateLegacyPagesDir renames pages/ → content/ if content/ does not already
 // exist. Safe to call on every startup: returns (false, nil) when there's
-// nothing to do. See spec-knowledge.md §5.
+// nothing to do. See docs/archive/spec-knowledge.md §5.
 func (p *Project) MigrateLegacyPagesDir() (bool, error) {
 	contentDir := p.ContentDir()
 	pagesDir := p.PagesDir()

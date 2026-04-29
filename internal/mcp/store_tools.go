@@ -1,6 +1,6 @@
 package mcp
 
-// MCP tools for the files-first store (spec-file-storage.md §11). Ten
+// MCP tools for the files-first store (docs/archive/spec-file-storage.md §11). Ten
 // tier-shaped tools replace the resource-CRUD surface for data access.
 // Old `agentboard_set` etc. stay registered until Phase 5 retires
 // them; agents picking up the new tools first get the cleaner shape.
