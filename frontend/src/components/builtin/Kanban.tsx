@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Send, Trash2, Users } from 'lucide-react'
+import { Pencil, Plus, Send, Trash2, Users, X } from 'lucide-react'
 import { useData } from '../../hooks/useData'
 import { useDataContext } from '../../hooks/DataContext'
 import { apiFetch } from '../../lib/session'
@@ -7,6 +7,9 @@ import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 import {
   deleteCollectionItem,
   patchCollectionItem,
+  patchCollectionItemBody,
+  patchPageFrontmatter,
+  readCollectionItemBody,
 } from '../../lib/collectionWrites'
 import { findUser, useUsers, type PublicUser } from '../../hooks/useUsers'
 import { findTeam, useTeams, type Team } from '../../hooks/useTeams'
@@ -31,26 +34,24 @@ interface NormalizedColumn { id: string; label: string }
 
 // KNOWN_COL_ORDER is the canonical workflow order for `col`-shaped
 // kanbans. Anything not in this list slots in alphabetically after the
-// known set. Set explicit `columns={[...]}` on the Kanban to override.
+// known set. Set explicit `columns={[...]}` on the Kanban (or via the
+// page's frontmatter.columns) to override.
 const KNOWN_COL_ORDER = [
   'backlog',
   'todo',
-  'in-progress', 'in_progress', 'doing',
+  'doing', 'in-progress', 'in_progress',
   'review',
   'done', 'shipped',
   'cancelled', 'archive',
 ]
 
 function defaultColOrder(present: string[], groupBy: string): string[] {
-  // Only apply the workflow heuristic when the page is grouped by the
-  // canonical "col" field; for other groupBy keys, fall back to the
-  // discovery order the items naturally produce (alphabetical).
   if (groupBy !== 'col') return present
-  // Fresh boards with no cards yet still need columns to render against,
-  // otherwise the user lands on a Kanban-shaped void after creating a
-  // project. Seed the canonical workflow trio so the page is usable
-  // from the first second.
-  if (present.length === 0) return ['todo', 'in_progress', 'done']
+  // Fresh boards default to TODO / DOING / DONE so a non-technical
+  // user lands on a usable workflow without needing to know about the
+  // columns prop or frontmatter.columns. Renames + new lanes are then
+  // edited inline and persisted to the page's frontmatter.
+  if (present.length === 0) return ['todo', 'doing', 'done']
   const set = new Set(present)
   const known = KNOWN_COL_ORDER.filter(c => set.has(c))
   const knownSet = new Set(known)
@@ -79,6 +80,15 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
   // the bundle is already populated.
   const effectiveSource = source ?? (ctx.path ? ctx.path + '/' : '')
   const { data, loading } = useData(effectiveSource)
+  // Columns can come from three places, in priority order:
+  //   1. The JSX `columns` prop (explicit override in the MDX).
+  //   2. The page's own frontmatter.columns (editable inline by the
+  //      user; survives across renames + new-lane writes).
+  //   3. Defaults derived from the data (or TODO/DOING/DONE if empty).
+  // Reading 2 via useData lets the backend's frontmatter splat carry
+  // the value into the bundle for free — no extra fetch.
+  const { data: fmColumns } = useData('columns')
+  const ownerPagePath = ctx.path ?? ''
   const users = useUsers()
   const teams = useTeams()
   const [openCard, setOpenCard] = useState<Record<string, unknown> | null>(null)
@@ -141,12 +151,61 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     return id.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
   }
 
+  // Resolve columns from props OR frontmatter. Fall back to defaults
+  // when neither carries an explicit list.
+  const fmColumnsArr =
+    Array.isArray(fmColumns)
+      ? (fmColumns as ReadonlyArray<string | { id: string; label?: string }>)
+      : null
+  const explicitColumns = columns ?? fmColumnsArr
   const normalisedColumns: NormalizedColumn[] =
-    columns?.map(normalizeCol) ??
+    explicitColumns?.map(normalizeCol) ??
     defaultColOrder(Array.from(groups.keys()), groupBy).map(id => normalizeCol(id))
   const colOrder = normalisedColumns.map(c => c.id)
   const labelFor = (id: string) =>
     normalisedColumns.find(c => c.id === id)?.label ?? colLabels[id] ?? prettify(id)
+
+  // Column edits (rename + add new lane) persist to frontmatter.columns
+  // on the owner page. Only enabled when this Kanban is auto-attached
+  // to its own page (ownerPagePath set) AND the source is a folder
+  // collection — that's the configuration where the page IS the board.
+  const columnsEditable = isFolderBoard && Boolean(ownerPagePath) && groupBy === 'col'
+  async function persistColumns(next: NormalizedColumn[]) {
+    if (!ownerPagePath) return
+    try {
+      const res = await patchPageFrontmatter(ownerPagePath, { columns: next })
+      if (!res.ok) throw new Error(`patch columns → ${res.status}`)
+      resetBeacon('Kanban', effectiveSource)
+    } catch (e) {
+      beaconError({
+        component: 'Kanban',
+        source: effectiveSource,
+        error: e instanceof Error ? e.message : 'rename column failed',
+      })
+    }
+  }
+  function renameColumn(id: string, label: string) {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    const next = normalisedColumns.map(c =>
+      c.id === id ? { id, label: trimmed } : c,
+    )
+    void persistColumns(next)
+  }
+  function addLane(label: string) {
+    const trimmed = label.trim()
+    if (!trimmed) return
+    // Slugify for the underlying id; keep the user-typed label visible.
+    const baseId = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'lane'
+    let id = baseId
+    const existing = new Set(normalisedColumns.map(c => c.id))
+    for (let i = 2; existing.has(id); i++) id = baseId + '_' + i
+    void persistColumns([...normalisedColumns, { id, label: trimmed }])
+  }
+  function removeLane(id: string) {
+    if (normalisedColumns.length <= 1) return
+    void persistColumns(normalisedColumns.filter(c => c.id !== id))
+  }
 
   // computeInsertOrder returns an `order` value that places the dragged
   // card either before `beforeId` (if provided) or at the end of `colItems`.
@@ -279,15 +338,14 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                 width: '18rem',
               }}
             >
-              <div
-                className="text-sm font-medium mb-3 flex items-center justify-between sticky top-0"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                <span>{labelFor(col)}</span>
-                <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--border)' }}>
-                  {colItems.length}
-                </span>
-              </div>
+              <ColumnHeader
+                label={labelFor(col)}
+                count={colItems.length}
+                editable={columnsEditable}
+                canRemove={columnsEditable && normalisedColumns.length > 1}
+                onRename={(label) => renameColumn(col, label)}
+                onRemove={() => removeLane(col)}
+              />
               <div className="space-y-2">
                 {colItems.map(({ card: item }, i) => {
                   const id = item.id != null ? String(item.id) : null
@@ -391,6 +449,7 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
             </div>
           )
         })}
+        {columnsEditable && <NewLaneCard onAdd={addLane} />}
       </div>
       {openCard && (
         <KanbanCardModal
@@ -565,7 +624,18 @@ function KanbanCardModal({
   const assignees = Array.isArray(merged.assignees)
     ? (merged.assignees as string[]).filter(a => typeof a === 'string')
     : []
-  const body = typeof merged.body === 'string' ? merged.body : ''
+  // Description = the actual MDX body of the task's .md file. Folder
+  // collection rows only carry frontmatter, so we lazy-load the body
+  // when the modal opens.
+  const [body, setBody] = useState<string>('')
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    void readCollectionItemBody(source, id).then(b => {
+      if (!cancelled) setBody(b)
+    })
+    return () => { cancelled = true }
+  }, [id, source])
   const priority = typeof merged.priority === 'number' ? merged.priority : null
   const due = typeof merged.due === 'string' ? merged.due : ''
   const labels = Array.isArray(merged.labels)
@@ -759,12 +829,27 @@ function KanbanCardModal({
             />
           </FieldRow>
 
-          {/* Body */}
+          {/* Description = the page's MDX body. Saved via a body-only
+              PATCH so frontmatter (structured fields) is left alone. */}
           <FieldRow label="Description">
             <BodyEditor
               value={body}
               readonly={readonly}
-              onSave={next => patchField('body', next)}
+              onSave={async (next) => {
+                if (!id) return
+                setBody(next)
+                try {
+                  const res = await patchCollectionItemBody(source, id, next)
+                  if (!res.ok) throw new Error(`patch body → ${res.status}`)
+                  resetBeacon('Kanban', source)
+                } catch (e) {
+                  beaconError({
+                    component: 'Kanban',
+                    source,
+                    error: e instanceof Error ? e.message : 'description save failed',
+                  })
+                }
+              }}
             />
           </FieldRow>
 
@@ -1712,6 +1797,180 @@ function BlockersBlock({
 //
 // Slug is derived from the title (lowercase, alphanumerics + hyphens).
 // Collisions are resolved by appending `-2`, `-3`, etc.
+// ColumnHeader is the lane title strip — readonly label by default,
+// click-to-edit when the board's columns are persisted to the page's
+// frontmatter. Hover surfaces a remove (X) icon for non-last columns.
+function ColumnHeader({
+  label,
+  count,
+  editable,
+  canRemove,
+  onRename,
+  onRemove,
+}: {
+  label: string
+  count: number
+  editable: boolean
+  canRemove: boolean
+  onRename: (next: string) => void
+  onRemove: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(label)
+  useEffect(() => { if (!editing) setDraft(label) }, [label, editing])
+
+  const commit = () => {
+    setEditing(false)
+    if (draft.trim() && draft.trim() !== label) onRename(draft)
+    else setDraft(label)
+  }
+
+  if (editing) {
+    return (
+      <div className="text-sm font-medium mb-3 flex items-center gap-1 sticky top-0">
+        <input
+          autoFocus
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); commit() }
+            if (e.key === 'Escape') { e.preventDefault(); setEditing(false); setDraft(label) }
+          }}
+          className="flex-1 px-1.5 py-0.5 rounded text-sm font-medium"
+          style={{
+            background: 'var(--bg)',
+            border: '1px solid var(--accent)',
+            color: 'var(--text)',
+            outline: 'none',
+            minWidth: 0,
+          }}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="text-sm font-medium mb-3 flex items-center justify-between gap-2 sticky top-0 group"
+      style={{ color: 'var(--text-secondary)' }}
+    >
+      <button
+        type="button"
+        onClick={() => editable && setEditing(true)}
+        className="flex items-center gap-1 truncate"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'inherit',
+          cursor: editable ? 'text' : 'default',
+          padding: 0,
+          font: 'inherit',
+          minWidth: 0,
+        }}
+        title={editable ? 'Click to rename' : undefined}
+      >
+        <span className="truncate">{label}</span>
+        {editable && (
+          <Pencil size={11} className="opacity-0 group-hover:opacity-60 transition-opacity" />
+        )}
+      </button>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--border)' }}>
+          {count}
+        </span>
+        {editable && canRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            title="Remove lane (cards in it become 'other')"
+            className="opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              padding: 2,
+              borderRadius: 4,
+            }}
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// NewLaneCard renders an empty-shaped column at the right edge of the
+// strip. Click → input → Enter → persists a new {id, label} to
+// frontmatter.columns. The visual matches a real column so the
+// affordance is unambiguous on a Trello-style board.
+function NewLaneCard({ onAdd }: { onAdd: (label: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const submit = () => {
+    if (draft.trim()) onAdd(draft)
+    setDraft('')
+    setOpen(false)
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="rounded-lg p-3 flex items-center justify-center gap-1.5 text-sm flex-shrink-0"
+        style={{
+          background: 'transparent',
+          border: '1px dashed var(--border)',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+          minWidth: '14rem',
+          width: '14rem',
+          alignSelf: 'flex-start',
+        }}
+      >
+        <Plus size={14} />
+        New lane
+      </button>
+    )
+  }
+
+  return (
+    <div
+      className="rounded-lg p-3 flex-shrink-0"
+      style={{
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--accent)',
+        minWidth: '14rem',
+        width: '14rem',
+        alignSelf: 'flex-start',
+      }}
+    >
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={submit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); submit() }
+          if (e.key === 'Escape') { e.preventDefault(); setDraft(''); setOpen(false) }
+        }}
+        placeholder="Lane name"
+        className="w-full px-2 py-1 rounded text-sm font-medium"
+        style={{
+          background: 'var(--bg)',
+          border: '1px solid var(--border)',
+          color: 'var(--text)',
+          outline: 'none',
+        }}
+      />
+    </div>
+  )
+}
+
 function NewTaskBar({ source }: { source: string }) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
@@ -1752,14 +2011,15 @@ function NewTaskBar({ source }: { source: string }) {
       const slug = await uniqueSlug(slugify(t))
       const folder = source.replace(/\/$/, '')
       const today = new Date().toISOString().slice(0, 10)
+      // Body is empty — the description editor in the card detail
+      // pane writes prose to the MDX body, so seeding a `# Title`
+      // heading would just make every new card start with redundant
+      // content the user has to delete.
       const body = `---
 title: ${JSON.stringify(t)}
 col: todo
 created: ${today}
 ---
-
-# ${t}
-
 `
       const res = await apiFetch(`/api/content/${folder}/${slug}`, {
         method: 'PUT',

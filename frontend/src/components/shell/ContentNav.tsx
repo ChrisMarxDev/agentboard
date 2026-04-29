@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Sparkles, SquareCheckBig } from 'lucide-react'
 import type { ContentTreeNode } from '../../lib/contentTree'
+import { NewProjectButton } from './Nav'
 
 interface ContentNavProps {
   nodes: ContentTreeNode[]
@@ -148,6 +149,11 @@ export default function ContentNav({
                 onExpand={onExpand}
                 activePath={activePath}
               />
+            )}
+            {isOpen && depth === 0 && node.name === 'tasks' && (
+              <div style={{ paddingLeft: ROW_PADDING_X + (depth + 1) * INDENT_STEP + CHEVRON_WIDTH }}>
+                <NewProjectButton />
+              </div>
             )}
           </div>
         )

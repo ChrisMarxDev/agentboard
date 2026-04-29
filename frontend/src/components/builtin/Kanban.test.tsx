@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Kanban } from './Kanban'
 
+// useData is keyed: the Kanban now calls it twice — once for the
+// folder source (tasks) and once for the page-frontmatter `columns`
+// override. The tests configure tasks via mockUseData; columns via
+// the global default below (returns nothing, so the prop or the data
+// derive the lanes).
 vi.mock('../../hooks/useData', () => ({
   useData: vi.fn(),
 }))
@@ -35,17 +40,28 @@ vi.mock('../../hooks/useTeams', () => ({
 import { useData } from '../../hooks/useData'
 const mockUseData = vi.mocked(useData)
 
+// setRowsData configures the row-shaped useData call (the kanban's
+// source). `columns` always returns an empty result, leaving lane
+// resolution to the explicit prop or default trio.
+const EMPTY_COLUMNS = { data: undefined, loading: false, error: null }
+function setRowsData(value: { data: unknown; loading: boolean; error: unknown }) {
+  mockUseData.mockImplementation((key: string) => {
+    if (key === 'columns') return EMPTY_COLUMNS as ReturnType<typeof useData>
+    return value as ReturnType<typeof useData>
+  })
+}
+
 describe('Kanban', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('shows loading state', () => {
-    mockUseData.mockReturnValue({ data: undefined, loading: true, error: null })
+    setRowsData({ data: undefined, loading: true, error: null })
     render(<Kanban source="tasks" groupBy="status" />)
     expect(screen.getByText('Loading...')).toBeInTheDocument()
   })
 
   it('renders items grouped by status', () => {
-    mockUseData.mockReturnValue({
+    setRowsData({
       data: [
         { id: '1', title: 'Fix bug', status: 'todo' },
         { id: '2', title: 'Deploy', status: 'in_progress' },
@@ -65,7 +81,7 @@ describe('Kanban', () => {
   })
 
   it('shows empty columns', () => {
-    mockUseData.mockReturnValue({
+    setRowsData({
       data: [
         { id: '1', title: 'Only todo', status: 'todo' },
       ],
@@ -79,7 +95,7 @@ describe('Kanban', () => {
   })
 
   it('returns null for non-array data', () => {
-    mockUseData.mockReturnValue({ data: 'not an array', loading: false, error: null })
+    setRowsData({ data: 'not an array', loading: false, error: null })
     const { container } = render(<Kanban source="tasks" groupBy="status" />)
     expect(container.innerHTML).toBe('')
   })
@@ -94,7 +110,7 @@ describe('Kanban', () => {
     ]
 
     it('opens a modal when a card is clicked, showing non-title fields', () => {
-      mockUseData.mockReturnValue({ data: tasks, loading: false, error: null })
+      setRowsData({ data: tasks, loading: false, error: null })
       render(<Kanban source="tasks" groupBy="status" />)
 
       fireEvent.click(screen.getByText('Fix bug'))
@@ -109,7 +125,7 @@ describe('Kanban', () => {
     })
 
     it('closes the modal on Escape', () => {
-      mockUseData.mockReturnValue({ data: tasks, loading: false, error: null })
+      setRowsData({ data: tasks, loading: false, error: null })
       render(<Kanban source="tasks" groupBy="status" />)
 
       fireEvent.click(screen.getByText('Fix bug'))
@@ -120,7 +136,7 @@ describe('Kanban', () => {
     })
 
     it('closes the modal on backdrop click', () => {
-      mockUseData.mockReturnValue({ data: tasks, loading: false, error: null })
+      setRowsData({ data: tasks, loading: false, error: null })
       render(<Kanban source="tasks" groupBy="status" />)
 
       fireEvent.click(screen.getByText('Fix bug'))
@@ -150,7 +166,7 @@ describe('Kanban', () => {
     }
 
     it('PATCHes /api/data/{source}/{id} with new group value on drop', async () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -169,7 +185,7 @@ describe('Kanban', () => {
     })
 
     it('does not PATCH when dropping on the same column', async () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -186,7 +202,7 @@ describe('Kanban', () => {
     })
 
     it('does not PATCH for cards without an id', async () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ title: 'Anonymous', status: 'todo' }],
         loading: false,
         error: null,
@@ -204,7 +220,7 @@ describe('Kanban', () => {
 
   describe('ordering', () => {
     it('sorts cards within a column by numeric order field', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [
           { id: '1', title: 'Gamma', status: 'todo', order: 3 },
           { id: '2', title: 'Alpha', status: 'todo', order: 1 },
@@ -220,7 +236,7 @@ describe('Kanban', () => {
     })
 
     it('keeps array order when no order fields are present', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [
           { id: '1', title: 'First', status: 'todo' },
           { id: '2', title: 'Second', status: 'todo' },
@@ -247,7 +263,7 @@ describe('Kanban', () => {
     })
 
     it('opens a confirm dialog when the trash icon is clicked', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -262,7 +278,7 @@ describe('Kanban', () => {
     })
 
     it('does not open the card modal when the trash icon is clicked', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -278,7 +294,7 @@ describe('Kanban', () => {
     })
 
     it('DELETEs /api/data/{source}/{id} when confirmed', async () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -295,7 +311,7 @@ describe('Kanban', () => {
     })
 
     it('does nothing on Cancel', async () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -311,7 +327,7 @@ describe('Kanban', () => {
     })
 
     it('closes the confirm dialog on Escape', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
         error: null,
@@ -326,7 +342,7 @@ describe('Kanban', () => {
     })
 
     it('does not render a trash icon on cards without an id', () => {
-      mockUseData.mockReturnValue({
+      setRowsData({
         data: [{ title: 'Anonymous', status: 'todo' }],
         loading: false,
         error: null,

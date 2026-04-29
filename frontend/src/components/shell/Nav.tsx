@@ -259,9 +259,6 @@ export default function Nav({ pages, width, onResize, onCollapse, onOpenHelp }: 
         </div>
       </div>
 
-      <NewProjectButton />
-
-
       <div className="flex-1 flex flex-col gap-1 overflow-y-auto">
         {titleMatchEmpty && !contentSearchReady && (
           <div className="px-3 py-2 text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -496,7 +493,7 @@ function TopNavItems({ activePath }: { activePath: string }) {
 // inline input → type project name → Enter creates the page and
 // navigates to it. The page tree picks up the new page via the usePages
 // SSE refresh; the user lands on an empty board ready to + New task.
-function NewProjectButton() {
+export function NewProjectButton() {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)

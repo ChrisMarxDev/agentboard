@@ -51,6 +51,75 @@ export async function patchCollectionItem(
   )
 }
 
+// patchPageFrontmatter targets a single page (not a row in a folder
+// collection) — used by the Kanban to persist column-config edits
+// to the page's own frontmatter.columns array. Takes the page path,
+// not a source folder path.
+export async function patchPageFrontmatter(
+  pagePath: string,
+  patch: Record<string, unknown>,
+): Promise<Response> {
+  const cleaned = pagePath.replace(/^\/+/, '').replace(/\.md$/, '')
+  const encoded = cleaned.split('/').map(encodeURIComponent).join('/')
+  return apiFetch(`/api/content/${encoded}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ frontmatter_patch: patch }),
+  })
+}
+
+// patchCollectionItemBody replaces the prose body of a folder-collection
+// row's .md file without touching its frontmatter. Used by the Kanban
+// card detail's description editor — descriptions are the actual MDX
+// body, not a frontmatter `body` field, so a free-form rewrite is the
+// natural shape.
+export async function patchCollectionItemBody(
+  source: string,
+  id: string,
+  body: string,
+): Promise<Response> {
+  if (!isFolderSource(source)) {
+    throw new Error('patchCollectionItemBody only works on folder sources')
+  }
+  const path = folderPath(source) + '/' + encodeURIComponent(id)
+  return apiFetch(`/api/content/${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  })
+}
+
+// readCollectionItemBody fetches the prose body of a folder-collection
+// row. The Kanban detail pane lazy-loads this on card open — the kanban
+// row itself only carries frontmatter (per folderChildren), so the body
+// is a separate round-trip.
+export async function readCollectionItemBody(
+  source: string,
+  id: string,
+): Promise<string> {
+  if (!isFolderSource(source)) return ''
+  const path = folderPath(source) + '/' + encodeURIComponent(id)
+  const res = await apiFetch(`/api/content/${path}`, {
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) return ''
+  const j = (await res.json()) as { source?: string }
+  return extractBody(j.source ?? '')
+}
+
+// extractBody returns everything after the YAML frontmatter block of an
+// MDX source. The frontmatter is delimited by `---` lines per the
+// project's content convention; if the source has no frontmatter we
+// return it verbatim.
+export function extractBody(source: string): string {
+  if (!source.startsWith('---')) return source
+  // Find the closing fence. The first `---` line after a newline ends
+  // the frontmatter block; everything after that line is body.
+  const m = source.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+  if (!m) return source
+  return source.slice(m[0].length).replace(/^\s+/, '')
+}
+
 export async function createCollectionItem(
   source: string,
   id: string,
