@@ -25,10 +25,10 @@ func TestStore_CreateAndList(t *testing.T) {
 	}
 	for i, title := range []string{"hello", "bye"} {
 		it, err := s.Create(CreateParams{
-			Recipient: "alice",
-			Kind:      KindMention,
-			Title:     title,
-			Actor:     "bob",
+			Recipient:  "alice",
+			Kind:       KindMention,
+			Title:      title,
+			Actor:      "bob",
 			SubjectRef: map[bool]string{true: "r1", false: "r2"}[i == 0],
 		})
 		if err != nil {

@@ -363,4 +363,3 @@ func (s *Store) Revoke(id string) error {
 	}
 	return nil
 }
-

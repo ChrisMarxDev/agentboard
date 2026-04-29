@@ -57,9 +57,9 @@ func (e *CASError) Unwrap() error { return ErrCASMismatch }
 // WrongShapeError carries the actual + attempted shape so handlers can
 // build a corrective message ("this key is a stream; use :append").
 type WrongShapeError struct {
-	Key      string
-	Actual   string // current shape on disk
-	Attempt  string // shape implied by the op the caller used
+	Key     string
+	Actual  string // current shape on disk
+	Attempt string // shape implied by the op the caller used
 }
 
 func (e *WrongShapeError) Error() string { return ErrWrongShape.Error() }

@@ -13,9 +13,9 @@ import (
 )
 
 var (
-	backupTo       string
-	restoreFrom    string
-	restoreForce   bool
+	backupTo     string
+	restoreFrom  string
+	restoreForce bool
 )
 
 var backupCmd = &cobra.Command{

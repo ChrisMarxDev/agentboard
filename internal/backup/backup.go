@@ -43,9 +43,9 @@ var excludedSuffixes = []string{
 // excludedNames are exact filename matches stripped from every backup.
 // Add to this list when a new transient file pattern shows up.
 var excludedNames = map[string]bool{
-	".DS_Store":    true,
-	"Thumbs.db":    true,
-	".tmp-temp":    true,
+	".DS_Store":              true,
+	"Thumbs.db":              true,
+	".tmp-temp":              true,
 	"first-admin-invite.url": true, // contains a one-shot bootstrap secret
 }
 

@@ -30,9 +30,9 @@ import (
 // something genuinely runaway to trip them. The bucket size + refill
 // rate together mean ~3 writes/sec sustained, 50 in a burst.
 const (
-	writeBurst        = 50
-	writesPerMinute   = 200
-	limiterIdleEvict  = 1 * time.Hour
+	writeBurst       = 50
+	writesPerMinute  = 200
+	limiterIdleEvict = 1 * time.Hour
 )
 
 // storeRateStore holds one token bucket per actor name. Anonymous /
@@ -114,10 +114,10 @@ func (s *Server) storeRateLimit(next http.Handler) http.Handler {
 			retrySec := max(int(delay.Round(time.Second).Seconds()), 1)
 			w.Header().Set("Retry-After", strconv.Itoa(retrySec))
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{
-				"error":              "rate_limited",
-				"message":            "You're writing too fast — try again in " + strconv.Itoa(retrySec) + " seconds.",
+				"error":               "rate_limited",
+				"message":             "You're writing too fast — try again in " + strconv.Itoa(retrySec) + " seconds.",
 				"retry_after_seconds": retrySec,
-				"limit":              "200 writes/min, 50/sec burst",
+				"limit":               "200 writes/min, 50/sec burst",
 			})
 			return
 		}

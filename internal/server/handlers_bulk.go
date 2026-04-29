@@ -162,4 +162,3 @@ func (s *Server) handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 
 	respondJSON(w, http.StatusOK, out)
 }
-

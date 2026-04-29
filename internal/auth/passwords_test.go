@@ -46,11 +46,11 @@ func TestVerifyPassword_MalformedHashes(t *testing.T) {
 	cases := []string{
 		"",
 		"plaintext",
-		"$argon2i$v=19$m=65536,t=1,p=4$saltsaltsalt$keykeykey",        // wrong algo
-		"$argon2id$v=18$m=65536,t=1,p=4$saltsaltsalt$keykeykey",       // wrong version
-		"$argon2id$v=19$m=65536,t=1,p=4$not-base64!$alsobad!",         // bad b64
-		"$argon2id$v=19$m=,t=,p=$saltsalt$keykey",                     // missing params
-		"$argon2id$v=19$$saltsalt$keykey",                             // empty params
+		"$argon2i$v=19$m=65536,t=1,p=4$saltsaltsalt$keykeykey",  // wrong algo
+		"$argon2id$v=18$m=65536,t=1,p=4$saltsaltsalt$keykeykey", // wrong version
+		"$argon2id$v=19$m=65536,t=1,p=4$not-base64!$alsobad!",   // bad b64
+		"$argon2id$v=19$m=,t=,p=$saltsalt$keykey",               // missing params
+		"$argon2id$v=19$$saltsalt$keykey",                       // empty params
 	}
 	for _, c := range cases {
 		if VerifyPassword("anything", c) {

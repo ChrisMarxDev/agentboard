@@ -355,4 +355,3 @@ func readAllSegments(dataDir, key string) ([]StreamLine, error) {
 	}
 	return out, nil
 }
-

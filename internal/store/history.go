@@ -14,13 +14,13 @@ import (
 // HistoryEntry is one snapshot of a value before it was overwritten,
 // plus the actor and timestamp of the write that displaced it.
 type HistoryEntry struct {
-	TS         string          `json:"ts"`
-	Actor      string          `json:"actor"`
-	Op         string          `json:"op"`
-	Version    string          `json:"version"`
-	PrevValue  json.RawMessage `json:"prev_value,omitempty"`
-	Key        string          `json:"key"`
-	ID         string          `json:"id,omitempty"`
+	TS        string          `json:"ts"`
+	Actor     string          `json:"actor"`
+	Op        string          `json:"op"`
+	Version   string          `json:"version"`
+	PrevValue json.RawMessage `json:"prev_value,omitempty"`
+	Key       string          `json:"key"`
+	ID        string          `json:"id,omitempty"`
 }
 
 // historyRetention bounds the per-key file. 100 entries keeps the file

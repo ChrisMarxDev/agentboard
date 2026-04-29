@@ -25,12 +25,12 @@ const (
 // not embed the previous value (history covers that), just enough for
 // "who did what when" displays.
 type ActivityEntry struct {
-	TS       string `json:"ts"`
-	Actor    string `json:"actor"`
-	Op       string `json:"op"`
-	Path     string `json:"path"` // <key> or <key>/<id>
-	Version  string `json:"version,omitempty"`
-	Shape    string `json:"shape,omitempty"`
+	TS      string `json:"ts"`
+	Actor   string `json:"actor"`
+	Op      string `json:"op"`
+	Path    string `json:"path"` // <key> or <key>/<id>
+	Version string `json:"version,omitempty"`
+	Shape   string `json:"shape,omitempty"`
 }
 
 // recordActivity appends to the global activity log under

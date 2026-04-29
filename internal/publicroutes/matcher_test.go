@@ -33,8 +33,8 @@ func TestMatcher_SingleWildcard(t *testing.T) {
 	}{
 		{"/catalog/a", true},
 		{"/catalog/b-thing", true},
-		{"/catalog", false},             // pattern needs a segment
-		{"/catalog/a/b", false},         // * is one segment only
+		{"/catalog", false},     // pattern needs a segment
+		{"/catalog/a/b", false}, // * is one segment only
 		{"/other/a", false},
 	}
 	for _, c := range cases {

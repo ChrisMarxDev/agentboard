@@ -62,17 +62,17 @@ type OAuthClient struct {
 // OAuthAccessRecord is one row in oauth_tokens — what the middleware
 // resolves a presented Bearer to when it isn't a PAT.
 type OAuthAccessRecord struct {
-	ID                string
-	Username          string
-	ClientID          string
-	Scope             string
-	Audience          string
-	AccessExpiresAt   time.Time
-	RefreshExpiresAt  *time.Time
-	HasRefresh        bool
-	CreatedAt         time.Time
-	RevokedAt         *time.Time
-	LastUsedAt        *time.Time
+	ID               string
+	Username         string
+	ClientID         string
+	Scope            string
+	Audience         string
+	AccessExpiresAt  time.Time
+	RefreshExpiresAt *time.Time
+	HasRefresh       bool
+	CreatedAt        time.Time
+	RevokedAt        *time.Time
+	LastUsedAt       *time.Time
 }
 
 // OAuthCodeRecord is the parsed authorization code payload.
@@ -299,13 +299,13 @@ type CreateAccessTokenParams struct {
 
 // AccessTokenIssued is the plaintext payload returned to the client.
 type AccessTokenIssued struct {
-	ID                string
-	AccessToken       string
-	RefreshToken      string // empty if WithRefresh=false
-	AccessExpiresIn   int    // seconds
-	RefreshExpiresIn  int    // seconds; 0 if no refresh
-	Scope             string
-	Audience          string
+	ID               string
+	AccessToken      string
+	RefreshToken     string // empty if WithRefresh=false
+	AccessExpiresIn  int    // seconds
+	RefreshExpiresIn int    // seconds; 0 if no refresh
+	Scope            string
+	Audience         string
 }
 
 // CreateAccessToken mints and stores an access token (and refresh, if
@@ -370,12 +370,12 @@ func (s *Store) ResolveAccessToken(tokenHash string) (*OAuthAccessRecord, *User,
 		 WHERE t.access_token_hash = ?`, tokenHash,
 	)
 	var (
-		rec               OAuthAccessRecord
+		rec                OAuthAccessRecord
 		accessExp, created int64
-		refreshExp        sql.NullInt64
-		hasRefresh        bool
-		revokedAt         sql.NullInt64
-		lastUsedAt        sql.NullInt64
+		refreshExp         sql.NullInt64
+		hasRefresh         bool
+		revokedAt          sql.NullInt64
+		lastUsedAt         sql.NullInt64
 
 		u           User
 		displayName sql.NullString
@@ -451,11 +451,11 @@ func (s *Store) RotateRefreshToken(presentedRefresh, clientID string) (*AccessTo
 	defer tx.Rollback()
 
 	var (
-		oldID            string
+		oldID                     string
 		username, scope, audience string
-		refreshExp       sql.NullInt64
-		revokedAt        sql.NullInt64
-		dbClientID       string
+		refreshExp                sql.NullInt64
+		revokedAt                 sql.NullInt64
+		dbClientID                string
 	)
 	err = tx.QueryRow(
 		`SELECT id, username, client_id, scope, audience, refresh_expires_at, revoked_at

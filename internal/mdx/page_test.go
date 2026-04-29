@@ -7,12 +7,12 @@ import (
 
 func TestParseFrontmatter(t *testing.T) {
 	cases := []struct {
-		name       string
-		in         string
-		wantTitle  string
+		name        string
+		in          string
+		wantTitle   string
 		wantSummary string
-		wantTags   []string
-		wantSource string
+		wantTags    []string
+		wantSource  string
 	}{
 		{
 			name:       "no frontmatter",

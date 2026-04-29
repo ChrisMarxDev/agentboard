@@ -112,7 +112,8 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	mintBody, _ := json.Marshal(map[string]any{"path": "/shareme"})
 	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/share", bytes.NewBuffer(mintBody))
 	mintReq.Header.Set("Content-Type", "application/json")
-	mintResp, _ := http.DefaultClient.Do(mintReq)
+	mintResp, mintErr := http.DefaultClient.Do(mintReq)
+	if mintErr != nil { t.Fatal(mintErr) }
 	defer mintResp.Body.Close()
 	var created struct {
 		Token string `json:"token"`
@@ -204,7 +205,8 @@ func TestView_CookieReAnchors(t *testing.T) {
 	mintBody, _ := json.Marshal(map[string]any{"path": "/shareme"})
 	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/share", bytes.NewBuffer(mintBody))
 	mintReq.Header.Set("Content-Type", "application/json")
-	mintResp, _ := http.DefaultClient.Do(mintReq)
+	mintResp, mintErr := http.DefaultClient.Do(mintReq)
+	if mintErr != nil { t.Fatal(mintErr) }
 	defer mintResp.Body.Close()
 	var created struct{ Token string }
 	_ = json.NewDecoder(mintResp.Body).Decode(&created)
@@ -252,7 +254,8 @@ func TestView_RevokeCascadesToSession(t *testing.T) {
 	mintBody, _ := json.Marshal(map[string]any{"path": "/revoketest"})
 	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/share", bytes.NewBuffer(mintBody))
 	mintReq.Header.Set("Content-Type", "application/json")
-	mintResp, _ := http.DefaultClient.Do(mintReq)
+	mintResp, mintErr := http.DefaultClient.Do(mintReq)
+	if mintErr != nil { t.Fatal(mintErr) }
 	defer mintResp.Body.Close()
 	var created struct {
 		Token string `json:"token"`

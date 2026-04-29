@@ -149,4 +149,3 @@ func (s *Store) notify(evt Event) {
 		}
 	}
 }
-

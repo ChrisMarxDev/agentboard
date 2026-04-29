@@ -59,8 +59,8 @@ type Server struct {
 	Teams                *teams.Store
 	Invitations          *invitations.Store
 	Locks                *locks.Store
-	UploadTokens         *uploadTokens // one-shot presigned upload tokens (spec §12)
-	Limits             *storeRateStore  // per-actor token bucket for /api/data writes
+	UploadTokens         *uploadTokens   // one-shot presigned upload tokens (spec §12)
+	Limits               *storeRateStore // per-actor token bucket for /api/data writes
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
@@ -266,16 +266,16 @@ func New(cfg ServerConfig) *Server {
 	grabber := &grab.Materializer{Pages: pageManager, FileStore: cfg.FileStore}
 
 	mcpServer := &mcp.Server{
-		FileStore:            cfg.FileStore,
-		Pages:                pageManager,
-		Search:               searchStore,
-		Components:           compManager,
-		Files:                fileManager,
-		Errors:               errorBuffer,
-		Grab:                 grabber,
-		Webhooks:             webhookStore,
-		Teams:                teamStore,
-		Locks:                lockStore,
+		FileStore:  cfg.FileStore,
+		Pages:      pageManager,
+		Search:     searchStore,
+		Components: compManager,
+		Files:      fileManager,
+		Errors:     errorBuffer,
+		Grab:       grabber,
+		Webhooks:   webhookStore,
+		Teams:      teamStore,
+		Locks:      lockStore,
 		IsAdmin: func(r *http.Request) bool {
 			u := auth.UserFromContext(r.Context())
 			return u != nil && u.Kind == auth.KindAdmin
@@ -310,7 +310,7 @@ func New(cfg ServerConfig) *Server {
 		Invitations:          invStore,
 		Locks:                lockStore,
 		UploadTokens:         newUploadTokens(),
-		Limits:             newRateStore(),
+		Limits:               newRateStore(),
 		Grab:                 grabber,
 		MCP:                  mcpServer,
 		Share:                shareStore,
@@ -534,7 +534,6 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		r.Use(auth.AuthorizeMiddleware())
 		r.Use(auth.CSRFMiddleware())
 	}
-
 
 	// /api/view/* is OUTSIDE the gated group: the broker does its own
 	// authority resolution (bearer | share cookie | public). Mounting

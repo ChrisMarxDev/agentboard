@@ -17,10 +17,10 @@ import (
 //   - nothing depends on approval for authorisation
 //   - revocation is explicit (DELETE); stale approvals are not auto-deleted
 type PageApproval struct {
-	Path          string `json:"path"`
-	ApprovedBy    string `json:"approved_by"`
-	ApprovedAt    string `json:"approved_at"`    // RFC3339Nano
-	ApprovedEtag  string `json:"approved_etag"`
+	Path         string `json:"path"`
+	ApprovedBy   string `json:"approved_by"`
+	ApprovedAt   string `json:"approved_at"` // RFC3339Nano
+	ApprovedEtag string `json:"approved_etag"`
 }
 
 // ApprovalStore persists one PageApproval row per page path.

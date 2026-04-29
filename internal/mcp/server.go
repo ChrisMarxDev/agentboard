@@ -19,17 +19,17 @@ import (
 
 // Server implements the MCP Streamable HTTP transport.
 type Server struct {
-	FileStore            *store.Store // files-first content store; powers the agentboard_* tools (renamed in Cut 3)
-	Pages                *mdx.PageManager
-	Search               *mdx.SearchStore
-	Components           *components.Manager
-	Files                *files.Manager
-	Errors               *interrors.Buffer
-	Grab                 *grab.Materializer
-	Webhooks             *webhooks.Store
-	WebhookDispatcher    *webhooks.Dispatcher
-	Teams                *teams.Store
-	Locks                *locks.Store
+	FileStore         *store.Store // files-first content store; powers the agentboard_* tools (renamed in Cut 3)
+	Pages             *mdx.PageManager
+	Search            *mdx.SearchStore
+	Components        *components.Manager
+	Files             *files.Manager
+	Errors            *interrors.Buffer
+	Grab              *grab.Materializer
+	Webhooks          *webhooks.Store
+	WebhookDispatcher *webhooks.Dispatcher
+	Teams             *teams.Store
+	Locks             *locks.Store
 	// IsAdmin reads the admin-ness of the current caller off an
 	// HTTP request's context. Wired by the server that owns the auth
 	// middleware. Nil → non-admin (defense in depth).

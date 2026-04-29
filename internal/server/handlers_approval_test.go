@@ -9,11 +9,11 @@ import (
 )
 
 // TestApprovalFlow_CreateReadRevoke walks the happy path:
-//   1. Seed a page, which gets an initial etag.
-//   2. POST /api/approval with the path → 200.
-//   3. GET /api/content/{path} surfaces the approval record + stale=false.
-//   4. Re-write the page → new etag → approval.stale = true.
-//   5. DELETE /api/approval?path=... → approval gone.
+//  1. Seed a page, which gets an initial etag.
+//  2. POST /api/approval with the path → 200.
+//  3. GET /api/content/{path} surfaces the approval record + stale=false.
+//  4. Re-write the page → new etag → approval.stale = true.
+//  5. DELETE /api/approval?path=... → approval gone.
 func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	_, ts := newTestServer(t)
 
@@ -43,7 +43,8 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	// 3. Read page, confirm approval present and stale = false.
 	g1, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g1.Header.Set("Accept", "application/json")
-	g1Resp, _ := http.DefaultClient.Do(g1)
+	g1Resp, err1 := http.DefaultClient.Do(g1)
+	if err1 != nil { t.Fatal(err1) }
 	defer g1Resp.Body.Close()
 	var payload struct {
 		Approval *struct {
@@ -72,7 +73,8 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 
 	g2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g2.Header.Set("Accept", "application/json")
-	g2Resp, _ := http.DefaultClient.Do(g2)
+	g2Resp, err2 := http.DefaultClient.Do(g2)
+	if err2 != nil { t.Fatal(err2) }
 	defer g2Resp.Body.Close()
 	var p2 struct {
 		Approval *struct {
@@ -93,7 +95,8 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	}
 	g3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
 	g3.Header.Set("Accept", "application/json")
-	g3Resp, _ := http.DefaultClient.Do(g3)
+	g3Resp, err3 := http.DefaultClient.Do(g3)
+	if err3 != nil { t.Fatal(err3) }
 	defer g3Resp.Body.Close()
 	var p3 struct {
 		Approval any `json:"approval"`
@@ -110,7 +113,10 @@ func TestApproval_MissingPage404(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"path": "/does-not-exist"})
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/approval", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("POST /api/approval for missing page: status = %d, want 404", resp.StatusCode)
@@ -168,7 +174,10 @@ func TestApproval_DeletePageClearsApproval(t *testing.T) {
 
 	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/ephemeral", nil)
 	g.Header.Set("Accept", "application/json")
-	gr, _ := http.DefaultClient.Do(g)
+	gr, err := http.DefaultClient.Do(g)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer gr.Body.Close()
 	var p struct {
 		Approval any `json:"approval"`

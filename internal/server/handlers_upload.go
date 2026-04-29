@@ -23,9 +23,9 @@ import (
 
 // requestUploadBody is the input to /api/files/request-upload.
 type requestUploadBody struct {
-	Name         string `json:"name"`
-	SizeBytes    int64  `json:"size_bytes"`
-	ContentType  string `json:"content_type,omitempty"` // advisory, server still sniffs
+	Name        string `json:"name"`
+	SizeBytes   int64  `json:"size_bytes"`
+	ContentType string `json:"content_type,omitempty"` // advisory, server still sniffs
 }
 
 // requestUploadResponse mirrors what the spec described in §12. Agents

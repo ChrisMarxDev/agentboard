@@ -107,7 +107,10 @@ func TestInvitation_RedeemHappyPath(t *testing.T) {
 	// The returned token works.
 	req, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+resp.Token)
-	meResp, _ := bareClient().Do(req)
+	meResp, err := bareClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer meResp.Body.Close()
 	if meResp.StatusCode != 200 {
 		t.Errorf("/api/me with fresh token = %d", meResp.StatusCode)

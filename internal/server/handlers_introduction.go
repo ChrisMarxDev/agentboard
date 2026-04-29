@@ -54,11 +54,11 @@ func introductionManifest() map[string]any {
 		"summary": "Single-binary knowledge + dashboard surface. Agents write via REST/MCP; humans browse a live web UI.",
 		"primer":  "/api/introduction",
 		"api": map[string]any{
-			"base":         "/api",
-			"auth":         "Bearer ab_<43> (header, ?token=, or HTTP Basic password)",
-			"write_verbs":  []string{"PUT", "PATCH", "POST", "DELETE"},
-			"open_paths":   []string{"/api/health", "/api/config", "/api/introduction", "/api/setup/status"},
-			"bootstrap":    "/api/setup/status returns {initialized:bool}. If false, the server prints a /invite/<id> URL on first boot — open it in a browser to claim the first admin.",
+			"base":        "/api",
+			"auth":        "Bearer ab_<43> (header, ?token=, or HTTP Basic password)",
+			"write_verbs": []string{"PUT", "PATCH", "POST", "DELETE"},
+			"open_paths":  []string{"/api/health", "/api/config", "/api/introduction", "/api/setup/status"},
+			"bootstrap":   "/api/setup/status returns {initialized:bool}. If false, the server prints a /invite/<id> URL on first boot — open it in a browser to claim the first admin.",
 			"endpoints": []map[string]string{
 				{"method": "GET", "path": "/api/health", "summary": "liveness probe"},
 				{"method": "GET", "path": "/api/config", "summary": "project config + public paths"},
@@ -145,8 +145,8 @@ Everything is a file under the project root.
 
 There are two write paths, distinguished by where state lives:
 
-1. **Page writes — `+"`/api/content/<path>`"+`.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
-2. **Data writes — `+"`/api/data/<key>`"+`.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
+1. **Page writes — ` + "`/api/content/<path>`" + `.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
+2. **Data writes — ` + "`/api/data/<key>`" + `.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
 
 **Rule of thumb**: if it deserves a URL on the dashboard, it's a page. If it's a number that updates without a story, it's data.
 

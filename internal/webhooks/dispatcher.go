@@ -64,8 +64,8 @@ func NewDispatcher(store *Store, opts DispatcherOptions) *Dispatcher {
 	}
 	if len(opts.RetrySchedule) == 0 {
 		opts.RetrySchedule = []time.Duration{
-			0,               // first attempt, immediate
-			5 * time.Second, // second attempt
+			0,                // first attempt, immediate
+			5 * time.Second,  // second attempt
 			30 * time.Second, // third + final attempt
 		}
 	}

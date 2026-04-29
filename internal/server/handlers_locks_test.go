@@ -164,7 +164,10 @@ func TestLock_GetPageEmitsHeaders(t *testing.T) {
 		`{"path":"handbook","reason":"canonical onboarding"}`, adminToken))
 	r.Body.Close()
 
-	r2, _ := http.DefaultClient.Get(ts.URL + "/api/content/handbook")
+	r2, err := http.DefaultClient.Get(ts.URL + "/api/content/handbook")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer r2.Body.Close()
 	if r2.Header.Get("X-Locked-By") == "" {
 		t.Error("X-Locked-By header missing")
@@ -184,7 +187,10 @@ func TestLock_Unlock(t *testing.T) {
 
 	req, _ := http.NewRequest("DELETE", ts.URL+"/api/locks/handbook", nil)
 	req.Header.Set("Authorization", "Bearer "+adminToken)
-	r2, _ := http.DefaultClient.Do(req)
+	r2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer r2.Body.Close()
 	if r2.StatusCode != 200 {
 		t.Errorf("unlock = %d", r2.StatusCode)

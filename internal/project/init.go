@@ -330,4 +330,3 @@ func seedAgentboardSkill(projectPath string) error {
 	}
 	return nil
 }
-

@@ -68,13 +68,13 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 // CORE_GUIDELINES §12: every error explains what went wrong, what
 // was expected, and how to retry.
 type errorBody struct {
-	Error           string          `json:"error"`            // snake_case code
-	Message         string          `json:"message"`          // human-readable hint
-	Current         *store.Envelope `json:"current,omitempty"` // for 412 / cas_mismatch
-	YourVersion     string          `json:"your_version,omitempty"`
-	CurrentVersion  string          `json:"current_version,omitempty"`
-	ExpectedShape   string          `json:"expected_shape,omitempty"`
-	ActualShape     string          `json:"actual_shape,omitempty"`
+	Error          string          `json:"error"`             // snake_case code
+	Message        string          `json:"message"`           // human-readable hint
+	Current        *store.Envelope `json:"current,omitempty"` // for 412 / cas_mismatch
+	YourVersion    string          `json:"your_version,omitempty"`
+	CurrentVersion string          `json:"current_version,omitempty"`
+	ExpectedShape  string          `json:"expected_shape,omitempty"`
+	ActualShape    string          `json:"actual_shape,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
@@ -132,8 +132,8 @@ func translateStoreError(w http.ResponseWriter, err error) {
 	var ws *store.WrongShapeError
 	if errors.As(err, &ws) {
 		writeJSON(w, http.StatusConflict, errorBody{
-			Error: "wrong_shape",
-			Message: "this key already has a different shape; pick the matching op or use a new key",
+			Error:         "wrong_shape",
+			Message:       "this key already has a different shape; pick the matching op or use a new key",
 			ExpectedShape: ws.Attempt,
 			ActualShape:   ws.Actual,
 		})

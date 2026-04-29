@@ -711,13 +711,13 @@ func (s *Server) toolListPages() (interface{}, *RPCError) {
 	// Decorate with lock metadata if the locks store is wired. Keeps
 	// pages that are normal undecorated so the output stays small.
 	type pageWithLock struct {
-		Path      string `json:"path"`
-		File      string `json:"file"`
-		Title     string `json:"title,omitempty"`
-		Order     int    `json:"order,omitempty"`
-		Locked    bool   `json:"locked,omitempty"`
-		LockedBy  string `json:"locked_by,omitempty"`
-		LockedAt  string `json:"locked_at,omitempty"`
+		Path       string `json:"path"`
+		File       string `json:"file"`
+		Title      string `json:"title,omitempty"`
+		Order      int    `json:"order,omitempty"`
+		Locked     bool   `json:"locked,omitempty"`
+		LockedBy   string `json:"locked_by,omitempty"`
+		LockedAt   string `json:"locked_at,omitempty"`
 		LockReason string `json:"lock_reason,omitempty"`
 	}
 	out := make([]pageWithLock, 0, len(pages))

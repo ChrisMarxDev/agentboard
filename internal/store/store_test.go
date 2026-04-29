@@ -291,4 +291,3 @@ func TestActivityRotation(t *testing.T) {
 		t.Fatalf("active file should be small after rotation, got %d bytes", fi.Size())
 	}
 }
-

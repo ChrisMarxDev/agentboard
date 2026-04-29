@@ -16,13 +16,13 @@ import (
 // here — agents fetch the value separately. This keeps the catalog
 // payload bounded and lets us answer "what exists?" in one cheap call.
 type CatalogEntry struct {
-	Key      string `json:"key"`
-	Shape    string `json:"shape"`
-	Version  string `json:"version,omitempty"`
-	Size     int64  `json:"size,omitempty"`      // bytes on disk
-	Type     string `json:"type,omitempty"`      // inferred JSON type (singleton only)
-	Count    int    `json:"count,omitempty"`     // collection only: item count
-	LineCount int  `json:"line_count,omitempty"` // stream only: lines in active segment
+	Key        string `json:"key"`
+	Shape      string `json:"shape"`
+	Version    string `json:"version,omitempty"`
+	Size       int64  `json:"size,omitempty"`        // bytes on disk
+	Type       string `json:"type,omitempty"`        // inferred JSON type (singleton only)
+	Count      int    `json:"count,omitempty"`       // collection only: item count
+	LineCount  int    `json:"line_count,omitempty"`  // stream only: lines in active segment
 	ModifiedAt string `json:"modified_at,omitempty"` // RFC3339Nano (== version for typed shapes)
 }
 
@@ -91,7 +91,7 @@ func LoadCatalog(dataDir string) (*catalog, error) {
 			fi, _ := e.Info()
 			c.m[key] = CatalogEntry{
 				Key: key, Shape: ShapeStream,
-				Size: fi.Size(),
+				Size:       fi.Size(),
 				ModifiedAt: fi.ModTime().UTC().Format(time.RFC3339Nano),
 			}
 		}
@@ -230,7 +230,7 @@ func (s *Store) touchCatalog(key string, shape string) {
 		}
 		s.cat.m[key] = CatalogEntry{
 			Key: key, Shape: ShapeStream,
-			Size: fi.Size(),
+			Size:       fi.Size(),
 			ModifiedAt: fi.ModTime().UTC().Format(time.RFC3339Nano),
 		}
 	}

@@ -14,11 +14,11 @@ func TestExtractMentions(t *testing.T) {
 		{"no mention here", nil},
 		{"@alice wrote the doc", []string{"alice"}},
 		{"ping @bob and @charlie tomorrow", []string{"bob", "charlie"}},
-		{"@alice @alice @alice", []string{"alice"}},                    // dedupe
-		{"email user@example.com", nil},                                // mid-word @ not a mention
-		{"(@alice) got this", []string{"alice"}},                       // paren-prefixed OK
-		{"see @Alice_01 for details", nil},                             // uppercase letter → invalid start
-		{"@bob.chris should not merge", []string{"bob"}},               // bob.c... → bob followed by `.` → match bob only
+		{"@alice @alice @alice", []string{"alice"}},                      // dedupe
+		{"email user@example.com", nil},                                  // mid-word @ not a mention
+		{"(@alice) got this", []string{"alice"}},                         // paren-prefixed OK
+		{"see @Alice_01 for details", nil},                               // uppercase letter → invalid start
+		{"@bob.chris should not merge", []string{"bob"}},                 // bob.c... → bob followed by `.` → match bob only
 		{"@alice, @bob; @charlie:", []string{"alice", "bob", "charlie"}}, // comma/semicolon/colon endings
 	}
 	for _, c := range cases {
@@ -61,7 +61,7 @@ func TestDiffAssigneesAny(t *testing.T) {
 		{nil, []any{"alice"}, []string{"alice"}},
 		{[]any{"alice"}, []any{"alice", "bob"}, []string{"bob"}},
 		{[]any{"alice", "bob"}, []any{"bob"}, nil},
-		{[]any{"Alice"}, []any{"alice"}, nil}, // case-insensitive match → nothing added
+		{[]any{"Alice"}, []any{"alice"}, nil},          // case-insensitive match → nothing added
 		{[]any{"alice"}, []any{"alice", "alice"}, nil}, // dedupe
 		{[]any{}, []any{"alice", "bob"}, []string{"alice", "bob"}},
 		{"not an array", []any{"alice"}, []string{"alice"}},

@@ -83,12 +83,12 @@ type redeemRequest struct {
 }
 
 type redeemResponse struct {
-	Token        string        `json:"token"`
-	User         *publicUser   `json:"user"`
-	InvitationID string        `json:"invitation_id"`
-	TokenID      string        `json:"token_id"`
-	Role         string        `json:"role"`
-	ExpiresAt    time.Time     `json:"expires_at,omitempty"`
+	Token        string      `json:"token"`
+	User         *publicUser `json:"user"`
+	InvitationID string      `json:"invitation_id"`
+	TokenID      string      `json:"token_id"`
+	Role         string      `json:"role"`
+	ExpiresAt    time.Time   `json:"expires_at,omitempty"`
 }
 
 // handleRedeemInvitation consumes the invitation + creates the user

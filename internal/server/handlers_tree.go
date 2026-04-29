@@ -9,8 +9,8 @@ import (
 // GET /api/tree. No source bodies — just enough to render a sidebar or
 // orient an agent.
 type TreeEntry struct {
-	Kind string `json:"kind"`          // "page" | "file"
-	Path string `json:"path"`          // URL-style path (e.g. "/features/grab" or "skills/x/banner.svg")
+	Kind string `json:"kind"`           // "page" | "file"
+	Path string `json:"path"`           // URL-style path (e.g. "/features/grab" or "skills/x/banner.svg")
 	Name string `json:"name,omitempty"` // filename for files
 	// Pages only:
 	Title string `json:"title,omitempty"`

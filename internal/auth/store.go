@@ -462,11 +462,11 @@ func (s *Store) ResolveToken(tokenHash string) (*User, *UserToken, error) {
 		deactivated sql.NullInt64
 		rulesJSON   string
 
-		tokenLabel       sql.NullString
-		tokenCreated     int64
-		tokenCreatedBy   sql.NullString
-		tokenLastUsed    sql.NullInt64
-		tokenRevoked     sql.NullInt64
+		tokenLabel     sql.NullString
+		tokenCreated   int64
+		tokenCreatedBy sql.NullString
+		tokenLastUsed  sql.NullInt64
+		tokenRevoked   sql.NullInt64
 	)
 	err := row.Scan(
 		&u.Username, &displayName, &u.Kind, &avatarColor,

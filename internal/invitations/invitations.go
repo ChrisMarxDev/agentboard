@@ -285,14 +285,14 @@ type rowScanner interface {
 
 func scan(r rowScanner) (*Invitation, error) {
 	var (
-		inv         Invitation
-		role        string
-		createdAt   int64
-		expiresAt   int64
-		label       sql.NullString
-		redeemedAt  sql.NullInt64
-		redeemedBy  sql.NullString
-		revokedAt   sql.NullInt64
+		inv        Invitation
+		role       string
+		createdAt  int64
+		expiresAt  int64
+		label      sql.NullString
+		redeemedAt sql.NullInt64
+		redeemedBy sql.NullString
+		revokedAt  sql.NullInt64
 	)
 	if err := r.Scan(&inv.ID, &role, &inv.CreatedBy, &createdAt, &expiresAt,
 		&label, &redeemedAt, &redeemedBy, &revokedAt); err != nil {
