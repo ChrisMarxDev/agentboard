@@ -197,9 +197,7 @@ export async function materialize(picks: Pick[], format: GrabFormat): Promise<st
   return String(data.text ?? '')
 }
 
-export async function copyToClipboard(text: string): Promise<void> {
-  if (typeof navigator === 'undefined' || !navigator.clipboard) {
-    throw new Error('clipboard API unavailable')
-  }
-  await navigator.clipboard.writeText(text)
-}
+// Kept as a re-export so any existing callers still resolve; the
+// implementation now lives in lib/clipboard with a plain-HTTP
+// (execCommand) fallback so copy works on the hosted dogfood box.
+export { copyToClipboard } from './clipboard'

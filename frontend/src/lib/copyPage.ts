@@ -4,6 +4,7 @@
 
 import { beaconError } from './errorBeacon'
 import { apiFetch } from './session'
+import { copyToClipboard } from './clipboard'
 
 export const COPY_EVENT = 'agentboard:page-copied'
 
@@ -44,7 +45,8 @@ export async function copyPageSource(pagePath: string): Promise<void> {
       throw new Error(body || `GET ${pagePath} → ${res.status}`)
     }
     const source = await res.text()
-    await navigator.clipboard.writeText(source)
+    const copied = await copyToClipboard(source)
+    if (!copied) throw new Error('clipboard write rejected')
     broadcast({ ok: true, pagePath })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'copy failed'

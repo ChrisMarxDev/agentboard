@@ -7,6 +7,7 @@ import {
   type PublicInvitationView,
 } from '../lib/auth'
 import { setToken } from '../lib/session'
+import { copyToClipboard } from '../lib/clipboard'
 import { refreshMe } from '../hooks/useMe'
 
 // Public redeem page at /invite/:id. Anonymous — no token required to
@@ -295,11 +296,12 @@ Never write directly to disk on the AgentBoard host — every change must go thr
 
 Now proceed with whatever the user asked you to do, using AgentBoard as the persistent knowledge base for this project.`
 
-  const copy = () => {
-    void navigator.clipboard.writeText(promptText).then(() => {
+  const copy = async () => {
+    const ok = await copyToClipboard(promptText)
+    if (ok) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    })
+    }
   }
 
   const wideShell: CSSProperties = {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { beaconError } from '../../lib/errorBeacon'
 import { copyPageSource } from '../../lib/copyPage'
+import { copyToClipboard } from '../../lib/clipboard'
 import { addPick, setMode } from '../../lib/grab'
 import { apiFetch } from '../../lib/session'
 import Kbd from './Kbd'
@@ -263,15 +264,9 @@ function ShareLinkDialog({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   const copy = async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(url)
-      }
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      setCopied(true)
-    }
+    await copyToClipboard(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
   const expiresText = expiresAt
     ? new Date(expiresAt).toLocaleString()

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Check, Copy, Sparkles } from 'lucide-react'
+import { copyToClipboard } from '../../lib/clipboard'
 
 // SkillInstall renders a single copy-paste prompt that any coding agent
 // (Claude Code, Cursor, Aider, etc.) can follow to safely install the
@@ -63,14 +64,8 @@ export function SkillInstall({ slug, label }: SkillInstallProps) {
   const prompt = buildPrompt(slug, origin)
 
   const copy = async () => {
-    try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(prompt)
-      }
-      setCopied(true)
-    } catch {
-      setCopied(true)
-    }
+    await copyToClipboard(prompt)
+    setCopied(true)
   }
 
   return (

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } 
 import { Copy, Eye, EyeOff, KeyRound, Plus, RotateCw, ShieldCheck, Trash2 } from 'lucide-react'
 import { useMe } from '../hooks/useMe'
 import { getToken } from '../lib/session'
+import { copyToClipboard } from '../lib/clipboard'
 import {
   createTokenForUser,
   listTokensForUser,
@@ -305,12 +306,12 @@ function CurrentSessionCard() {
     )
   }
 
-  function copy() {
+  async function copy() {
     if (!tok) return
-    void navigator.clipboard.writeText(tok).then(() => {
+    if (await copyToClipboard(tok)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
-    })
+    }
   }
 
   const masked = `${tok.slice(0, 6)}${'•'.repeat(Math.max(8, tok.length - 9))}${tok.slice(-3)}`
@@ -357,11 +358,11 @@ function CurrentSessionCard() {
 
 function RevealBanner({ token, onDismiss }: { token: CreatedToken; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false)
-  function copy() {
-    void navigator.clipboard.writeText(token.token).then(() => {
+  async function copy() {
+    if (await copyToClipboard(token.token)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
-    })
+    }
   }
   return (
     <div

@@ -38,6 +38,7 @@ import {
   type UserToken,
 } from '../lib/auth'
 import { apiFetch, clearToken, getToken, redirectToLogin } from '../lib/session'
+import { copyToClipboard } from '../lib/clipboard'
 
 // Admin page. Rendered inside Layout so the sidebar persists. Uses the
 // shared session token — no separate admin-token store. If the user's
@@ -1215,11 +1216,10 @@ function RevealBanner({
 }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(created.token)
+    if (await copyToClipboard(created.token)) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
-    } catch { /* clipboard blocked */ }
+    }
   }
   return (
     <div
@@ -1742,11 +1742,11 @@ function NewInviteCard({
 function InviteReveal({ invite, onDismiss }: { invite: Invitation; onDismiss: () => void }) {
   const url = `${window.location.origin}/invite/${invite.id}`
   const [copied, setCopied] = useState(false)
-  const copy = () => {
-    void navigator.clipboard.writeText(url).then(() => {
+  const copy = async () => {
+    if (await copyToClipboard(url)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1200)
-    })
+    }
   }
   return (
     <div
