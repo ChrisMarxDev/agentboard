@@ -55,10 +55,17 @@ func resolveProjectPath() string {
 func runServe(cmd *cobra.Command, args []string) error {
 	projPath := resolveProjectPath()
 
-	// Check if project exists, if not init it
+	// Init when the project dir is missing OR exists but unseeded.
+	// The unseeded case matters for hosted deploys: a Docker bind-mount
+	// or a manually-created empty volume passes os.Stat but contains no
+	// index.md, so Pages.GetPage("index") returns 404 and the SPA can't
+	// render anything. InitProject is safe to call on an empty dir
+	// (only writes index.md + agentboard.yaml + a seed skill).
 	var proj *project.Project
-	if _, err := os.Stat(projPath); os.IsNotExist(err) {
-		log.Printf("Creating new project at %s", projPath)
+	_, statErr := os.Stat(projPath)
+	_, indexErr := os.Stat(filepath.Join(projPath, "index.md"))
+	if os.IsNotExist(statErr) || os.IsNotExist(indexErr) {
+		log.Printf("Initializing project at %s", projPath)
 		var initErr error
 		proj, initErr = project.InitProject(projPath)
 		if initErr != nil {

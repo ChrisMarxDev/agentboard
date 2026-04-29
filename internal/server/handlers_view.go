@@ -34,7 +34,11 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "body must be JSON {path}")
 		return
 	}
-	authority, user, session := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	authority, user, session, authErr := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	if authErr != nil {
+		respondError(w, http.StatusServiceUnavailable, "AUTH_TRANSIENT", "auth lookup failed; retry")
+		return
+	}
 
 	// Share visitors are anchored to their share's path. If they ask
 	// for something else, re-anchor rather than leaking a second view.
@@ -195,7 +199,11 @@ func (s *Server) handleViewEvents(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotImplemented, "NOT_SUPPORTED", "view broker unavailable")
 		return
 	}
-	authority, user, session := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	authority, user, session, authErr := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	if authErr != nil {
+		respondError(w, http.StatusServiceUnavailable, "AUTH_TRANSIENT", "auth lookup failed; retry")
+		return
+	}
 
 	requestedPath := strings.TrimPrefix(strings.TrimSuffix(r.URL.Query().Get("path"), ".md"), "/")
 	if requestedPath == "" {
@@ -359,7 +367,11 @@ func (s *Server) handleViewFile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "file name required")
 		return
 	}
-	authority, user, session := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	authority, user, session, authErr := view.ResolveAuthority(r, s.Auth, s.ViewSessions)
+	if authErr != nil {
+		respondError(w, http.StatusServiceUnavailable, "AUTH_TRANSIENT", "auth lookup failed; retry")
+		return
+	}
 
 	requestedPath := strings.TrimPrefix(strings.TrimSuffix(r.URL.Query().Get("path"), ".md"), "/")
 	if requestedPath == "" {

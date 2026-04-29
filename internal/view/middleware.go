@@ -2,6 +2,7 @@ package view
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/christophermarx/agentboard/internal/auth"
@@ -49,29 +50,48 @@ func WithSession(ctx context.Context, s *Session) context.Context {
 // the situation where a share-cookie visitor gets 401'd by the
 // authentication layer before the broker sees them.
 //
+// Error semantics: a non-nil error signals a *transient* failure
+// (typically a SQLite hiccup during an in-flight write). Callers
+// should map that to 503, not 401. Without this, a freshly-redeemed
+// admin can hit a brief contention window where ResolveToken fails,
+// fall through to AuthorityAnonymous, then 401, then bounce to
+// /login — clearing a perfectly good token along the way. ErrNotFound
+// / revoked / deactivated do NOT count as transient: they bubble up
+// as Anonymous so the public-paths gate decides.
+//
 // Shares: the resolved session's path overrides the request's view
 // path. A share-cookie visitor hitting /api/view/open?path=other gets
 // re-anchored to their share's path. Prevents using a share cookie to
 // probe other views.
-func ResolveAuthority(r *http.Request, authStore *auth.Store, sessions *SessionStore) (AuthorityKind, *auth.User, *Session) {
+func ResolveAuthority(r *http.Request, authStore *auth.Store, sessions *SessionStore) (AuthorityKind, *auth.User, *Session, error) {
 	if authStore != nil {
 		if token := extractBearerToken(r); token != "" {
-			if user, _, err := authStore.ResolveToken(auth.HashToken(token)); err == nil && user != nil {
+			user, _, err := authStore.ResolveToken(auth.HashToken(token))
+			if err == nil && user != nil {
 				if user.Kind == auth.KindAdmin {
-					return AuthorityAdmin, user, nil
+					return AuthorityAdmin, user, nil, nil
 				}
-				return AuthorityAgent, user, nil
+				return AuthorityAgent, user, nil, nil
+			}
+			// ErrNotFound / revoked / deactivated → fall through to
+			// the cookie/anonymous branches. Anything else is
+			// transient and must surface as a server error.
+			if err != nil &&
+				!errors.Is(err, auth.ErrNotFound) &&
+				!errors.Is(err, auth.ErrTokenRevoked) &&
+				!errors.Is(err, auth.ErrUserDeactivated) {
+				return AuthorityAnonymous, nil, nil, err
 			}
 		}
 	}
 	if sessions != nil {
 		if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
 			if sess, err := sessions.Resolve(c.Value); err == nil {
-				return AuthorityShare, nil, sess
+				return AuthorityShare, nil, sess, nil
 			}
 		}
 	}
-	return AuthorityAnonymous, nil, nil
+	return AuthorityAnonymous, nil, nil, nil
 }
 
 func extractBearerToken(r *http.Request) string {

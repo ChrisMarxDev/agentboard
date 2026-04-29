@@ -142,7 +142,7 @@ No token / revoked token / deactivated user → ` + "`401 Unauthorized`" + `. Do
 |---|---|---|
 | Pages (MDX) | ` + "`agentboard_write_page`, `agentboard_patch_page`" + ` (or ` + "`PUT/PATCH /api/content/<path>`" + `) | ` + "`agentboard_read_page`, `agentboard_list_pages`" + ` |
 | Data (key/value) | ` + "`agentboard_set`, `agentboard_merge`, `agentboard_append`" + ` | ` + "`agentboard_get`, `agentboard_list_keys`" + ` |
-| Files (binary) | ` + "`agentboard_write_file`" + ` | ` + "`agentboard_list_files`, GET /api/files/<name>" + ` |
+| Files (binary) | ` + "`agentboard_write_file`" + ` | ` + "`agentboard_list_files`, `GET /api/files/<name>`" + ` |
 | Skills | write a folder under ` + "`content/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` via the page API | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
 
 ## Folder collections (the most useful pattern)
