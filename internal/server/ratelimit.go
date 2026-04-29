@@ -1,9 +1,9 @@
 package server
 
-// Per-token rate limiter for /api/v2 mutation endpoints (spec §18).
+// Per-token rate limiter for /api/data mutation endpoints (spec §18).
 //
 // Defaults: 200 writes/min sustained, 50/sec burst. Reads are
-// unthrottled here — the v2 read paths read from the in-memory
+// unthrottled here — the storeread paths read from the in-memory
 // catalog and are cheap enough that a buggy poll loop is annoying,
 // not actually expensive.
 //
@@ -26,7 +26,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// v2 rate-limit defaults. Tuned generously — agents have to be doing
+// store rate-limit defaults. Tuned generously — agents have to be doing
 // something genuinely runaway to trip them. The bucket size + refill
 // rate together mean ~3 writes/sec sustained, 50 in a burst.
 const (
@@ -36,7 +36,7 @@ const (
 )
 
 // storeRateStore holds one token bucket per actor name. Anonymous /
-// unauthenticated callers should never reach a v2 handler (auth gates
+// unauthenticated callers should never reach a store handler (auth gates
 // them earlier), but as a defensive default the empty actor maps to a
 // shared "anonymous" bucket so no single client can saturate.
 type storeRateStore struct {
@@ -87,7 +87,7 @@ func (s *storeRateStore) janitor() {
 	}
 }
 
-// storeRateLimit is the chi middleware applied to /api/v2 mutation
+// storeRateLimit is the chi middleware applied to /api/data mutation
 // routes. Reads (GET, HEAD) bypass it — the bucket only matters for
 // state-changing calls.
 func (s *Server) storeRateLimit(next http.Handler) http.Handler {

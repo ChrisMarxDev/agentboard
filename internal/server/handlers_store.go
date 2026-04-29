@@ -1,9 +1,11 @@
 package server
 
-// Handlers for the files-first store described in spec-file-storage.md.
-// Mounted at /api/v2 alongside the existing /api/data routes; once the
-// frontend is migrated to consume the envelope shape (Phase 4) we
-// retire the old routes (Phase 5).
+// Handlers for the files-first store. Mounted at /api/data/<key>
+// (singletons + collections + streams via .ndjson), plus the /api/
+// index, /api/search, /api/activity, and /api/files/request-upload
+// envelope endpoints. The store backs every cross-page value the
+// dashboards display; for in-page fields, agents prefer frontmatter
+// on the rendering page (see spec-rework.md).
 
 import (
 	"encoding/json"
@@ -19,7 +21,7 @@ import (
 )
 
 // actorFor extracts the username from the auth context. Anonymous
-// callers should be blocked by middleware before they reach a v2
+// callers should be blocked by middleware before they reach a store
 // handler — defensively we fall back to "anonymous" so the activity
 // log always has *something* recognizable.
 func actorFor(r *http.Request) string {

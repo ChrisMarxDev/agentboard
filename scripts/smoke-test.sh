@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Smoke test for /api/v2 (files-first store).
-# Boots a fresh agentboard binary with a throwaway project + dummy auth
-# token, hits every v2 endpoint, asserts the contract. Self-contained:
-# you can run this anywhere as long as `go` is on PATH.
+# Smoke test for the files-first store at /api/data/<key> +
+# /api/index, /api/search, /api/activity, /api/files/request-upload.
+# Boots a fresh agentboard binary with a throwaway project + dummy
+# auth token, hits every store endpoint, asserts the contract.
+# Self-contained: runs anywhere `go` is on PATH.
 #
 # Usage:
-#   scripts/v2-smoke-test.sh [PORT]
+#   scripts/smoke-test.sh [PORT]
 set -euo pipefail
 
 PORT=${1:-3399}
 BINARY="${BINARY:-./agentboard}"
 TOKEN="smoke-token-$$"
 URL="http://localhost:$PORT"
-TEST_PROJECT="/tmp/agentboard-v2-smoke-$$"
+TEST_PROJECT="/tmp/agentboard-store-smoke-$$"
 
 GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
 PASS=0; FAIL=0
@@ -20,7 +21,7 @@ PASS=0; FAIL=0
 pass() { echo -e "${GREEN}PASS${NC} $1"; PASS=$((PASS + 1)); }
 fail() { echo -e "${RED}FAIL${NC} $1: $2"; FAIL=$((FAIL + 1)); }
 
-curl_v2() {
+authed_curl() {
   curl -s -H "Authorization: Bearer $TOKEN" "$@"
 }
 
@@ -28,18 +29,18 @@ assert_status() {
   local desc="$1" method="$2" path="$3" expected="$4"
   shift 4
   local status
-  status=$(curl_v2 -o /dev/null -w '%{http_code}' -X "$method" "$URL$path" "$@")
+  status=$(authed_curl -o /dev/null -w '%{http_code}' -X "$method" "$URL$path" "$@")
   if [ "$status" = "$expected" ]; then pass "$desc"; else fail "$desc" "want $expected got $status"; fi
 }
 
 assert_jq() {
   local desc="$1" path="$2" jq_expr="$3" expected="$4"
   local actual
-  actual=$(curl_v2 "$URL$path" | jq -r "$jq_expr" 2>/dev/null || echo "ERROR")
+  actual=$(authed_curl "$URL$path" | jq -r "$jq_expr" 2>/dev/null || echo "ERROR")
   if [ "$actual" = "$expected" ]; then pass "$desc"; else fail "$desc" "want '$expected' got '$actual'"; fi
 }
 
-echo "=== /api/v2 smoke test ==="
+echo "=== files-first store smoke test ==="
 echo ""
 
 # Build if missing
@@ -50,7 +51,7 @@ fi
 
 # Boot
 rm -rf "$TEST_PROJECT"
-AGENTBOARD_AUTH_TOKEN="$TOKEN" "$BINARY" --path "$TEST_PROJECT" --port "$PORT" --no-open > /tmp/v2-smoke-$$.log 2>&1 &
+AGENTBOARD_AUTH_TOKEN="$TOKEN" "$BINARY" --path "$TEST_PROJECT" --port "$PORT" --no-open > /tmp/store-smoke-$$.log 2>&1 &
 SERVER_PID=$!
 sleep 2
 
@@ -70,7 +71,7 @@ assert_status "PUT singleton fresh"      PUT "/api/data/smoke.k" 200 -H 'Content
 assert_jq     "GET singleton value"      "/api/data/smoke.k" ".value" "42"
 assert_jq     "shape == singleton"       "/api/data/smoke.k" "._meta.shape" "singleton"
 
-VERSION=$(curl_v2 "$URL/api/data/smoke.k" | jq -r "._meta.version")
+VERSION=$(authed_curl "$URL/api/data/smoke.k" | jq -r "._meta.version")
 
 assert_status "PUT with matching ver"    PUT "/api/data/smoke.k" 200 \
   -H 'Content-Type: application/json' -d "{\"_meta\":{\"version\":\"$VERSION\"},\"value\":100}"
@@ -87,8 +88,8 @@ assert_jq     "deep merge preserved b"    "/api/data/smoke.cfg" ".value.b" "2"
 assert_jq     "deep merge updated a"      "/api/data/smoke.cfg" ".value.a" "99"
 assert_jq     "deep merge added c"        "/api/data/smoke.cfg" ".value.c" "3"
 
-# Atomic increment + CAS removed in Cut 2 — agents do read-modify-write
-# under the file-level _meta.version CAS.
+# No atomic field-level increment / CAS — agents read-modify-write
+# the whole doc under file-level _meta.version CAS.
 
 # --- Collection ---
 assert_status "Upsert task-1"            PUT "/api/data/smoke.kanban/task-1" 200 \
@@ -122,7 +123,7 @@ assert_jq     "history has entries"       "/api/data/smoke.k/history" ".entries 
 assert_jq     "activity has entries"      "/api/activity?path_prefix=smoke" ".entries | length > 0" "true"
 
 # # --- Presigned upload (spec §12) ---
-MINT=$(curl_v2 -X POST -H 'Content-Type: application/json' \
+MINT=$(authed_curl -X POST -H 'Content-Type: application/json' \
   "$URL/api/files/request-upload" -d '{"name":"smoke.txt","size_bytes":12}')
 UPLOAD_URL=$(echo "$MINT" | jq -r .upload_url)
 if [ "$UPLOAD_URL" != "null" ] && [ -n "$UPLOAD_URL" ]; then pass "Mint upload URL"; else fail "Mint upload URL" "no url returned"; fi
