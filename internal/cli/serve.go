@@ -240,10 +240,11 @@ MCP:       %s/mcp
 Connect Claude:
   claude mcp add agentboard %s/mcp
 
-Or ask any agent to POST to:
-  %s/api/data/:key
+Author pages and data via:
+  %s/api/content/:path        # MDX pages
+  %s/api/data/:key             # frontmatter values + collections
 
-`, server.Version(), proj.Config.Title, projPath, url, url, url, url)
+`, server.Version(), proj.Config.Title, projPath, url, url, url, url, url)
 
 	// Open browser
 	if !noOpen {

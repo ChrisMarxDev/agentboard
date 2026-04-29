@@ -675,16 +675,6 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// board claim now happens via /invite/<id>.
 		r.Get("/setup/status", s.handleSetupStatus)
 
-		// Legacy /api/data/* routes were removed in Cut 1 of the
-		// rewrite. The data layer is now files-first; consumers go
-		// through /api/data/* until Cut 3 collapses the prefix into
-		// /api/data/* on the new shape.
-		//
-		// One survivor: the bulk-delete stub returns 410 with a forward
-		// pointer so existing callers see a structured error instead of
-		// a raw 404.
-		r.Post("/data/bulk-delete", s.handleBulkDeleteData)
-
 		// Content endpoints (MDX dashboards + knowledge docs)
 		r.Get("/content", s.handleListPages)
 		r.Post("/content/move", s.handleMovePage)
@@ -744,8 +734,12 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// visitors out with 401 before the handler can inspect the
 		// cookie.
 
-		// /api/v2 — files-first store routes (spec-file-storage.md).
-		// Mounted parallel to /api/data/* during the migration window.
+		// /api/data/* + /api/index + /api/search + /api/activity —
+		// the files-first store namespace. Singletons live at
+		// /api/data/<key>; collection items at /api/data/<key>/<id>;
+		// streams (.ndjson) live next to docs and POST :append.
+		// Mounted under the gated chain so reads + writes share the
+		// same auth posture as content/files.
 		s.registerStoreRoutes(r)
 
 		// Component endpoints

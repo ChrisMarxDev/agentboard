@@ -163,12 +163,3 @@ func (s *Server) handleBulkDeleteFiles(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, out)
 }
 
-// handleBulkDeleteData — DEPRECATED stub. The legacy KV layer is gone
-// in the rewrite; the route entry itself gets removed in Cut 1.D.
-// Until then, the handler returns 410 Gone with a clear forward
-// pointer to the v2 surface.
-func (s *Server) handleBulkDeleteData(w http.ResponseWriter, r *http.Request) {
-	_ = r
-	respondError(w, http.StatusGone, "REMOVED",
-		"the legacy /api/data/* surface was removed in the rewrite — use /api/data/* (or /api/* once Cut 3 lands)")
-}
