@@ -71,7 +71,7 @@ _meta:
 Rules:
 
 - `_meta` is server-owned. Agents echo `_meta.version` for CAS; the server strips agent-supplied `_meta` fields except `version`.
-- All other frontmatter keys are user-owned. Server treats them opaquely.
+- All other frontmatter keys are user-owned. Server treats them opaquely. **`order:` in particular is opaque** — agents write whatever sort hint they want, the server stores it verbatim and components are free to read it. Page-tree traversal order is server-derived from path-sort and surfaces under the separate `_meta.order` field; the two never collide.
 - A `.md` with no body is fine (singletons typically have only frontmatter). A `.md` with no frontmatter is fine. A doc that is just `42\n` is fine.
 - **No shape validation on writes.** Per `CORE_GUIDELINES §8`, the server stores whatever it parses. Wrong-shape errors come from components at render time, not from the write path. Section 8 of this spec gives suggested shapes for common types — those are *hints to the authoring agent*, never enforcement.
 - **Speak, don't reject.** When a write under a known suggested-shape path is missing common fields, the response includes a non-blocking `warnings` array per §6 (Shape warnings) and `CORE_GUIDELINES §12`. The write still succeeds. Agents are free to ignore the warning.
@@ -111,6 +111,8 @@ Conflict response (`412`) embeds the current envelope. Wrong-shape errors (`409`
 **Initial-write semantics.** A PUT to a path with no existing leaf MUST succeed without `If-Match` — the absence of a prior version means there's nothing to be stale against. CAS only applies when an existing version is being overwritten. (This corrects an ergonomic friction noted in `ISSUES.md`.)
 
 **Auth surfaces are separate.** `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/invitations/<id>/redeem`, the OAuth `/oauth/*` flow, the admin endpoints `/api/admin/*` and `/api/users/*` — all read and write SQLite tables, not files. They are not part of the content surface.
+
+**Implementation status.** Cut 6 ships the MCP surface change (§6) and the shape-warning system (§8). The REST unification described above is the locked target shape; the live HTTP layer still mounts pages under `/api/content/<path>` and data under `/api/data/<key>` while the legacy routes get retired in a follow-up cut. The spec wins on intent; the wire is one cut behind.
 
 ## 6. MCP surface — eight tools + named extensions, always-plural
 

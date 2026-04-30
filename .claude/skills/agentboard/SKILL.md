@@ -161,18 +161,65 @@ For primitives/arrays, use `value:` instead of splatting top-level keys.
 - Or via MCP: `agentboard_request_file_upload` returns the URL
 - Tokens are one-shot, TTL 5 min
 
-**MCP tools (~40, run `tools/list` for the live set).** They split into:
+**MCP tools (10, locked by spec §6).** Cut 6 collapsed the surface from 38 domain-specific tools to 10 generic batch tools that dispatch by path. Always-plural batch shape; best-effort partial-success semantics; native JSON values; full envelope on read; non-blocking shape warnings on write.
 
-- **Store data plane (10).** `agentboard_index`, `_search`, `_read`, `_write` (PUT), `_merge` (PATCH), `_append` (stream), `_delete`, `_history`, `_activity`, `_request_file_upload`. Use these for any cross-page value.
-- **Pages (6).** `agentboard_list_pages`, `_read_page`, `_write_page`, `_patch_page`, `_delete_page`, `_search_pages`. MDX docs in the same single tree.
-- **Files (4).** `_write_file`, `_list_files`, `_delete_file`, plus `_request_file_upload` above for binary uploads.
-- **Components (4).** `_list_components`, `_read_component`, `_write_component`, `_delete_component` (write/delete gated by `--allow-component-upload`).
-- **Skills (2).** `_list_skills`, `_get_skill`.
-- **Errors (2).** `_list_errors`, `_clear_errors` — render-error beacons.
-- **Webhooks (4).** `_list_webhooks`, `_create_webhook`, `_revoke_webhook`, `_fire_event`.
-- **Teams (6).** `_list_teams`, `_get_team`, `_create_team`, `_delete_team`, `_add_team_member`, `_remove_team_member`.
-- **Locks (2).** `_lock_page`, `_unlock_page` (admin-only).
-- **Grab (1).** `_grab` materializer.
+```
+Read tier:
+  agentboard_read(paths)              — paths: [string]
+                                         → [{path, frontmatter, body, version, warnings?}]
+  agentboard_list(path)               — folder children + frontmatter snippets
+  agentboard_search(q, scope?)        — FTS + substring across the tree
+                                         scope: pages | data | all (default)
+
+Write tier (always batch):
+  agentboard_write(items)             — items: [{path, frontmatter?, body?, version?}]
+  agentboard_patch(items)             — items: [{path, frontmatter_patch?, body?, version?}]
+  agentboard_append(path, items)      — items: [any]; one stream per call; race-free
+  agentboard_delete(items)            — items: [{path, version?}]
+
+Files:
+  agentboard_request_file_upload(items) — items: [{name, size_bytes}]
+                                          → [{name, upload_url, expires_at, max_size_bytes}]
+
+Named extensions:
+  agentboard_grab(picks)              — cross-page materializer
+  agentboard_fire_event(event, payload?) — emit on webhook bus
+```
+
+**Single-item operations wrap in a one-element array.** `agentboard_write({items: [{path, frontmatter}]})` — there is no singular form. Two writes, two patches, twenty deletes — all go in one call, partial-success per item.
+
+**Native JSON values.** `frontmatter` is a JSON object. `frontmatter.value: 23` round-trips as the number `23`, not the string `"23"`. The MCP wrapper does NOT call `JSON.stringify` on already-decoded payloads (this was Issue 1 + 2 — fixed in Cut 6).
+
+**Full envelope on read.** `agentboard_read([paths])` returns one result per path with `{frontmatter, body, version, shape}` plus a structured `error` if the read failed. The body-only `read_page` is gone.
+
+**Shape warnings.** When a write lands at a path matching a suggested-shape glob (spec §8 — `tasks/*`, `metrics/*`, `skills/*/SKILL`) and the frontmatter is missing the suggested fields, the result includes a non-blocking `shape_hint` warning naming the missing fields. The write still succeeds. Agents are free to ignore.
+
+**Bearer-to-user attribution.** MCP writes attribute to the bearer's actual user (Issue 7 — fixed in Cut 6). The MCP server resolves the bearer from the HTTP request context just like the REST middleware does.
+
+**Admin operations stay on REST + CLI.** Webhook subscribe/revoke/list, page locks, team management — all moved to `/api/admin/*` and the `agentboard admin` CLI. MCP is the agent realm; admin operations never expose through MCP. See AUTH.md §"MCP invariant".
+
+### Suggested shapes (spec §8)
+
+The server stores any well-formed payload — schemas are documentation, not enforcement. But certain paths look like they belong to a known shape, and missing fields trigger a `shape_hint` warning:
+
+| Path glob | Suggested fields |
+|---|---|
+| `tasks/*`, `tasks/**`, `*/tasks/*` | `title`, `status` |
+| `metrics/*`, `metrics/**`, `*/metrics/*` | `value`, `label` |
+| `skills/*/SKILL` | `name`, `description` |
+
+Adding a shape is a one-liner in `internal/store/shapes.go` plus a new subsection in spec §8.
+
+### Path layout (spec §1)
+
+| Concept | Path |
+|---|---|
+| Pages (MDX docs) | `<path>` |
+| Singleton values | `<key>` (frontmatter only, no body required) |
+| Collection items | `<path>/<id>` |
+| User-composed streams | `<path>` (.ndjson on disk) |
+| Binary files | `files/<name>` (mint via `agentboard_request_file_upload`) |
+| Skills | `skills/<slug>/SKILL` |
 
 **Backup:** `agentboard backup --to ./snapshot.tar.gz` and `agentboard restore --from ./snapshot.tar.gz`. Tar excludes SQLite WAL/SHM and the bootstrap-secret URL.
 
@@ -182,8 +229,8 @@ For primitives/arrays, use `value:` instead of splatting top-level keys.
 
 If the user just shipped something (landed a commit, says "we shipped X", asks for the dashboard to reflect new work), update the dashboard in this order:
 
-1. **Write a feature page** under `content/features/<slug>.md` via `PUT /api/content/features/<slug>` or MCP `agentboard_write_page`. Use the feature-page template below.
-2. **Update the feature list data** at `dev.features.shipped` (array of `{id, title, status: "done", landed_at}`) via `agentboard_set` or `PUT /api/data/dev.features.shipped`. The home page Kanban/List reads from this.
+1. **Write a feature page** under `content/features/<slug>.md` via `PUT /api/content/features/<slug>` or MCP `agentboard_write({items: [{path: "features/<slug>", frontmatter: {…}, body: "…"}]})`. Use the feature-page template below.
+2. **Update the feature list data** at `dev.features.shipped` (array of `{id, title, status: "done", landed_at}`) via `agentboard_write({items: [{path: "dev.features.shipped", frontmatter: {value: [...]}}]})` or `PUT /api/data/dev.features.shipped`. The home page Kanban/List reads from this.
 3. **Bump relevant metrics** — `dev.components.count`, `dev.mcp.tools`, `dev.tests.passing`, etc.
 4. **If the session was a bigger phase** (multi-day push, rewrote a subsystem, shipped a cohort of related features together), **also write a `/showcase/<session-slug>` page** — see the "Showcase folder" section below.
 
@@ -383,7 +430,7 @@ When the user asks to "update the dashboard", "add a feature page", or "show the
 
 When the user says "record this metric" or "the test count changed":
 
-1. PUT the new value to the appropriate `dev.*` key via REST or MCP.
+1. PUT the new value to the appropriate `dev.*` key via REST (`PUT /api/data/dev.foo`) or MCP (`agentboard_write({items: [{path: "dev.foo", frontmatter: {value: 42}}]})`).
 2. SSE broadcasts it within ~100 ms. No page write needed.
 
 When the user asks what's currently on the dashboard:

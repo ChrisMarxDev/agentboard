@@ -19,7 +19,6 @@ import (
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mcp"
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/publicroutes"
 	"github.com/christophermarx/agentboard/internal/share"
@@ -38,11 +37,11 @@ type Server struct {
 	FileStore            *store.Store // files-first content store; sole data source
 	Auth                 *auth.Store
 	Broadcaster          *Broadcaster
-	Pages                *mdx.PageManager
-	PageMeta             *mdx.MetaStore
-	PageApproval         *mdx.ApprovalStore
-	PageRefs             *mdx.RefStore
-	Search               *mdx.SearchStore
+	Pages                *store.PageManager
+	PageMeta             *store.MetaStore
+	PageApproval         *store.ApprovalStore
+	PageRefs             *store.RefStore
+	Search               *store.SearchStore
 	Components           *components.Manager
 	Files                *files.Manager
 	Errors               *interrors.Buffer
@@ -104,14 +103,14 @@ func New(cfg ServerConfig) *Server {
 		}()
 	}
 
-	pageManager := mdx.NewPageManager(cfg.Project)
+	pageManager := store.NewPageManager(cfg.Project)
 	// Best-effort: if the store exposes a *sql.DB (SQLiteStore does), build
 	// a MetaStore over it so we can surface "last edited by" on pages. When
 	// the assert fails, PageMeta stays nil and handlers fall back to "no
 	// meta available" — never fatal.
-	var metaStore *mdx.MetaStore
+	var metaStore *store.MetaStore
 	if cfg.Conn != nil {
-		if ms, err := mdx.NewMetaStore(cfg.Conn); err == nil {
+		if ms, err := store.NewMetaStore(cfg.Conn); err == nil {
 			metaStore = ms
 		}
 	}
@@ -119,18 +118,18 @@ func New(cfg ServerConfig) *Server {
 	// Approval store — same best-effort pattern as MetaStore. Nil-safe
 	// at every read/write site so a DB without SQL backing just
 	// degrades to "no approvals", not a boot error.
-	var approvalStore *mdx.ApprovalStore
+	var approvalStore *store.ApprovalStore
 	if cfg.Conn != nil {
-		if a, err := mdx.NewApprovalStore(cfg.Conn); err == nil {
+		if a, err := store.NewApprovalStore(cfg.Conn); err == nil {
 			approvalStore = a
 		}
 	}
 
 	// Ref store — the page-dependency graph the view broker uses to
 	// decide what a page touches. Best-effort like the others.
-	var refStore *mdx.RefStore
+	var refStore *store.RefStore
 	if cfg.Conn != nil {
-		if rs, err := mdx.NewRefStore(cfg.Conn); err == nil {
+		if rs, err := store.NewRefStore(cfg.Conn); err == nil {
 			refStore = rs
 			// Backfill: walk every page on boot and record its refs.
 			// PageInfo.Path has a leading slash; the ref store uses the
@@ -140,7 +139,7 @@ func New(cfg ServerConfig) *Server {
 				if key == "" {
 					key = "index"
 				}
-				_ = refStore.Record(key, mdx.ExtractRefs(p.Source, key))
+				_ = refStore.Record(key, store.ExtractRefs(p.Source, key))
 			}
 		} else {
 			log.Printf("agentboard: page_refs unavailable (continuing without): %v", err)
@@ -152,9 +151,9 @@ func New(cfg ServerConfig) *Server {
 	// best-effort posture as MetaStore — if the DB can't be addressed or
 	// FTS isn't available, search silently becomes a no-op rather than
 	// failing the boot.
-	var searchStore *mdx.SearchStore
+	var searchStore *store.SearchStore
 	if cfg.Conn != nil {
-		if ss, err := mdx.NewSearchStore(cfg.Conn); err == nil {
+		if ss, err := store.NewSearchStore(cfg.Conn); err == nil {
 			searchStore = ss
 			// Prime the index from whatever's on disk. Zero-cost on a
 			// fresh project; O(N) on an existing one.
@@ -266,22 +265,12 @@ func New(cfg ServerConfig) *Server {
 	grabber := &grab.Materializer{Pages: pageManager, FileStore: cfg.FileStore}
 
 	mcpServer := &mcp.Server{
-		FileStore:  cfg.FileStore,
-		Pages:      pageManager,
-		Search:     searchStore,
-		Components: compManager,
-		Files:      fileManager,
-		Errors:     errorBuffer,
-		Grab:       grabber,
-		Webhooks:   webhookStore,
-		Teams:      teamStore,
-		Locks:      lockStore,
-		IsAdmin: func(r *http.Request) bool {
-			u := auth.UserFromContext(r.Context())
-			return u != nil && u.Kind == auth.KindAdmin
-		},
+		FileStore: cfg.FileStore,
+		Pages:     pageManager,
+		Files:     fileManager,
+		Grab:      grabber,
+		Auth:      cfg.Auth,
 		// WebhookDispatcher is set below after the dispatcher is built.
-		AllowComponentUpload: cfg.AllowComponentUpload,
 	}
 	// Wire the upload-token mint into MCP. The base URL needs a host;
 	// for now we use localhost + port, which works for every Claude

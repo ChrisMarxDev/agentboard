@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/store"
 	"github.com/christophermarx/agentboard/internal/view"
 )
@@ -477,9 +476,6 @@ func contentTypeForName(name string) string {
 	return ""
 }
 
-// Unused alias to keep mdx import honest — referenced via PageRefs.
-var _ = mdx.RefSet{}
-
 // unwrapV2ForBroadcast takes a `data` SSE payload (store.Event
 // JSON) and re-emits it in the legacy `data` shape `{key, value}` by
 // reading the current envelope from the file store. Returns ok=false
@@ -523,7 +519,7 @@ func unwrapV2ForBroadcast(fs *store.Store, payload []byte) ([]byte, bool) {
 //
 // Returns ok=false when the prefix has zero matches; caller falls
 // through to the file store.
-func folderChildren(pm *mdx.PageManager, key string) ([]map[string]any, bool) {
+func folderChildren(pm *store.PageManager, key string) ([]map[string]any, bool) {
 	if pm == nil {
 		return nil, false
 	}

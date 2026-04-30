@@ -132,7 +132,7 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 - **Frontend**: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation), embedded into the Go binary at build time.
 - **Data model**: Files-first. `.md` docs (frontmatter holds structured fields, body holds MDX) + `.ndjson` streams + binaries. Folders are collections. Singletons live at `<key>.md`; collection items at `<key>/<id>.md`. Full-file CAS via `_meta.version`.
 - **Realtime**: SSE broadcaster pushes `data` and `page-updated` events to all connected browsers.
-- **MCP**: Streamable HTTP at `/mcp` with ~40 tools across store, pages, files, components, skills, errors, webhooks, teams, locks, and grab. `tools/list` enumerates the live set.
+- **MCP**: Streamable HTTP at `/mcp` with the 10 tools in spec §6 (8 generic batch CRUD + grab + fire_event). Always-plural batch shape; native JSON values; full envelope on read; non-blocking shape warnings on write. Admin operations (webhook subscribe / revoke / list, page locks, team CRUD) live on `/api/admin/*` + the `agentboard admin` CLI per the AUTH.md MCP invariant.
 - **Pages**: MDX files compiled client-side, served from project folder. Watcher rebuilds the catalog on disk changes.
 - **Components**: 32 built-ins, plus user `.jsx` files in `components/` (off by default, gated behind `--allow-component-upload`).
 - **Auth**: Two credential paths — bearer tokens (`ab_*`, `oat_*`) for non-human callers, browser sessions (cookie + CSRF) for humans. See [`AUTH.md`](./AUTH.md).
@@ -141,12 +141,11 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 
 - `cmd/agentboard/` — CLI entry point.
 - `internal/auth/` — users, tokens, passwords, sessions, OAuth, middleware.
-- `internal/store/` — files-first envelope + CAS + history + activity log + rate limiter.
+- `internal/store/` — files-first envelope + CAS + history + activity log + rate limiter, plus the page manager, frontmatter parser, unified file watcher, FTS5 search index, and refs (folded in from the former `internal/mdx/` in Cut 5).
 - `internal/server/` — HTTP handlers, SSE broadcaster, every gated route.
 - `internal/mcp/` — JSON-RPC protocol + tool definitions (store, pages, files, components, skills, errors, webhooks, teams, locks, grab).
 - `internal/cli/` — Cobra commands (`serve`, `init`, `version`, `projects`, `admin`, `backup`, `restore`).
 - `internal/project/` — Project model, config, first-run init.
-- `internal/mdx/` — Page manager, frontmatter parser, file watcher, FTS5 search index, refs.
 - `internal/components/` — Component catalog + file watcher.
 - `internal/files/` — File manager, name validation, presigned upload tokens.
 - `internal/grab/` — Materializer that turns a list of picks into agent-ready text.

@@ -260,10 +260,14 @@ TOOL_COUNT=$(curl -s -X POST "$URL/mcp" \
   -H 'Accept: application/json, text/event-stream' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   | jq -r '.result.tools | length' 2>/dev/null || echo 0)
-if [ "$TOOL_COUNT" -ge 30 ] 2>/dev/null; then
-  pass "MCP tools/list ≥ 30 tools (got $TOOL_COUNT)"
+# Cut 6 collapsed the MCP surface from ~38 tools across 10 domains to
+# exactly 10 (8 generic batch CRUD + agentboard_grab + _fire_event).
+# Per spec §6, this count is locked. Adding a tool requires a spec
+# update and a corresponding bump here.
+if [ "$TOOL_COUNT" = "10" ]; then
+  pass "MCP tools/list = 10 tools (spec §6 lock)"
 else
-  fail "MCP tools/list" "expected ≥ 30 tools, got '$TOOL_COUNT'"
+  fail "MCP tools/list" "expected exactly 10 tools, got '$TOOL_COUNT'"
 fi
 
 # ----- Index + search -----

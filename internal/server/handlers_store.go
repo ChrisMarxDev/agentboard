@@ -303,12 +303,12 @@ func (s *Server) handleStoreMerge(w http.ResponseWriter, r *http.Request) {
 	}
 	patch := p.Value
 	if len(patch) == 0 {
-		// Tolerate a bare-patch body as well — agents commonly omit the
-		// envelope wrapper for merges and just send the patch directly.
-		// Re-read; if body was top-level JSON, treat the whole body as
-		// the patch.
-		// Simpler: if we got a non-envelope JSON, fall through.
-		writeError(w, http.StatusBadRequest, "missing_value", `body must be {"value": <patch>} (or top-level patch object)`)
+		// Spec §6 + ISSUES.md #4: only `{"value": <patch>}` is accepted.
+		// The earlier hint about a "top-level patch object" was wrong —
+		// the parser never accepted that shape, and the contradictory
+		// message wasted agent attempts. Per CORE_GUIDELINES §12 the
+		// error names exactly what works.
+		writeError(w, http.StatusBadRequest, "missing_value", `body must be {"value": <patch>}`)
 		return
 	}
 	env, err := s.FileStore.Merge(key, patch, actorFor(r))

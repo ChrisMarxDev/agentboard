@@ -6,42 +6,47 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/christophermarx/agentboard/internal/components"
-	interrors "github.com/christophermarx/agentboard/internal/errors"
+	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/grab"
-	"github.com/christophermarx/agentboard/internal/locks"
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/store"
-	"github.com/christophermarx/agentboard/internal/teams"
 	"github.com/christophermarx/agentboard/internal/webhooks"
 )
 
 // Server implements the MCP Streamable HTTP transport.
+//
+// Cut 6 collapsed the surface from 38 tools across 10 domains down
+// to the spec §6 ten: 8 generic batch CRUD + agentboard_grab +
+// agentboard_fire_event. Admin domains (teams, locks, webhook
+// subscriptions) moved to REST + CLI per the AUTH.md MCP invariant
+// (admin operations never expose through MCP).
 type Server struct {
-	FileStore         *store.Store // files-first content store; powers the agentboard_* tools (renamed in Cut 3)
-	Pages             *mdx.PageManager
-	Search            *mdx.SearchStore
-	Components        *components.Manager
-	Files             *files.Manager
-	Errors            *interrors.Buffer
-	Grab              *grab.Materializer
-	Webhooks          *webhooks.Store
-	WebhookDispatcher *webhooks.Dispatcher
-	Teams             *teams.Store
-	Locks             *locks.Store
-	// IsAdmin reads the admin-ness of the current caller off an
-	// HTTP request's context. Wired by the server that owns the auth
-	// middleware. Nil → non-admin (defense in depth).
-	IsAdmin              func(*http.Request) bool
-	ActorResolver        func() string // returns current actor for attribution; optional
-	AllowComponentUpload bool
+	// FileStore + Pages cover the entire content tier. The 8 generic
+	// tools dispatch by path through these two — the dispatcher tries
+	// the page index first, then the data catalog.
+	FileStore *store.Store
+	Pages     *store.PageManager
 
-	// MintUploadToken minds a one-shot presigned upload token for the
-	// caller. Wired in by the HTTP server (mcp tests stub it). Returns
-	// the public URL the agent should PUT bytes to and the expiry. Nil
-	// means the upload feature isn't configured (returned to the agent
-	// as a structured error).
+	// Files backs agentboard_request_file_upload (mints a presigned URL).
+	Files *files.Manager
+
+	// Grab is the cross-page materializer behind agentboard_grab.
+	Grab *grab.Materializer
+
+	// WebhookDispatcher backs agentboard_fire_event. Admin
+	// (subscribe / revoke / list) operations live on REST under
+	// /api/admin/webhooks/* and the CLI — never on MCP.
+	WebhookDispatcher *webhooks.Dispatcher
+
+	// Auth lets every tool resolve the bearer token to the actor's
+	// username for write attribution. Without this every MCP write
+	// landed under the generic `agent` actor (Issue 7). Optional —
+	// nil falls back to "agent".
+	Auth *auth.Store
+
+	// MintUploadToken minds a one-shot presigned upload token. Wired
+	// in by the HTTP server (mcp tests stub it). Returns the URL and
+	// expiry. Nil means the upload feature isn't configured.
 	MintUploadToken func(name, actor string, sizeBytes int64) (uploadURL, expiresAt string, maxBytes int64, ok bool)
 }
 
@@ -146,4 +151,18 @@ func writeRPCError(w http.ResponseWriter, id interface{}, code int, message stri
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// resolveActor pulls the authenticated user off the request context
+// (set by auth.TokenMiddleware higher up the chain). Returns "agent"
+// when no user is attached — matches the previous default while
+// closing Issue 7 (MCP writes attribute to the actual user, not the
+// generic "agent" string).
+func (s *Server) resolveActor(r *http.Request) string {
+	if r != nil {
+		if u := auth.UserFromContext(r.Context()); u != nil && u.Username != "" {
+			return u.Username
+		}
+	}
+	return "agent"
 }

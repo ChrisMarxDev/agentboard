@@ -1,36 +1,27 @@
-package mdx
+package store
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	"github.com/christophermarx/agentboard/internal/project"
 	"gopkg.in/yaml.v3"
 )
 
-// ErrStale is returned by WritePageIfMatch / DeletePageIfMatch when the
-// caller's expected etag doesn't match the current page source. Handlers
+// ErrPageStale is returned by WritePageIfMatch / DeletePageIfMatch when
+// the caller's expected version doesn't match the current page. Handlers
 // translate it to HTTP 412 with the current page in the body.
-var ErrStale = errors.New("mdx: stale write — If-Match did not match current etag")
+var ErrPageStale = errors.New("store: stale page write — If-Match did not match current _meta.version")
 
-// ErrNotFoundForMatch signals that an If-Match was set but the page doesn't
-// exist. 412 with `current: null`.
-var ErrNotFoundForMatch = errors.New("mdx: page not found for If-Match check")
-
-// pageEtag derives a content-addressed etag from the raw source. First 16
-// hex chars of sha256 — short enough for headers, long enough to rule out
-// accidental collisions within a project.
-func pageEtag(source string) string {
-	sum := sha256.Sum256([]byte(source))
-	return hex.EncodeToString(sum[:])[:16]
-}
+// ErrPageNotFoundForMatch signals that an If-Match was set but the page
+// doesn't exist. 412 with `current: null`.
+var ErrPageNotFoundForMatch = errors.New("store: page not found for If-Match check")
 
 // titleCase uppercases the first rune of each space-separated word.
 // Replaces strings.Title (deprecated in Go 1.18) for the narrow filename-slug
@@ -69,9 +60,14 @@ type PageInfo struct {
 	// Tags are authored in frontmatter (`tags: [foo, bar]`) and let search
 	// filter by topic in addition to full-text matching.
 	Tags []string `json:"tags"`
-	// Etag is a content-addressed version identifier — sha256(source) prefix.
-	// Handlers echo it as the HTTP ETag header; callers send it back in
-	// If-Match for optimistic concurrency.
+	// Version is the page's `_meta.version` — an RFC3339Nano timestamp
+	// stamped by the server on every write. Handlers echo it as the
+	// HTTP ETag header; callers send it back in If-Match for optimistic
+	// concurrency. Spec §3: pages and data both CAS via `_meta.version`.
+	Version string `json:"version"`
+	// Etag is the legacy field name kept on the JSON wire for one
+	// release so SPA + Bruno consumers don't break in lock-step with
+	// this rename. Identical to Version. Drop after Cut 6.
 	Etag  string `json:"etag"`
 	Order int    `json:"order"`
 	// Frontmatter is the full YAML frontmatter as a generic map. Used
@@ -82,20 +78,32 @@ type PageInfo struct {
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
 }
 
-// PageManager manages MDX pages for a project.
+// PageManager manages MDX pages for a project. Pages share the same
+// monotonic-version generator as the rest of the store so CAS works
+// uniformly across pages and data leaves (spec §3).
 type PageManager struct {
-	project *project.Project
-	mu      sync.RWMutex
-	pages   map[string]*PageInfo // path -> page
+	project  *project.Project
+	versions *VersionGen
+	mu       sync.RWMutex
+	pages    map[string]*PageInfo // path -> page
 }
 
-// NewPageManager creates a new page manager.
+// NewPageManager creates a new page manager. The version generator is
+// seeded from the highest `_meta.version` already on disk so a fresh
+// boot never hands out a version that sorts before an existing leaf.
 func NewPageManager(proj *project.Project) *PageManager {
 	pm := &PageManager{
-		project: proj,
-		pages:   make(map[string]*PageInfo),
+		project:  proj,
+		versions: NewVersionGen(time.Time{}),
+		pages:    make(map[string]*PageInfo),
 	}
 	pm.ScanPages()
+	// Push the high-water mark to the latest observed page version.
+	for _, p := range pm.pages {
+		if p.Version != "" {
+			pm.versions.Observe(p.Version)
+		}
+	}
 	return pm
 }
 
@@ -122,7 +130,8 @@ func (pm *PageManager) ScanPages() {
 			Summary:     fm.Summary,
 			Tags:        fm.Tags,
 			Frontmatter: fm.All,
-			Etag:        pageEtag(source),
+			Version:     fm.Version,
+			Etag:        fm.Version,
 			Order:       0,
 		}
 	}
@@ -180,7 +189,8 @@ func (pm *PageManager) ScanPages() {
 				Summary:     fm.Summary,
 				Tags:        fm.Tags,
 				Frontmatter: fm.All,
-				Etag:        pageEtag(source),
+				Version:     fm.Version,
+				Etag:        fm.Version,
 			},
 		})
 		return nil
@@ -239,10 +249,21 @@ func (pm *PageManager) WritePage(pagePath string, source string) error {
 	return pm.WritePageIfMatch(pagePath, source, "")
 }
 
-// WritePageIfMatch is WritePage with an optimistic-concurrency precondition.
-// When expectedEtag is non-empty, returns ErrStale if the current page etag
-// doesn't match, or ErrNotFoundForMatch if the page doesn't exist yet.
-func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedEtag string) error {
+// WritePageIfMatch is WritePage with an optimistic-concurrency
+// precondition expressed as `_meta.version`.
+//
+// expectedVersion semantics (spec §3 + §5):
+//   - "" — no precondition. New leaves write through; existing leaves
+//     are overwritten last-write-wins. (Spec §5: "PUT to a path with
+//     no existing leaf MUST succeed without If-Match.")
+//   - "*" — force-overwrite. Skips the version check entirely.
+//   - any other value — strict CAS. ErrPageStale on mismatch,
+//     ErrPageNotFoundForMatch when the page is gone.
+//
+// On every successful write the server stamps a fresh
+// `_meta.version` into the frontmatter via pm.versions.Next() so the
+// next reader observes the new monotonic timestamp.
+func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedVersion string) error {
 	var filePath string
 	normalized := pagePath
 	if pagePath == "index" || pagePath == "index.md" {
@@ -253,16 +274,25 @@ func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedEtag string) e
 		filePath = filepath.Join(pm.project.ContentDir(), normalized+".md")
 	}
 
-	if expectedEtag != "" {
+	if expectedVersion != "" && expectedVersion != "*" {
 		pm.mu.RLock()
 		current := pm.pages[normalized]
 		pm.mu.RUnlock()
 		if current == nil {
-			return ErrNotFoundForMatch
+			return ErrPageNotFoundForMatch
 		}
-		if current.Etag != expectedEtag {
-			return ErrStale
+		if current.Version != expectedVersion {
+			return ErrPageStale
 		}
+	}
+
+	// Stamp `_meta.version` into the frontmatter. The author-supplied
+	// source may already carry an `_meta` block (echoed from a prior
+	// read); strip everything except the version we're about to mint
+	// so agents can't forge `created_at` / `modified_by`.
+	stamped, err := stampPageVersion(source, pm.versions.Next())
+	if err != nil {
+		return err
 	}
 
 	// Ensure parent directory exists
@@ -271,11 +301,11 @@ func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedEtag string) e
 		return err
 	}
 
-	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(stamped), 0644); err != nil {
 		return err
 	}
 
-	// Re-scan to pick up changes (including the new etag)
+	// Re-scan to pick up the new version + any frontmatter changes.
 	pm.ScanPages()
 	return nil
 }
@@ -285,20 +315,22 @@ func (pm *PageManager) DeletePage(pagePath string) error {
 	return pm.DeletePageIfMatch(pagePath, "")
 }
 
-// DeletePageIfMatch is DeletePage with an optimistic-concurrency precondition.
-func (pm *PageManager) DeletePageIfMatch(pagePath, expectedEtag string) error {
+// DeletePageIfMatch is DeletePage with an optimistic-concurrency
+// precondition. Empty expectedVersion or "*" force the delete; any
+// other value must match the current `_meta.version`.
+func (pm *PageManager) DeletePageIfMatch(pagePath, expectedVersion string) error {
 	normalized := strings.TrimSuffix(pagePath, ".md")
 	filePath := filepath.Join(pm.project.ContentDir(), normalized+".md")
 
-	if expectedEtag != "" {
+	if expectedVersion != "" && expectedVersion != "*" {
 		pm.mu.RLock()
 		current := pm.pages[normalized]
 		pm.mu.RUnlock()
 		if current == nil {
-			return ErrNotFoundForMatch
+			return ErrPageNotFoundForMatch
 		}
-		if current.Etag != expectedEtag {
-			return ErrStale
+		if current.Version != expectedVersion {
+			return ErrPageStale
 		}
 	}
 
@@ -393,9 +425,12 @@ func AssemblePageSource(fm map[string]any, body string) (string, error) {
 // of them and the server won't reject it (per #8); search quality just
 // degrades for that page until a summary is filled in.
 type frontmatter struct {
-	Title   string         `yaml:"title"`
-	Summary string         `yaml:"summary"`
-	Tags    []string       `yaml:"tags"`
+	Title   string   `yaml:"title"`
+	Summary string   `yaml:"summary"`
+	Tags    []string `yaml:"tags"`
+	// Version is read from `_meta.version` in frontmatter. Used as the
+	// canonical CAS token for pages (spec §3).
+	Version string         `yaml:"-"`
 	All     map[string]any `yaml:"-"` // full frontmatter for component source-resolution
 }
 
@@ -423,12 +458,61 @@ func parseFrontmatter(content string) (fm frontmatter, source string) {
 	// Typed parse for the well-known fields.
 	_ = yaml.Unmarshal([]byte(block), &fm)
 	// Untyped parse so the broker can splat user-authored fields into
-	// the page bundle. _meta is dropped — server-owned, agents echo it
-	// only on writes.
+	// the page bundle. _meta is dropped from the agent-readable map
+	// (server-owned), but its `version` is pulled out separately so
+	// callers can echo it for CAS.
 	all := map[string]any{}
 	if err := yaml.Unmarshal([]byte(block), &all); err == nil {
+		if rawMeta, ok := all["_meta"].(map[string]any); ok {
+			if v, ok := rawMeta["version"].(string); ok {
+				fm.Version = v
+			}
+		}
 		delete(all, "_meta")
 		fm.All = all
 	}
 	return fm, source
+}
+
+// stampPageVersion takes a raw page source (frontmatter + body) and
+// returns the same source with `_meta.version` set to `version` —
+// stripping any agent-supplied `_meta` fields other than version
+// itself. Server-owned: agents may echo version for CAS but cannot
+// forge `_meta.modified_by` / `_meta.created_at` (spec §3).
+//
+// A source with no frontmatter gets one. A source with a frontmatter
+// block that's missing `_meta` gets one inserted at the top of the
+// block. Existing user-authored keys are preserved verbatim — only the
+// `_meta` map is rewritten.
+func stampPageVersion(source, version string) (string, error) {
+	fm := map[string]any{}
+	body := source
+	if strings.HasPrefix(source, "---\n") {
+		end := strings.Index(source[4:], "\n---\n")
+		if end >= 0 {
+			block := source[4 : 4+end]
+			body = source[4+end+5:]
+			if err := yaml.Unmarshal([]byte(block), &fm); err != nil {
+				return "", err
+			}
+		}
+	}
+	// Carry over only `created_at` from the agent-supplied _meta so
+	// first-create vs subsequent-update can be distinguished by readers
+	// that scrape it from disk; everything else is server-owned and
+	// scrubbed here.
+	createdAt := ""
+	if existing, ok := fm["_meta"].(map[string]any); ok {
+		if c, ok := existing["created_at"].(string); ok && c != "" {
+			createdAt = c
+		}
+	}
+	if createdAt == "" {
+		createdAt = version
+	}
+	fm["_meta"] = map[string]any{
+		"version":    version,
+		"created_at": createdAt,
+	}
+	return AssemblePageSource(fm, body)
 }

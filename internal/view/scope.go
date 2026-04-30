@@ -15,8 +15,8 @@ import (
 	"strings"
 
 	"github.com/christophermarx/agentboard/internal/auth"
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/publicroutes"
+	"github.com/christophermarx/agentboard/internal/store"
 )
 
 // AuthorityKind is how a view session got authorised. It determines
@@ -145,7 +145,7 @@ func (s *Scope) CanReadSubpage(path string) bool {
 // ScopeBuilder assembles scopes for incoming requests. Injected into
 // the broker and view middleware so tests can stub dependencies.
 type ScopeBuilder struct {
-	Refs          *mdx.RefStore
+	Refs          *store.RefStore
 	PublicMatcher *publicroutes.Matcher
 }
 

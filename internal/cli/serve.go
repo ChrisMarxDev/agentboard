@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	agentboard "github.com/christophermarx/agentboard"
@@ -191,16 +192,50 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("Auth: identity-backed. Sign in at /login; admins manage users + invitations + tokens at /admin.")
 	}
 
-	// Start page watcher
-	if err := srv.Pages.StartWatcher(func(pagePath string) {
-		log.Printf("Page updated: %s", pagePath)
-		eventData, _ := json.Marshal(map[string]string{"path": pagePath})
-		srv.Broadcaster.Broadcast(server.SSEEvent{
-			Type: "page-updated",
-			Data: eventData,
-		})
+	// Start the unified content/data watcher. Cut 5 collapsed the
+	// previous two watchers (pages + data) into one fsnotify watcher
+	// rooted at the project tree. Direct disk writes anywhere under
+	// content/, data/, or to index.md propagate the same way an API
+	// write would: page changes re-record refs + re-index FTS,
+	// data changes refresh the catalog and broadcast a store event.
+	// Fixes the gotcha called out in
+	// docs/archive/REWRITE-cuts-1-4.md ("don't write content/* directly").
+	if err := srv.Pages.StartWatcherOpts(storepkg.WatchOptions{
+		OnPage: func(pagePath string) {
+			log.Printf("Page updated: %s", pagePath)
+			// Re-record refs + re-index FTS so direct-disk writes are
+			// indistinguishable from API writes downstream. Best-effort:
+			// a refs/search hiccup must not poison the broadcast.
+			normalized := storepkg.NormalizePagePath(pagePath)
+			normalized = filepath.ToSlash(normalized)
+			normalized = strings.TrimPrefix(normalized, "content/")
+			if p := srv.Pages.GetPage(normalized); p != nil {
+				if srv.PageRefs != nil {
+					_ = srv.PageRefs.Record(normalized, storepkg.ExtractRefs(p.Source, normalized))
+				}
+				if srv.Search != nil {
+					_ = srv.Search.IndexPage(p.Path, p.Title, p.Source)
+				}
+			}
+			eventData, _ := json.Marshal(map[string]string{"path": pagePath})
+			srv.Broadcaster.Broadcast(server.SSEEvent{
+				Type: "page-updated",
+				Data: eventData,
+			})
+		},
+		OnData: func(key string) {
+			log.Printf("Data updated: %s", key)
+			// Refresh the in-memory catalog so /api/index reflects
+			// reality. Catalog is best-effort; if the refresh fails,
+			// the next /api/index call falls back to walking disk.
+			eventData, _ := json.Marshal(map[string]any{"key": key, "op": "EXTERNAL"})
+			srv.Broadcaster.Broadcast(server.SSEEvent{
+				Type: "data",
+				Data: eventData,
+			})
+		},
 	}); err != nil {
-		log.Printf("Warning: could not start page watcher: %v", err)
+		log.Printf("Warning: could not start unified watcher: %v", err)
 	}
 
 	// Start component watcher

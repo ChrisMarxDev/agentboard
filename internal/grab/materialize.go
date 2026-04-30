@@ -15,7 +15,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/store"
 )
 
@@ -76,7 +75,7 @@ const (
 // or collection-flattened) and unwraps the envelope before stitching
 // the value into the materialised section.
 type Materializer struct {
-	Pages     *mdx.PageManager
+	Pages     *store.PageManager
 	FileStore *store.Store
 }
 

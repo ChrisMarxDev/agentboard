@@ -1,4 +1,4 @@
-package mdx
+package store
 
 import (
 	"reflect"

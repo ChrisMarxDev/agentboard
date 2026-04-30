@@ -7,18 +7,18 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/christophermarx/agentboard/internal/auth"
-	"github.com/christophermarx/agentboard/internal/mdx"
 	"github.com/christophermarx/agentboard/internal/publicroutes"
+	"github.com/christophermarx/agentboard/internal/store"
 )
 
-func openScopeDB(t *testing.T) (*mdx.RefStore, *sql.DB) {
+func openScopeDB(t *testing.T) (*store.RefStore, *sql.DB) {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	rs, err := mdx.NewRefStore(db)
+	rs, err := store.NewRefStore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,9 +28,9 @@ func openScopeDB(t *testing.T) (*mdx.RefStore, *sql.DB) {
 func seedScope(t *testing.T) *ScopeBuilder {
 	t.Helper()
 	rs, _ := openScopeDB(t)
-	_ = rs.Record("handbook", mdx.RefSet{Data: []string{"hb.main"}, Files: []string{"/api/files/banner.svg"}})
-	_ = rs.Record("handbook/faq", mdx.RefSet{Data: []string{"hb.faq"}})
-	_ = rs.Record("other", mdx.RefSet{Data: []string{"other.secret"}})
+	_ = rs.Record("handbook", store.RefSet{Data: []string{"hb.main"}, Files: []string{"/api/files/banner.svg"}})
+	_ = rs.Record("handbook/faq", store.RefSet{Data: []string{"hb.faq"}})
+	_ = rs.Record("other", store.RefSet{Data: []string{"other.secret"}})
 	return &ScopeBuilder{Refs: rs}
 }
 

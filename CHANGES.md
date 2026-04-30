@@ -1,3 +1,211 @@
+# Cut 6 — MCP collapse to 10 tools (2026-04-30)
+
+Second PR of the cuts-5-and-6 rewrite plan. Replaces the 38 domain-specific MCP tools with the locked spec §6 ten:
+
+```
+agentboard_read(paths)              → [{path, frontmatter, body, version, warnings?}]
+agentboard_list(path)
+agentboard_search(q, scope?)
+
+agentboard_write(items)             → items: [{path, frontmatter?, body?, version?}]
+agentboard_patch(items)             → items: [{path, frontmatter_patch?, body?, version?}]
+agentboard_append(path, items)
+agentboard_delete(items)            → items: [{path, version?}]
+
+agentboard_request_file_upload(items)
+
+agentboard_grab(picks)
+agentboard_fire_event(event, payload?)
+```
+
+## What changed
+
+- **Always-plural batch shape.** Single-item operations wrap in a one-element array. Per-item `results` array with `success`, `version`, `warnings`, and structured `error`. Best-effort partial success — the agent retries failures.
+- **Native JSON values (Issue 1, Issue 2).** `frontmatter` is a JSON object on the wire. `frontmatter.value: 23` round-trips as the number `23`, not the string `"23"`. The MCP wrapper no longer double-stringifies already-decoded payloads. Regression tests in `internal/mcp/native_json_test.go::TestMCPWrite_NativeJSONNumber` and `TestMCPPatch_PreservesObjectShape`.
+- **Full envelope on read (Issue 6).** `agentboard_read` returns frontmatter + body + version per path. The body-only `read_page` is gone — every read returns the same shape so the patch-and-verify loop never needs an out-of-band REST call.
+- **Unified search (Issue 5).** One `agentboard_search` with optional `scope: "pages" | "data" | "all"`. The body-only `agentboard_search_pages` is gone.
+- **Bearer-to-user attribution (Issue 7).** MCP writes attribute to the bearer's actual user. `Server.resolveActor(r)` reads the user off the request context (set by `auth.TokenMiddleware`) just like the REST middleware does. No more generic "agent" actor on MCP-driven writes.
+- **Shape warnings (spec §6 + §8).** New `internal/store/shapes.go` defines a glob → suggested-fields catalog. Writes that match a glob but lack the suggested fields surface a non-blocking `shape_hint` warning naming the missing fields. Writes ALWAYS succeed — warnings are for the agent that would have wanted to know. Globs today: `tasks/*` (title, status), `metrics/*` (value, label), `skills/*/SKILL` (name, description). Adding a shape is a one-liner.
+- **Path dispatcher.** Each tool resolves a path against the page tree first, then the data catalog. New writes go to the page tree when `body` is present OR the path has a slash; otherwise to the data tier as a flat-key singleton. Existing data leaves keep their tier.
+- **Admin operations off MCP.** Webhook subscribe / revoke / list, page locks, team CRUD all moved off MCP. Per the AUTH.md MCP invariant: agents author content, admins manage the system through REST + CLI. The `internal/mcp/{team,lock,webhook}_tools.go` files are gone (only `agentboard_fire_event` survives — it's the one webhook surface an authoring agent legitimately needs).
+
+## Files changed
+
+```
+A  internal/store/shapes.go
+A  internal/store/shapes_test.go         (7 cases — glob match, missing fields, dedup, no-glob)
+M  internal/mcp/server.go                (Server struct trimmed: dropped Components, Errors, Webhooks, Teams, Locks, IsAdmin, AllowComponentUpload, ActorResolver; added Auth)
+M  internal/mcp/tools.go                 (10 tool definitions; dispatcher routes to handlers)
+A  internal/mcp/handlers.go              (unified read/list/search/write/patch/append/delete/request_file_upload/grab/fire_event)
+A  internal/mcp/native_json_test.go      (Issue 1 + 2 + shape-warning regression)
+M  internal/mcp/privilege_test.go        (no-AllowComponentUpload constructor)
+D  internal/mcp/store_tools.go           (folded into handlers.go)
+D  internal/mcp/team_tools.go            (admin ops → REST)
+D  internal/mcp/lock_tools.go            (admin ops → REST)
+D  internal/mcp/webhook_tools.go         (admin ops → REST; fire_event now lives in handlers.go)
+M  internal/server/server.go             (mcp.Server wiring trimmed)
+M  spec.md                               (§3 clarifies user `order` vs `_meta.order`; §5 notes REST unification deferred to next cut)
+M  .claude/skills/agentboard/SKILL.md    (rewrote MCP tools section, added Suggested Shapes + Path Layout)
+M  frontend/src/routes/InviteRedeem.tsx  (bootstrap prompt: agentboard_get_skill → agentboard_read)
+M  scripts/integration-test.sh           (tool count assertion: 30 → exactly 10 per spec lock)
+M  ISSUES.md                             (pruned [obsolete] + [cut 6] entries)
+```
+
+## What did NOT ship in Cut 6 (deferred)
+
+- **REST namespace unification** (spec §5 — `/api/<path>` instead of `/api/{content,data}/*`). The MCP surface is the agent-facing change; the REST routes still mount under the old per-domain prefixes for now. Spec §5 carries an `Implementation status` note. A follow-up cut rips the legacy routes and updates integration + smoke + bruno tests in lock-step.
+
+## Validation
+
+```
+$ go test ./...
+ok  	github.com/christophermarx/agentboard/internal/auth
+ok  	github.com/christophermarx/agentboard/internal/mcp           — 3 new regression tests green
+ok  	github.com/christophermarx/agentboard/internal/store         — 7 new shape tests green
+... (16 packages, all green)
+
+$ go vet ./...                  (clean)
+$ gofmt -l cmd internal frontend_embed.go  (empty)
+
+$ bash scripts/smoke-test.sh
+=== Results === Passed: 35  Failed: 0
+
+$ bash scripts/integration-test.sh
+=== Results: 45 passed, 0 failed ===
+   MCP tools/list = 10 tools (spec §6 lock)
+
+$ task build && tmux send-keys -t agentboard C-c Up Enter
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health         # 200
+$ curl -s -o /dev/null -w '%{http_code}' https://agentboard.hextorical.com/api/health  # 200
+```
+
+Live MCP probe against a fresh test instance:
+- `tools/list` → 10 tools, names match spec §6 verbatim.
+- `agentboard_write` round-trips `value: 23` as the number 23.
+- `agentboard_patch` preserves untouched fields (object shape intact).
+- `agentboard_write({path: "tasks/foo", frontmatter: {priority: 2}})` returns one `shape_hint` warning naming the missing `title` + `status`.
+
+---
+
+# Cut 5 — pages + store file-layer merge (2026-04-30)
+
+This entry covers the first PR of the cuts-5-and-6 rewrite plan. The
+goal: collapse `internal/mdx/` and `internal/store/` into a single
+content-tier package so the next cut (MCP collapse to 10 tools) can
+dispatch generic CRUD by path through one read + write + watcher +
+CAS.
+
+`internal/mdx/` no longer exists — all 9 files moved into
+`internal/store/` with their package declarations rewritten. Public
+types (`PageManager`, `RefStore`, `MetaStore`, `ApprovalStore`,
+`SearchStore`, `PageInfo`, `RefSet`, `ExtractRefs`,
+`NormalizePagePath`, `AssemblePageSource`) keep their names so the
+import-site change is mechanical (`mdx.X` → `store.X`).
+
+## What changed
+
+- **Page CAS adopts `_meta.version`.** Pages used to compute a
+  sha256-prefix etag at scan time; data already used a monotonic
+  RFC3339Nano timestamp. Spec §3 mandates one CAS token everywhere.
+  `PageManager` now owns its own `*VersionGen`, seeded from the
+  highest `_meta.version` observed on disk at boot.
+  `WritePageIfMatch` stamps a fresh version on every write via
+  `stampPageVersion`, scrubbing agent-supplied `_meta.modified_by` /
+  `created_at` / `shape` (server-owned, per spec §3 — agents may
+  echo `version` but cannot forge attribution). `PageInfo.Version`
+  is the canonical field; `PageInfo.Etag` stays as a wire-compat
+  alias (identical value) for one cycle.
+- **One unified watcher.** `PageManager.StartWatcherOpts(WatchOptions{
+  OnPage, OnData})` replaces the page-only watcher: one `fsnotify`
+  watcher walks both `<root>/content/**` and `<root>/data/**` (plus
+  `<root>/index.md`), routes events to the right callback by tree.
+  `cli/serve.go`'s `OnPage` callback now also re-records page refs
+  and re-indexes FTS, closing the "don't write `content/*` directly"
+  gotcha from `docs/archive/REWRITE-cuts-1-4.md`. Agents and humans
+  dropping `.md` files into the tree by hand are now indistinguishable
+  from API writes downstream. New
+  `pages_watch_test.go::TestPagesWatch_DirectDiskWriteFiresOnPage`
+  proves it.
+- **Issue 3 (initial PUT no If-Match).** Spec §5: "A PUT to a path
+  with no existing leaf MUST succeed without `If-Match`." The
+  existing code path already worked at both surfaces (page +
+  data); added a regression test
+  (`handlers_initial_put_test.go::TestInitialPut_DataNoIfMatch`,
+  `TestInitialPut_PageNoIfMatch`) so a future change can't reintroduce
+  the friction.
+- **Issue 4 (PATCH error message contradicts parser).** The
+  `/api/data/<key>` PATCH error read `body must be {"value": <patch>}
+  (or top-level patch object)` but the parser only ever accepted
+  `{"value": ...}`. Per CORE_GUIDELINES §12 (responses are repair
+  manuals) the message now names exactly the shape that works.
+  Regression test:
+  `handlers_initial_put_test.go::TestPatchData_ErrorMessageMatchesShape`.
+- **Sentinel renames.** `mdx.ErrStale` →  `store.ErrPageStale`,
+  `mdx.ErrNotFoundForMatch` → `store.ErrPageNotFoundForMatch`. The
+  prefix disambiguates them from `store.ErrNotFound` (data-tier,
+  unrelated) and tracks the new `_meta.version` semantics in the
+  message text.
+
+## Files moved
+
+```
+internal/mdx/approval.go        → internal/store/pages_approval.go
+internal/mdx/approval_test.go   → internal/store/pages_approval_test.go
+internal/mdx/meta.go            → internal/store/pages_meta.go
+internal/mdx/page.go            → internal/store/pages.go
+internal/mdx/page_test.go       → internal/store/pages_test.go
+internal/mdx/refs.go            → internal/store/pages_refs.go
+internal/mdx/refs_test.go       → internal/store/pages_refs_test.go
+internal/mdx/search.go          → internal/store/pages_search.go
+internal/mdx/watch.go           → internal/store/pages_watch.go
+```
+
+Plus a new `internal/store/pages_watch_test.go` for the direct-disk
+reentry regression.
+
+## Validation
+
+```
+$ go test ./...
+ok  	github.com/christophermarx/agentboard/internal/auth
+ok  	github.com/christophermarx/agentboard/internal/server     25.169s
+ok  	github.com/christophermarx/agentboard/internal/store       0.979s
+... (16 packages, all green)
+
+$ go vet ./...
+(clean)
+
+$ gofmt -l cmd internal frontend_embed.go
+(empty)
+
+$ bash scripts/smoke-test.sh
+=== Results === Passed: 35  Failed: 0
+
+$ bash scripts/integration-test.sh
+=== Results: 45 passed, 0 failed ===
+
+$ task test:bruno
+# Preexisting infra debt — the bruno harness has no auth bootstrap
+# (no token in opencollection.yml, no admin redeem in 00-setup), so
+# every request 401s against a real auth-enabled instance. The
+# integration test exercises the same REST + MCP surface end-to-end
+# with auth, and 45/45 there is a stronger gate. Filed for follow-up;
+# not a Cut 5 regression.
+
+$ task build && tmux send-keys -t agentboard C-c Up Enter
+$ curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/health    # 200
+$ curl -s -o /dev/null -w '%{http_code}' https://agentboard.hextorical.com/api/health  # 200
+```
+
+## What's next
+
+Cut 6 (MCP collapse to 10 tools) ships in a separate PR. With one
+read path + one CAS in place, the 8 generic batch tools dispatch
+cleanly by path through `store.PageManager` + `store.Store` — no
+per-domain branching at the tool layer.
+
+---
+
 # Overnight cleanup — 2026-04-29 → 2026-04-30
 
 This is the morning briefing for an overnight pass that landed a working

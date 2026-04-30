@@ -21,6 +21,7 @@ The live design surface lives at the repo root:
 | --- | --- |
 | `spec-2026-04-pre-rework.md` | The original v2 spec. Marked superseded on 2026-04-28; finally moved out of the root in the everything-is-a-file pass. Describes SQLite KV + the parallel `/api/v2` namespace that cuts 1–4 deleted. Historical context only. |
 | `REWRITE-cuts-1-4.md` | Snapshot of where cuts 1–4 landed (post-files-first, pre-everything-is-a-file). Internally inconsistent — calls 8 tools "the data-plane set" but lists domain-specific names. The next rewrite (cuts 5–8 in `spec.md §11`) supersedes it. |
+| `REWRITE-cuts-5-6.md` | The implementation plan for Cut 5 (mdx + store merge) and Cut 6 (MCP collapse to 10 tools). Both cuts landed; archive for the cut-by-cut history of what landed when. The current contract lives in `spec.md` + `CHANGES.md`. |
 | `spec-desktop.md` | Brainstorm. Tauri-shell desktop wrapper exploration. Not on the roadmap; revisit when the hosted offering is more mature. |
 | `spec-docs.md` | Brainstorm. Mapped the docs-platform feature space (Docusaurus, Mintlify, etc.) onto AgentBoard. Useful as a "future docs surface" net. |
 | `spec-files.md` | Draft. Files-feature design. Superseded by what actually shipped under `/api/files/*` + the files-first store. |

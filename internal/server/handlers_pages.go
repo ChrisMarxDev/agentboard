@@ -11,7 +11,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/locks"
-	"github.com/christophermarx/agentboard/internal/mdx"
+	"github.com/christophermarx/agentboard/internal/store"
 )
 
 // resolveActor picks a human-readable identity for a write. Prefers the
@@ -30,7 +30,7 @@ func resolveActor(r *http.Request) string {
 
 // respondPageStale emits a 412 with the current page info so the caller can
 // re-base and retry. page may be nil when the path doesn't exist.
-func respondPageStale(w http.ResponseWriter, page *mdx.PageInfo, path string) {
+func respondPageStale(w http.ResponseWriter, page *store.PageInfo, path string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusPreconditionFailed)
 	payload := map[string]any{
@@ -53,7 +53,7 @@ func (s *Server) handleListPages(w http.ResponseWriter, r *http.Request) {
 	// leading slash.
 	if prefix := r.URL.Query().Get("prefix"); prefix != "" {
 		norm := "/" + strings.TrimPrefix(prefix, "/")
-		filtered := make([]mdx.PageInfo, 0, len(pages))
+		filtered := make([]store.PageInfo, 0, len(pages))
 		for _, p := range pages {
 			if strings.HasPrefix(p.Path, norm) {
 				filtered = append(filtered, p)
@@ -125,7 +125,7 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 
 	// Best-effort last-edited-by. Emit as headers so `Accept: text/markdown`
 	// callers still get the info without parsing JSON.
-	var meta *mdx.PageMeta
+	var meta *store.PageMeta
 	if s.PageMeta != nil {
 		meta, _ = s.PageMeta.Get(pagePath)
 		if meta != nil {
@@ -135,7 +135,7 @@ func (s *Server) handleGetPage(w http.ResponseWriter, r *http.Request) {
 	}
 	// Approval, if any. Stale = the approved etag no longer matches the
 	// page's current etag — show "approved at vX, edited since" in the UI.
-	var approval *mdx.PageApproval
+	var approval *store.PageApproval
 	var approvalStale bool
 	if s.PageApproval != nil {
 		approval, _ = s.PageApproval.Get(pagePath)
@@ -216,7 +216,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e := s.enforcePageLock(r, mdx.NormalizePagePath(pagePath)); e != nil {
+	if e := s.enforcePageLock(r, store.NormalizePagePath(pagePath)); e != nil {
 		respondPageLocked(w, e)
 		return
 	}
@@ -230,8 +230,8 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	expected := ifMatch(r)
 	writeErr := s.Pages.WritePageIfMatch(pagePath, string(body), expected)
 	if writeErr != nil {
-		if errors.Is(writeErr, mdx.ErrStale) || errors.Is(writeErr, mdx.ErrNotFoundForMatch) {
-			respondPageStale(w, s.Pages.GetPage(mdx.NormalizePagePath(pagePath)), pagePath)
+		if errors.Is(writeErr, store.ErrPageStale) || errors.Is(writeErr, store.ErrPageNotFoundForMatch) {
+			respondPageStale(w, s.Pages.GetPage(store.NormalizePagePath(pagePath)), pagePath)
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", writeErr.Error())
@@ -246,7 +246,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	// the same rule the page manager uses to index. Without it, every
 	// post-write hook below would miss for SKILL.md uploads (no etag
 	// echo, no FTS row, no ref recording).
-	normalizedPath := mdx.NormalizePagePath(pagePath)
+	normalizedPath := store.NormalizePagePath(pagePath)
 	actor := resolveActor(r)
 	if s.PageMeta != nil {
 		_ = s.PageMeta.Record(normalizedPath, actor)
@@ -265,7 +265,7 @@ func (s *Server) handleWritePage(w http.ResponseWriter, r *http.Request) {
 	// if refs drift.
 	if s.PageRefs != nil {
 		if p := s.Pages.GetPage(normalizedPath); p != nil {
-			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source, normalizedPath))
+			_ = s.PageRefs.Record(normalizedPath, store.ExtractRefs(p.Source, normalizedPath))
 		}
 	}
 
@@ -318,7 +318,7 @@ func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "page path required")
 		return
 	}
-	normalizedPath := mdx.NormalizePagePath(pagePath)
+	normalizedPath := store.NormalizePagePath(pagePath)
 
 	if e := s.enforcePageLock(r, normalizedPath); e != nil {
 		respondPageLocked(w, e)
@@ -363,7 +363,7 @@ func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
 		body = *req.Body
 	}
 
-	newSource, err := mdx.AssemblePageSource(merged, body)
+	newSource, err := store.AssemblePageSource(merged, body)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "assemble source: "+err.Error())
 		return
@@ -371,7 +371,7 @@ func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
 
 	expected := ifMatch(r)
 	if writeErr := s.Pages.WritePageIfMatch(pagePath, newSource, expected); writeErr != nil {
-		if errors.Is(writeErr, mdx.ErrStale) || errors.Is(writeErr, mdx.ErrNotFoundForMatch) {
+		if errors.Is(writeErr, store.ErrPageStale) || errors.Is(writeErr, store.ErrPageNotFoundForMatch) {
 			respondPageStale(w, s.Pages.GetPage(normalizedPath), pagePath)
 			return
 		}
@@ -390,7 +390,7 @@ func (s *Server) handlePatchPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.PageRefs != nil {
 		if p := s.Pages.GetPage(normalizedPath); p != nil {
-			_ = s.PageRefs.Record(normalizedPath, mdx.ExtractRefs(p.Source, normalizedPath))
+			_ = s.PageRefs.Record(normalizedPath, store.ExtractRefs(p.Source, normalizedPath))
 		}
 	}
 
@@ -423,7 +423,7 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if e := s.enforcePageLock(r, mdx.NormalizePagePath(pagePath)); e != nil {
+	if e := s.enforcePageLock(r, store.NormalizePagePath(pagePath)); e != nil {
 		respondPageLocked(w, e)
 		return
 	}
@@ -431,8 +431,8 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 	expected := ifMatch(r)
 	delErr := s.Pages.DeletePageIfMatch(pagePath, expected)
 	if delErr != nil {
-		if errors.Is(delErr, mdx.ErrStale) || errors.Is(delErr, mdx.ErrNotFoundForMatch) {
-			respondPageStale(w, s.Pages.GetPage(mdx.NormalizePagePath(pagePath)), pagePath)
+		if errors.Is(delErr, store.ErrPageStale) || errors.Is(delErr, store.ErrPageNotFoundForMatch) {
+			respondPageStale(w, s.Pages.GetPage(store.NormalizePagePath(pagePath)), pagePath)
 			return
 		}
 		respondError(w, http.StatusInternalServerError, "INTERNAL_ERROR", delErr.Error())
@@ -442,7 +442,7 @@ func (s *Server) handleDeletePage(w http.ResponseWriter, r *http.Request) {
 	// Drop the meta + approval rows too — a recreated page should start
 	// with a fresh attribution rather than inherit the deleter, and
 	// absolutely shouldn't carry a stale approval across identity-reuse.
-	normalizedPath := mdx.NormalizePagePath(pagePath)
+	normalizedPath := store.NormalizePagePath(pagePath)
 	if s.PageMeta != nil {
 		_ = s.PageMeta.Delete(normalizedPath)
 	}

@@ -40,7 +40,7 @@ func TestMCPToolsDoNotExposeAdminPlane(t *testing.T) {
 
 	// Construct a minimal Server so toolDefinitions() can run. The tool
 	// catalog is static — it doesn't actually query any of the backends.
-	s := &Server{AllowComponentUpload: true}
+	s := &Server{}
 	tools := s.toolDefinitions()
 	if len(tools) == 0 {
 		t.Fatal("expected at least one MCP tool; got zero (did the catalog move?)")

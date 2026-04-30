@@ -336,9 +336,9 @@ Then check whether the agentboard_* tools are available to you in this session:
 
 Step 2 — once the tools are visible, your first call MUST be:
 
-    agentboard_get_skill({ slug: "agentboard" })
+    agentboard_read({ paths: ["skills/agentboard/SKILL"] })
 
-That returns the skill manifest, which documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you must follow. Read it once, then act.
+That returns the skill manifest in the unified-read shape (frontmatter + body + version). The body documents every surface (pages, files, data, components), the exact 10-tool MCP API, and the conventions you must follow. Read it once, then act.
 
 Server:    ${base}
 Username:  ${username} (role: ${role})
@@ -354,11 +354,11 @@ Header:  Authorization: Bearer ${token}`
 
   const otherAgentPrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project.
 
-Your first action MUST be to fetch the skill manifest — it documents every surface (pages, files, tasks, data, components), the exact API shape for writes, and the conventions you must follow:
+Your first action MUST be to fetch the skill manifest — it documents every surface (pages, files, data, components), the exact 10-tool MCP API, and the conventions you must follow:
 
-    agentboard_get_skill({ slug: "agentboard" })
+    agentboard_read({ paths: ["skills/agentboard/SKILL"] })
 
-If the agentboard_* tools aren't available to you, the MCP server hasn't been wired up yet — stop and tell the human "I don't see the agentboard MCP tools; please add the MCP server and restart this session."
+That returns the manifest in the unified-read shape (frontmatter + body + version). If the agentboard_* tools aren't available to you, the MCP server hasn't been wired up yet — stop and tell the human "I don't see the agentboard MCP tools; please add the MCP server and restart this session."
 
 Server:    ${base}
 Username:  ${username} (role: ${role})
