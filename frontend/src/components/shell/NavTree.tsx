@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { BookOpen } from 'lucide-react'
+import { BookOpen, ChevronRight } from 'lucide-react'
 import type { TreeNode } from '../../lib/pageTree'
 
 interface NavTreeProps {
@@ -107,9 +107,15 @@ export default function NavTree({
               font: 'inherit',
             }}
           >
-            <span aria-hidden className="text-xs leading-none" style={{ opacity: 0.75 }}>
-              {isOpen ? '▼' : '▶'}
-            </span>
+            <ChevronRight
+              size={14}
+              aria-hidden
+              style={{
+                opacity: 0.75,
+                transition: 'transform 180ms ease',
+                transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+              }}
+            />
           </button>
         )
 
@@ -155,16 +161,27 @@ export default function NavTree({
                 </button>
               )}
             </div>
-            {isOpen && (
-              <NavTree
-                nodes={node.children}
-                depth={depth + 1}
-                expanded={expanded}
-                onToggle={onToggle}
-                onExpand={onExpand}
-                activePath={activePath}
-              />
-            )}
+            <div
+              className="grid"
+              aria-hidden={!isOpen}
+              style={{
+                gridTemplateRows: isOpen ? '1fr' : '0fr',
+                transition: 'grid-template-rows 180ms ease',
+              }}
+            >
+              <div style={{ minHeight: 0, overflow: 'hidden' }}>
+                <div style={{ paddingTop: 4 }}>
+                  <NavTree
+                    nodes={node.children}
+                    depth={depth + 1}
+                    expanded={expanded}
+                    onToggle={onToggle}
+                    onExpand={onExpand}
+                    activePath={activePath}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         )
       })}

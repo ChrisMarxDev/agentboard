@@ -110,14 +110,19 @@ export default function PageRenderer() {
   // Compile the page source whenever the bundle changes. The view
   // broker returns a fresh bundle on every view/open; we just compile
   // what's already in hand — no direct /api/content fetch.
+  //
+  // Frontmatter-only pages (metrics, data singletons) carry an empty
+  // body and would compile to a no-op component. Render the page meta
+  // bar over a blank canvas instead of falling through to "Not found".
   const compileBundle = useCallback(async () => {
-    if (!bundle || !bundle.source) return
+    if (!bundle) return
     setLoading(true)
     setError(null)
     try {
-      const firstHeading = bundle.source.match(/^#\s+(.+)$/m)
+      const source = bundle.source ?? ''
+      const firstHeading = source.match(/^#\s+(.+)$/m)
       const title = bundle.title ?? (firstHeading ? firstHeading[1].trim() : undefined)
-      const compiled = await compile(bundle.source, {
+      const compiled = await compile(source, {
         outputFormat: 'function-body',
         development: false,
         remarkPlugins: [remarkGfm],
@@ -138,7 +143,7 @@ export default function PageRenderer() {
         kind: 'page',
         Content: MDXContent as React.ComponentType,
         title,
-        source: bundle.source,
+        source,
         lastActor: bundle.last_actor,
         lastAt: bundle.last_at,
         approval,
@@ -204,7 +209,7 @@ export default function PageRenderer() {
       setLoading(false)
       return
     }
-    if (bundle && bundle.source) {
+    if (bundle) {
       void compileBundle()
       return
     }
