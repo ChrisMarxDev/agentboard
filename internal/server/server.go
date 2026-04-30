@@ -777,6 +777,22 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// Namespaced under /api so a user-authored page at /introduction
 		// doesn't collide with the discovery endpoint.
 		r.Get("/introduction", s.handleIntroduction)
+
+		// ---------- Cut 7: unified /api/<path> namespace (spec §5) ----------
+		//
+		// One namespace, one CRUD per leaf. Reserved /api/* prefixes
+		// above (admin, auth, content, data, files, components, etc.)
+		// win the chi dispatcher; this catch-all picks up anything
+		// else as a content-tier path. Mirrors handlers_unified.go's
+		// dispatcher logic — page tree first, data catalog second.
+		//
+		// MUST stay last in this function so the more-specific routes
+		// register first.
+		r.Get("/*", s.handleUnifiedRead)
+		r.Put("/*", s.handleUnifiedWrite)
+		r.Patch("/*", s.handleUnifiedPatch)
+		r.Delete("/*", s.handleUnifiedDelete)
+		r.Post("/*", s.handleUnifiedAppend) // requires `:append` suffix on the path
 	}
 }
 

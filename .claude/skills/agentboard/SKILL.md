@@ -140,16 +140,20 @@ Optional markdown body here, with JSX components inline.
 ```
 For primitives/arrays, use `value:` instead of splatting top-level keys.
 
-**Endpoints (one namespace, no v2):**
-- `GET  /api/index` — flat catalog of every leaf
-- `GET  /api/search?q=…` — substring search across values
-- `GET  /api/data/<path>[/<id>]` — read doc, list collection, or tail stream
-- `PUT  /api/data/<path>[/<id>]` — full write, CAS via `_meta.version` or `If-Match`
-- `PATCH /api/data/<path>[/<id>]` — RFC 7396 merge on frontmatter
-- `POST /api/data/<path>?op=append` — stream append (the only `?op=` left)
-- `DELETE /api/data/<path>[/<id>]` — idempotent
-- `GET  /api/data/<path>/history` — per-doc NDJSON history
-- `GET  /api/activity` — global write log
+**Endpoints (one namespace, spec §5):**
+- `GET    /api/<path>` — read doc / list folder / tail stream / serve binary
+- `PUT    /api/<path>` — full write, CAS via `_meta.version` or `If-Match`
+- `PATCH  /api/<path>` — RFC 7396 merge on frontmatter, optional body replace
+- `DELETE /api/<path>` — idempotent
+- `POST   /api/<path>:append` — stream append (only `:` verb)
+- `GET    /api/index` — flat catalog of every leaf
+- `GET    /api/search?q=…` — substring search across values
+- `GET    /api/<path>/history` — per-doc NDJSON history
+- `GET    /api/activity` — global write log
+
+`<path>` covers any content leaf — pages, singletons, collection items, streams. The dispatcher resolves page tree first, then data catalog. A path with a slash defaults to the page tree on new writes; flat keys default to the data tier as singletons. Reserved `/api/*` prefixes (admin, auth, view, files, etc.) take precedence per chi's specific-first routing.
+
+The legacy `/api/content/<path>` and `/api/data/<key>[/<id>]` routes still work during the migration window. Prefer `/api/<path>` in new code.
 
 **Atomic ops are gone** — no INCREMENT, no field-level CAS. Agents read-modify-write the whole doc; the file-level `_meta.version` CAS handles concurrent writers.
 

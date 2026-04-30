@@ -15,7 +15,19 @@ After every cut lands, walk this list and prune entries the cut resolved.
 
 ## Open
 
-_(empty after Cut 5 + Cut 6)_
+### Data singleton drops user-supplied `value:` field on read round-trip `[needs-decision]`
+
+Writing `{"value": {"label": "DAU", "value": 42}}` to a singleton splats `label` + inner `value` into the frontmatter on disk. On read, `UnmarshalDoc` treats `value:` as the envelope wrapper and drops it when other keys are present (`internal/store/envelope.go::UnmarshalDoc` "Drop a stray `value:` if other keys are present — the object shape wins"). Net: writing `{label, value: 42}` round-trips as `{label}`, losing the `value: 42` field.
+
+Pre-dates Cuts 5–7 (deliberate design call when the splat encoding landed). Hits any agent that authors a singleton with a literal `value` key. Decide:
+
+- a) Reserved-key documentation: `value` is a reserved frontmatter key for top-level singletons — agents must rename to `quantity` / `score` / etc. Document in spec §3.
+- b) On-disk encoding switches to nested: `_meta:` + `value:` always at top level, never splatted. More verbose YAML but no collision.
+- c) Detect: if the user-supplied frontmatter object contains a `value` key, marshal it as `value: <object>` (not splat) so the round-trip is symmetric.
+
+Lean (c) — least breaking, preserves agent intent. Workaround until then: pick a different field name for the literal value.
+
+
 
 Cut 5 closed: initial PUT no-If-Match (regression test), PATCH error message contradicts shape (regression test).
 

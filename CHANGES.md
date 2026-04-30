@@ -1,3 +1,100 @@
+# Cut 7 — REST namespace unification (2026-04-30)
+
+The last named spec drift. Spec §5 promises one namespace —
+`/api/<path>` GET/PUT/PATCH/DELETE/POST `:append` covers the entire
+content tier. After Cut 7 the wire matches the spec.
+
+## What changed
+
+- **New unified handler** in `internal/server/handlers_unified.go`:
+  GET reads, PUT writes, PATCH merges frontmatter, DELETE drops,
+  POST `/api/<path>:append` appends to a stream. The dispatcher
+  routes by lookup — page tree first, then data catalog — same logic
+  the MCP layer uses (spec §6).
+- **Reserved prefixes stay routed.** `/api/admin/*`, `/api/auth/*`,
+  `/api/view/*`, `/api/files/*`, `/api/components/*`, `/api/skills/*`,
+  `/api/index`, `/api/search`, `/api/activity`, `/api/grab`,
+  `/api/events`, `/api/me`, `/api/health`, `/api/config`,
+  `/api/setup/status`, `/api/users/*`, `/api/invitations/*`,
+  `/api/upload/<token>`, `/api/inbox*`, `/api/teams*`, `/api/share*`,
+  `/api/approval`, `/api/locks/*`, `/api/webhooks/*`, `/api/errors`,
+  `/api/tree`, `/api/introduction`, `/oauth/*`, `/.well-known/*` —
+  all keep their per-domain handlers. chi's specific-first routing
+  resolves them before falling through to the unified `/api/*`
+  catch-all. Spec §5 carries the full reserved list.
+- **Legacy routes still work.** `/api/content/<path>` and
+  `/api/data/<key>[/<id>]` accept the same writes as the unified
+  namespace during the migration window. Cut 8 retires them once
+  the SPA, integration tests, smoke tests, and bruno tests have
+  all migrated to `/api/<path>`. Until then both surfaces produce
+  identical envelopes — verified by
+  `TestUnifiedAPI_LegacyAndUnifiedAgree`.
+- **Spec §5 updated.** Dropped the "Implementation status" deferral
+  note. Added a reserved-prefix list + a migration-footprint note
+  naming the routes that retire next cycle.
+- **SKILL.md updated.** Endpoint table teaches `/api/<path>` as the
+  canonical surface; the legacy paths get a "still works during
+  migration" footnote.
+
+## What still ships behind legacy paths (deferred to Cut 8)
+
+The frontend SPA + the test scripts + the bruno harness still call
+`/api/content/<path>` and `/api/data/<key>[/<id>]`. They keep
+working because the legacy routes are untouched. Migrating them is
+a mechanical sed pass + verification:
+
+- `frontend/src/lib/collectionWrites.ts`, `frontend/src/components/shell/PageActionsMenu.tsx`,
+  `frontend/src/lib/copyPage.ts`, `frontend/src/components/builtin/Kanban.tsx` —
+  ~20 callsites total.
+- `scripts/integration-test.sh`, `scripts/smoke-test.sh` —
+  52 references.
+- `bruno/tests/02-content/*`, `bruno/tests/10-data/*` —
+  44 references.
+
+After all callers flip, `r.Get("/content/*", ...)` etc. drop off
+`internal/server/server.go` and the dispatcher logic in
+`handlers_unified.go` becomes the sole content-tier path.
+
+## Validation
+
+- `go test ./...` — 16 packages green.
+- New regression suite (`internal/server/handlers_unified_test.go`):
+  - `TestUnifiedAPI_PageRoundTrip` — PUT/GET round-trips a page
+    through `/api/<path>`.
+  - `TestUnifiedAPI_NestedPathDefaultsToPage` — `/api/tasks/foo` (no
+    catalog hit) routes to the page tier on a fresh write.
+  - `TestUnifiedAPI_DataSingleton` — flat-key write lands in data.
+  - `TestUnifiedAPI_ReservedPrefixesStillWork` — `/api/health`,
+    `/api/me`, `/api/index`, `/api/setup/status` keep their old
+    handlers (chi routes specific first).
+  - `TestUnifiedAPI_LegacyAndUnifiedAgree` — write via
+    `/api/content/echo`, read via `/api/echo`, same payload.
+- `scripts/integration-test.sh` 45/45, `scripts/smoke-test.sh`
+  35/35, `go vet` clean, `gofmt -l` clean.
+
+Live probe of the dogfood instance:
+
+```
+PUT  /api/<path>     (page tier, Content-Type: text/markdown)   200 + version
+PUT  /api/<key>      (data tier, Content-Type: application/json) 200 + envelope
+GET  /api/<path>     200, returns frontmatter + body + version
+GET  /api/health      200
+GET  /api/me          200 (authed)
+GET  /api/index       200 (authed)
+PUT  /api/content/<path>  200 (legacy, still works)
+```
+
+## Known issue surfaced
+
+`ISSUES.md` gained one `[needs-decision]` entry: data singletons
+that splat a user-supplied `value:` field into the frontmatter
+collide with the envelope's `value:` semantic on read — round-trip
+loses the inner value. Pre-dates Cuts 5–7 (deliberate design call
+when the splat encoding landed). Workaround: rename the field. See
+`ISSUES.md` for the three resolution options.
+
+---
+
 # Cut 6 — MCP collapse to 10 tools (2026-04-30)
 
 Second PR of the cuts-5-and-6 rewrite plan. Replaces the 38 domain-specific MCP tools with the locked spec §6 ten:
