@@ -1,3 +1,83 @@
+# Cut 8 — retire legacy /api/content/* + /api/data/<key> routes (2026-04-30)
+
+Closes the last gap in the REST namespace migration started in Cut 7.
+After Cut 8 the content tier is reachable only through `/api/<path>`
+(spec §5). The `/api/content/<path>` per-leaf CRUD verbs and the
+entire `/api/data/<key>[/<id>]` route group are gone.
+
+## What changed
+
+- **Routes removed** in `internal/server/server.go`:
+  - `GET/PUT/PATCH/DELETE /api/content/<path>` — page CRUD verbs.
+  - `GET/PUT/PATCH/POST/DELETE /api/data/<key>` — data singleton.
+  - `GET/PUT/PATCH/POST/DELETE /api/data/<key>/<id>` — collection items.
+  - `GET /api/data/<key>/history` — moved to `/api/<path>/history`.
+  - `POST /api/data/<key>?op=append` — replaced by `POST /api/<path>:append`.
+- **Routes kept** as operational side-channels (not per-leaf CRUD):
+  - `GET /api/content` — page-list + filtering.
+  - `POST /api/content/move` — atomic rename of a page.
+  - `POST /api/content/bulk-delete` — admin bulk-delete.
+  - All store-level cross-cutting verbs: `/api/index`, `/api/search`,
+    `/api/activity`, `/api/files/request-upload`.
+- **Unified handler now serves `/history`.** `GET /api/<path>/history`
+  routes to the per-doc audit log (matches spec §5).
+- **Dispatcher upgrade.** `dispatchTarget` recognizes the `{"value": ...}`
+  envelope shape as a data-tier write — disambiguates `<key>/<id>` data
+  collection items from nested page paths. New auto-create path:
+  the first PUT to `/api/<key>/<id>` creates the collection.
+- **Pretty PATCH 404.** When the body is page-shaped
+  (`frontmatter_patch` or `body` keys) and the leaf doesn't exist, the
+  unified handler returns `404 NOT_FOUND` instead of falling through
+  to a misleading `400 missing_value`.
+- **Auth-rule pattern migration.** `internal/view/scope.go` now
+  authorizes against `/api/<key>` (not `/api/data/<key>` or
+  `/api/content<path>`). Existing user-defined ACL rules with the old
+  `/api/data/**` / `/api/content/**` patterns will no longer match —
+  admins should re-enter rules in the new shape.
+
+## Files migrated
+
+- **SPA**: `frontend/src/lib/{collectionWrites,copyPage}.ts`,
+  `frontend/src/components/shell/PageActionsMenu.tsx`,
+  `frontend/src/components/builtin/{Kanban,Sheet,SkillInstall}.tsx`,
+  `frontend/src/routes/Admin.tsx`. Plus the Vitest spec files.
+- **Tests**: `scripts/integration-test.sh` (50+ refs),
+  `scripts/smoke-test.sh` (30+ refs).
+- **Bruno**: `bruno/tests/{02-content,08-grab,10-data}/*.yml` (44 refs).
+- **Server**: `handlers_introduction.go`, `inbox_dispatch.go`,
+  `view/scope.go`, `cli/serve.go` startup banner.
+
+## Files dropped
+
+`internal/server/handlers_store.go` lost the orphaned per-leaf handlers
+(`handleStoreRead`, `handleStoreSet`, `handleStoreMerge`,
+`handleStoreDelete`, `handleStoreReadItem`, `handleStoreUpsert`,
+`handleStoreMergeItem`, `handleStoreDeleteItem`, `handleStoreAction`,
+`handleStoreHistory`) plus the unused `headerOrBodyVersion` helper.
+`registerStoreRoutes` now mounts only the four cross-cutting endpoints.
+
+## Validation
+
+- `go test ./...` — 16 packages green, including the migrated
+  `handlers_pages_patch_test.go`, `handlers_approval_test.go`,
+  `handlers_locks_test.go`, `handlers_view_test.go`, `view/scope_test.go`,
+  and `handlers_initial_put_test.go`.
+- `scripts/integration-test.sh`: 45/45.
+- `scripts/smoke-test.sh`: 35/35.
+- `go vet` clean. `gofmt` clean.
+- Dogfood rebuilt + restarted: `/api/health` 200 local + 200 through
+  Cloudflare Tunnel.
+
+## Spec status after Cut 8
+
+`spec.md §5` no longer carries an "Implementation status" or migration
+footnote — the wire matches the spec. The reserved-prefix list now
+includes `content` (the page-list + move + bulk-delete operational
+verbs). `ISSUES.md` carries one `[needs-decision]` entry from Cut 7
+(`value:` field collision in singletons); no other open work.
+
+---
+
 # Cut 7 — REST namespace unification (2026-04-30)
 
 The last named spec drift. Spec §5 promises one namespace —

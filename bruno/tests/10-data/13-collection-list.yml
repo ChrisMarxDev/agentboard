@@ -5,7 +5,7 @@ info:
 
 http:
   method: GET
-  url: "{{baseUrl}}/api/data/test.v2.kanban"
+  url: "{{baseUrl}}/api/test.v2.kanban"
 
 runtime:
   scripts:

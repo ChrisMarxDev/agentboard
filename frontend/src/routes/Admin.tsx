@@ -1036,8 +1036,7 @@ function NewUserCard({
       setRulesText(
         JSON.stringify(
           [
-            { action: 'allow', pattern: '/api/data/**', methods: ['GET'] },
-            { action: 'allow', pattern: '/api/content/**', methods: ['GET'] },
+            { action: 'allow', pattern: '/api/**', methods: ['GET'] },
             { action: 'allow', pattern: '/api/files/**', methods: ['GET'] },
             { action: 'allow', pattern: '/api/events', methods: ['GET'] },
           ] satisfies Rule[],

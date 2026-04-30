@@ -1,11 +1,11 @@
 info:
-  name: PUT /api/content/test-page creates a page
+  name: PUT /api/test-page creates a page
   type: http
   seq: 2
 
 http:
   method: PUT
-  url: "{{baseUrl}}/api/content/test-page"
+  url: "{{baseUrl}}/api/test-page"
   headers:
     - name: Content-Type
       value: text/markdown

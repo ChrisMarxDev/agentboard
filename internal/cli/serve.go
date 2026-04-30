@@ -276,10 +276,9 @@ Connect Claude:
   claude mcp add agentboard %s/mcp
 
 Author pages and data via:
-  %s/api/content/:path        # MDX pages
-  %s/api/data/:key             # frontmatter values + collections
+  %s/api/<path>                # one namespace, page or data leaf
 
-`, server.Version(), proj.Config.Title, projPath, url, url, url, url, url)
+`, server.Version(), proj.Config.Title, projPath, url, url, url, url)
 
 	// Open browser
 	if !noOpen {

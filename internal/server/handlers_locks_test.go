@@ -77,7 +77,7 @@ func TestLock_WriteGate(t *testing.T) {
 	r.Body.Close()
 
 	// Member write → 403 PAGE_LOCKED.
-	req, _ := http.NewRequest("PUT", ts.URL+"/api/content/handbook", strings.NewReader("# Handbook edited"))
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/handbook", strings.NewReader("# Handbook edited"))
 	req.Header.Set("Content-Type", "text/markdown")
 	r2, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -94,7 +94,7 @@ func TestLock_WriteGate(t *testing.T) {
 	}
 
 	// Admin write → 200.
-	req3, _ := http.NewRequest("PUT", ts.URL+"/api/content/handbook", strings.NewReader("# Handbook v2"))
+	req3, _ := http.NewRequest("PUT", ts.URL+"/api/handbook", strings.NewReader("# Handbook v2"))
 	req3.Header.Set("Content-Type", "text/markdown")
 	req3.Header.Set("Authorization", "Bearer "+adminToken)
 	r3, _ := http.DefaultClient.Do(req3)
@@ -113,7 +113,7 @@ func TestLock_DeleteGate(t *testing.T) {
 	r.Body.Close()
 
 	// Member delete → 403.
-	req, _ := http.NewRequest("DELETE", ts.URL+"/api/content/handbook", nil)
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/handbook", nil)
 	r2, _ := http.DefaultClient.Do(req)
 	if r2.StatusCode != 403 {
 		t.Errorf("member delete on locked page = %d, want 403", r2.StatusCode)
@@ -164,7 +164,7 @@ func TestLock_GetPageEmitsHeaders(t *testing.T) {
 		`{"path":"handbook","reason":"canonical onboarding"}`, adminToken))
 	r.Body.Close()
 
-	r2, err := http.DefaultClient.Get(ts.URL + "/api/content/handbook")
+	r2, err := http.DefaultClient.Get(ts.URL + "/api/handbook")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestLock_Unlock(t *testing.T) {
 		t.Error("still locked after unlock")
 	}
 	// Member can now write.
-	req3, _ := http.NewRequest("PUT", ts.URL+"/api/content/handbook", strings.NewReader("# After unlock"))
+	req3, _ := http.NewRequest("PUT", ts.URL+"/api/handbook", strings.NewReader("# After unlock"))
 	req3.Header.Set("Content-Type", "text/markdown")
 	r3, _ := http.DefaultClient.Do(req3)
 	if r3.StatusCode != 200 {

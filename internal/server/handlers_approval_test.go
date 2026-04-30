@@ -11,14 +11,14 @@ import (
 // TestApprovalFlow_CreateReadRevoke walks the happy path:
 //  1. Seed a page, which gets an initial etag.
 //  2. POST /api/approval with the path → 200.
-//  3. GET /api/content/{path} surfaces the approval record + stale=false.
+//  3. GET /api/{path} surfaces the approval record + stale=false.
 //  4. Re-write the page → new etag → approval.stale = true.
 //  5. DELETE /api/approval?path=... → approval gone.
 func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	// 1. Seed.
-	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/approveme", bytes.NewBufferString("# v1"))
+	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/approveme", bytes.NewBufferString("# v1"))
 	seed.Header.Set("Content-Type", "text/markdown")
 	sResp, _ := http.DefaultClient.Do(seed)
 	sResp.Body.Close()
@@ -41,7 +41,7 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	}
 
 	// 3. Read page, confirm approval present and stale = false.
-	g1, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
+	g1, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/approveme", nil)
 	g1.Header.Set("Accept", "application/json")
 	g1Resp, err1 := http.DefaultClient.Do(g1)
 	if err1 != nil {
@@ -68,12 +68,12 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	}
 
 	// 4. Re-write → etag changes → approval becomes stale.
-	rw, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/approveme", bytes.NewBufferString("# v2\nedited"))
+	rw, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/approveme", bytes.NewBufferString("# v2\nedited"))
 	rw.Header.Set("Content-Type", "text/markdown")
 	rwResp, _ := http.DefaultClient.Do(rw)
 	rwResp.Body.Close()
 
-	g2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
+	g2, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/approveme", nil)
 	g2.Header.Set("Accept", "application/json")
 	g2Resp, err2 := http.DefaultClient.Do(g2)
 	if err2 != nil {
@@ -97,7 +97,7 @@ func TestApprovalFlow_CreateReadRevoke(t *testing.T) {
 	if rvResp.StatusCode != http.StatusOK {
 		t.Fatalf("revoke: status = %d", rvResp.StatusCode)
 	}
-	g3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/approveme", nil)
+	g3, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/approveme", nil)
 	g3.Header.Set("Accept", "application/json")
 	g3Resp, err3 := http.DefaultClient.Do(g3)
 	if err3 != nil {
@@ -134,7 +134,7 @@ func TestApproval_AnonymousRejected(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	// Seed with the authed default client.
-	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/need-auth", bytes.NewBufferString("# x"))
+	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/need-auth", bytes.NewBufferString("# x"))
 	seed.Header.Set("Content-Type", "text/markdown")
 	sr, _ := http.DefaultClient.Do(seed)
 	sr.Body.Close()
@@ -157,7 +157,7 @@ func TestApproval_DeletePageClearsApproval(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	// Seed + approve.
-	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/ephemeral", bytes.NewBufferString("# x"))
+	seed, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/ephemeral", bytes.NewBufferString("# x"))
 	seed.Header.Set("Content-Type", "text/markdown")
 	sr, _ := http.DefaultClient.Do(seed)
 	sr.Body.Close()
@@ -168,17 +168,17 @@ func TestApproval_DeletePageClearsApproval(t *testing.T) {
 	ar.Body.Close()
 
 	// Delete the page.
-	d, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/content/ephemeral", nil)
+	d, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/ephemeral", nil)
 	dr, _ := http.DefaultClient.Do(d)
 	dr.Body.Close()
 
 	// Re-create: approval should not be there any more.
-	seed2, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/ephemeral", bytes.NewBufferString("# fresh"))
+	seed2, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/ephemeral", bytes.NewBufferString("# fresh"))
 	seed2.Header.Set("Content-Type", "text/markdown")
 	sr2, _ := http.DefaultClient.Do(seed2)
 	sr2.Body.Close()
 
-	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/content/ephemeral", nil)
+	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/ephemeral", nil)
 	g.Header.Set("Accept", "application/json")
 	gr, err := http.DefaultClient.Do(g)
 	if err != nil {

@@ -21,14 +21,14 @@ func TestView_AuthedOpen(t *testing.T) {
 
 <Metric source="counter.value" />
 `)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/hello", seed)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/hello", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
 
 	// Seed counter.value through the file-store v2 endpoint. The
 	// envelope wraps the value; the broker unwraps before bundling.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/counter.value", strings.NewReader(`{"value":42}`))
+	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/counter.value", strings.NewReader(`{"value":42}`))
 	dr.Header.Set("Content-Type", "application/json")
 	drResp, _ := http.DefaultClient.Do(dr)
 	drResp.Body.Close()
@@ -80,7 +80,7 @@ func TestView_SessionCookieAccepted(t *testing.T) {
 
 <Metric source="counter.value" />
 `)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/hello", seed)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/hello", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	sr, err := http.DefaultClient.Do(wr)
 	if err != nil {
@@ -122,7 +122,7 @@ func TestView_AnonymousOnPrivateIs401(t *testing.T) {
 
 	// Seed a page.
 	seed := bytes.NewBufferString(`# Private`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/private", seed)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/private", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
@@ -150,12 +150,12 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	// Seed a page.
 	seed := bytes.NewBufferString(`# Shareme
 <Metric source="share.demo" />`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/shareme", seed)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/shareme", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
 	// Seed the referenced data — v2 endpoint expects an envelope.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/share.demo", strings.NewReader(`{"value":"ok"}`))
+	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/share.demo", strings.NewReader(`{"value":"ok"}`))
 	dr.Header.Set("Content-Type", "application/json")
 	drResp, _ := http.DefaultClient.Do(dr)
 	drResp.Body.Close()
@@ -219,7 +219,7 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	}
 
 	// Cookie → /api/data/* must 401.
-	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/data/share.demo", nil)
+	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/share.demo", nil)
 	dresp, err := bare.Do(dreq)
 	if err != nil {
 		t.Fatal(err)
@@ -230,7 +230,7 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	}
 
 	// Cookie → write must 401.
-	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/share.demo", strings.NewReader(`"x"`))
+	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/share.demo", strings.NewReader(`"x"`))
 	wresp, err := bare.Do(wreq)
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestView_CookieReAnchors(t *testing.T) {
 	// Two pages.
 	for _, p := range []string{"shareme", "other"} {
 		seed := bytes.NewBufferString("# " + p)
-		wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/"+p, seed)
+		wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/"+p, seed)
 		wr.Header.Set("Content-Type", "text/markdown")
 		wresp, _ := http.DefaultClient.Do(wr)
 		wresp.Body.Close()
@@ -302,7 +302,7 @@ func TestView_RevokeCascadesToSession(t *testing.T) {
 
 	// Seed + mint + redeem.
 	seed := bytes.NewBufferString(`# x`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/revoketest", seed)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/revoketest", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	wresp, _ := http.DefaultClient.Do(wr)
 	wresp.Body.Close()

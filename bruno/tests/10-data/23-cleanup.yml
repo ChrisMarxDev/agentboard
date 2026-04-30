@@ -18,7 +18,7 @@ runtime:
         for (const k of keys) {
           try {
             const qs = k.shape === "collection" ? "?confirm=true" : "";
-            await fetch(`${baseUrl}/api/data/${encodeURIComponent(k.key)}${qs}`, { method: "DELETE" });
+            await fetch(`${baseUrl}/api/${encodeURIComponent(k.key)}${qs}`, { method: "DELETE" });
           } catch (e) {}
         }
         bru.setVar("v2_cleaned", keys.length);

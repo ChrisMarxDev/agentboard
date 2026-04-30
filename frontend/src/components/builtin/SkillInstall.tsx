@@ -23,7 +23,7 @@ interface SkillInstallProps {
 
 function buildPrompt(slug: string, origin: string): string {
   const pagePath = `${origin}/skills/${slug}`
-  const manifestURL = `${origin}/api/content/skills/${slug}/SKILL.md`
+  const manifestURL = `${origin}/api/skills/${slug}/SKILL.md`
   const bundleURL = `${origin}/api/skills/${slug}`
 
   return [

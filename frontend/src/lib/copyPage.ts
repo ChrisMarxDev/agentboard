@@ -37,7 +37,7 @@ export async function copyPageSource(pagePath: string): Promise<void> {
     return
   }
   try {
-    const res = await apiFetch(`/api/content/${encodeURI(pagePath)}`, {
+    const res = await apiFetch(`/api/${encodeURI(pagePath)}`, {
       headers: { Accept: 'text/markdown' },
     })
     if (!res.ok) {

@@ -22,7 +22,7 @@ func TestInitialPut_DataNoIfMatch(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	body := bytes.NewBufferString(`{"value": 42}`)
-	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/never-existed", body)
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/never-existed", body)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -35,7 +35,7 @@ func TestInitialPut_DataNoIfMatch(t *testing.T) {
 	}
 
 	// Read it back, confirm the value landed.
-	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/data/never-existed", nil)
+	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/never-existed", nil)
 	gResp, err := http.DefaultClient.Do(g)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestInitialPut_PageNoIfMatch(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	src := "---\ntitle: Fresh page\n---\n\n# Hello\n"
-	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/fresh", strings.NewReader(src))
+	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/fresh", strings.NewReader(src))
 	req.Header.Set("Content-Type", "text/markdown")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestPatchData_ErrorMessageMatchesShape(t *testing.T) {
 
 	// Seed a key so PATCH has something to merge against.
 	put := bytes.NewBufferString(`{"value": {"label": "Open"}}`)
-	preq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/data/vet.clinic.status", put)
+	preq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/vet.clinic.status", put)
 	preq.Header.Set("Content-Type", "application/json")
 	pResp, err := http.DefaultClient.Do(preq)
 	if err != nil {
@@ -100,7 +100,7 @@ func TestPatchData_ErrorMessageMatchesShape(t *testing.T) {
 
 	// Wrong shape → parser rejects → error message must match reality.
 	bad := bytes.NewBufferString(`{"detail": {"label": "Open"}}`)
-	preq2, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/data/vet.clinic.status", bad)
+	preq2, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/vet.clinic.status", bad)
 	preq2.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(preq2)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestPatchData_ErrorMessageMatchesShape(t *testing.T) {
 
 	// And the documented shape works.
 	good := bytes.NewBufferString(`{"value": {"label": "Closed"}}`)
-	preq3, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/data/vet.clinic.status", good)
+	preq3, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/vet.clinic.status", good)
 	preq3.Header.Set("Content-Type", "application/json")
 	resp3, err := http.DefaultClient.Do(preq3)
 	if err != nil {

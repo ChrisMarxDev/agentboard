@@ -20,7 +20,7 @@ runtime:
       code: |-
         const axios = require('axios');
         const baseUrl = bru.getEnvVar("baseUrl");
-        const r = await axios.get(`${baseUrl}/api/data/test.mcp.val`);
+        const r = await axios.get(`${baseUrl}/api/test.mcp.val`);
         bru.setVar("mcpSetValue", r.data.value);
     - type: tests
       code: |-

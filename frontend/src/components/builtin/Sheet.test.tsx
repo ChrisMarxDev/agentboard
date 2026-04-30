@@ -78,7 +78,7 @@ describe('Sheet', () => {
     expect(input).toBeInTheDocument()
   })
 
-  it('Enter key commits an edit via PATCH /api/data/{source}/{id}', async () => {
+  it('Enter key commits an edit via PATCH /api/{source}/{id}', async () => {
     mockUseData.mockReturnValue({
       data: [{ id: '1', name: 'Alice', role: 'Engineer' }],
       loading: false,
@@ -92,7 +92,7 @@ describe('Sheet', () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(url).toBe('/api/data/team.roster/1')
+    expect(url).toBe('/api/team.roster/1')
     expect(init.method).toBe('PATCH')
     expect(JSON.parse(init.body as string)).toEqual({ name: 'Alicia' })
   })
@@ -140,7 +140,7 @@ describe('Sheet', () => {
     expect(JSON.parse(init.body as string)).toEqual({ score: 42 })
   })
 
-  it('Add row posts to /api/data/{source} with a seeded row', async () => {
+  it('Add row posts to /api/{source} with a seeded row', async () => {
     mockUseData.mockReturnValue({
       data: [{ id: '1', name: 'Alice', role: 'Engineer' }],
       loading: false,
@@ -150,7 +150,7 @@ describe('Sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: /Add row/i }))
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
     const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(url).toBe('/api/data/team.roster')
+    expect(url).toBe('/api/team.roster')
     expect(init.method).toBe('POST')
     const body = JSON.parse(init.body as string)
     expect(typeof body.id).toBe('string')

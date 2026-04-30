@@ -1,11 +1,11 @@
 info:
-  name: DELETE /api/content/index is forbidden
+  name: DELETE /api/index is forbidden
   type: http
   seq: 8
 
 http:
   method: DELETE
-  url: "{{baseUrl}}/api/content/index"
+  url: "{{baseUrl}}/api/index"
 
 runtime:
   scripts:

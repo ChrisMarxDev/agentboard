@@ -22,14 +22,14 @@ import { beaconError, resetBeacon } from '../../lib/errorBeacon'
 //     index page to bind the grid to its siblings.
 //
 //   <Sheet source="tasks/" />                — folder collection
-//     → PATCH /api/content/tasks/<id>      (frontmatter merge)
-//     → PUT   /api/content/tasks/<newid>   (create as MDX doc)
-//     → DELETE /api/content/tasks/<id>
+//     → PATCH /api/tasks/<id>      (frontmatter merge)
+//     → PUT   /api/tasks/<newid>   (create as MDX doc)
+//     → DELETE /api/tasks/<id>
 //
 //   <Sheet source="store.key" />              — file-store collection
-//     → PATCH /api/data/store.key/<id>
-//     → POST  /api/data/store.key
-//     → DELETE /api/data/store.key/<id>
+//     → PATCH /api/store.key/<id>
+//     → POST  /api/store.key
+//     → DELETE /api/store.key/<id>
 //
 // Sources that resolve from a page's own frontmatter (`<Sheet source="roster" />`
 // where `roster` is an array literal in YAML) read fine but cannot be edited

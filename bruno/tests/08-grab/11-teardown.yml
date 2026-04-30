@@ -5,7 +5,7 @@ info:
 
 http:
   method: DELETE
-  url: "{{baseUrl}}/api/content/test-grab"
+  url: "{{baseUrl}}/api/test-grab"
 
 runtime:
   scripts:
@@ -13,7 +13,7 @@ runtime:
       code: |-
         const axios = require('axios');
         await axios.delete(
-          `${bru.getEnvVar("baseUrl")}/api/data/test.grab.mermaid`,
+          `${bru.getEnvVar("baseUrl")}/api/test.grab.mermaid`,
           { validateStatus: () => true },
         );
     - type: tests

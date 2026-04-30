@@ -80,12 +80,12 @@ func (s *Scope) CanReadData(key string) bool {
 		if s.User == nil {
 			return false
 		}
-		return auth.Authorize(s.User.AccessMode, s.User.Rules, http.MethodGet, "/api/data/"+key)
+		return auth.Authorize(s.User.AccessMode, s.User.Rules, http.MethodGet, "/api/"+key)
 	case AuthorityAnonymous:
 		if s.publicMatcher == nil {
 			return false
 		}
-		return s.publicMatcher.IsPubliclyReadable(http.MethodGet, "/api/data/"+key)
+		return s.publicMatcher.IsPubliclyReadable(http.MethodGet, "/api/"+key)
 	}
 	return false
 }
@@ -137,7 +137,7 @@ func (s *Scope) CanReadSubpage(path string) bool {
 		if s.User == nil {
 			return false
 		}
-		return auth.Authorize(s.User.AccessMode, s.User.Rules, http.MethodGet, "/api/content"+n)
+		return auth.Authorize(s.User.AccessMode, s.User.Rules, http.MethodGet, "/api"+n)
 	}
 	return false
 }

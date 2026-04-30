@@ -6,7 +6,7 @@ info:
 # Create a small page with two <Card>s so later tests can pick sections.
 http:
   method: PUT
-  url: "{{baseUrl}}/api/content/test-grab"
+  url: "{{baseUrl}}/api/test-grab"
   headers:
     - name: Content-Type
       value: text/markdown
@@ -45,7 +45,7 @@ runtime:
         const axios = require('axios');
         // Seed a mermaid source for the first card to resolve.
         await axios.put(
-          `${bru.getEnvVar("baseUrl")}/api/data/test.grab.mermaid`,
+          `${bru.getEnvVar("baseUrl")}/api/test.grab.mermaid`,
           JSON.stringify("graph LR\n  A --> B"),
           { headers: { "Content-Type": "application/json" } },
         );

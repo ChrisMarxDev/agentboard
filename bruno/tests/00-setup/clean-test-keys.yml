@@ -15,7 +15,7 @@ runtime:
         const keys = Object.keys(res.body).filter(k => k.startsWith('test.'));
         for (const k of keys) {
           try {
-            await fetch(`${baseUrl}/api/data/${encodeURIComponent(k)}`, { method: 'DELETE' });
+            await fetch(`${baseUrl}/api/${encodeURIComponent(k)}`, { method: 'DELETE' });
           } catch (e) {}
         }
         bru.setVar("cleaned", keys.length);

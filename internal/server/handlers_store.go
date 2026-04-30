@@ -1,11 +1,13 @@
 package server
 
-// Handlers for the files-first store. Mounted at /api/data/<key>
-// (singletons + collections + streams via .ndjson), plus the /api/
-// index, /api/search, /api/activity, and /api/files/request-upload
-// envelope endpoints. The store backs every cross-page value the
-// dashboards display; for in-page fields, agents prefer frontmatter
-// on the rendering page (see spec-rework.md).
+// Cross-cutting store endpoints: catalog, search, activity, mint
+// presigned upload tokens. Per-leaf CRUD moved to the unified
+// `/api/<path>` namespace in Cut 8 (handlers_unified.go) so this
+// file no longer mounts `/api/data/<key>` routes — only the
+// side-channel verbs that aren't tied to a single leaf. The shared
+// helpers (translateStoreError, writeJSON, writeError, actorFor,
+// errorBody, readJSONBody) are still exported for the unified
+// handler.
 
 import (
 	"encoding/json"
@@ -13,7 +15,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/store"
@@ -177,321 +178,6 @@ func (s *Server) handleStoreSearch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ---------- Reads ----------
-
-func (s *Server) handleStoreRead(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-
-	cat, ok := s.FileStore.CatalogGet(key)
-	if !ok {
-		// Unknown key — try each shape and let the store report 404.
-		env, err := s.FileStore.ReadSingleton(key)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, env)
-		return
-	}
-
-	switch cat.Shape {
-	case store.ShapeSingleton:
-		env, err := s.FileStore.ReadSingleton(key)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, env)
-	case store.ShapeCollection:
-		items, err := s.FileStore.ListCollection(key)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"_meta": map[string]any{
-				"shape": store.ShapeCollection,
-				"count": len(items),
-				"key":   key,
-			},
-			"items": items,
-		})
-	case store.ShapeStream:
-		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-		opts := store.ReadStreamOpts{
-			Limit: limit,
-			Since: r.URL.Query().Get("since"),
-			Until: r.URL.Query().Get("until"),
-		}
-		lines, err := s.FileStore.ReadStream(key, opts)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"_meta": map[string]any{
-				"shape":      store.ShapeStream,
-				"line_count": len(lines),
-				"key":        key,
-			},
-			"lines": lines,
-		})
-	default:
-		writeError(w, http.StatusInternalServerError, "unknown_shape", "internal: catalog has no shape for "+key)
-	}
-}
-
-func (s *Server) handleStoreReadItem(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	id := chi.URLParam(r, "id")
-	env, err := s.FileStore.ReadItem(key, id)
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-// ---------- Writes ----------
-
-// writePayload is the body shape for SET / PUT writes:
-// {"_meta": {"version": "..."}, "value": ...}. Either field may be
-// omitted; missing _meta means "no version asserted".
-type writePayload struct {
-	Meta  *store.Meta     `json:"_meta,omitempty"`
-	Value json.RawMessage `json:"value"`
-}
-
-func (p writePayload) version() string {
-	if p.Meta == nil {
-		return ""
-	}
-	return p.Meta.Version
-}
-
-func (s *Server) handleStoreSet(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	op := r.URL.Query().Get("op")
-	if op != "" {
-		s.handleStoreAction(w, r, key, "")
-		return
-	}
-
-	var p writePayload
-	if err := readJSONBody(r, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-		return
-	}
-	if len(p.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "missing_value", `body must include {"value": ...}`)
-		return
-	}
-	env, err := s.FileStore.Set(key, p.Value, headerOrBodyVersion(r, p.version()), actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-func (s *Server) handleStoreMerge(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	var p writePayload
-	if err := readJSONBody(r, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-		return
-	}
-	patch := p.Value
-	if len(patch) == 0 {
-		// Spec §6 + ISSUES.md #4: only `{"value": <patch>}` is accepted.
-		// The earlier hint about a "top-level patch object" was wrong —
-		// the parser never accepted that shape, and the contradictory
-		// message wasted agent attempts. Per CORE_GUIDELINES §12 the
-		// error names exactly what works.
-		writeError(w, http.StatusBadRequest, "missing_value", `body must be {"value": <patch>}`)
-		return
-	}
-	env, err := s.FileStore.Merge(key, patch, actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-func (s *Server) handleStoreDelete(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	cat, ok := s.FileStore.CatalogGet(key)
-	if !ok {
-		// Idempotent — already gone.
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	version := r.URL.Query().Get("version")
-	if version == "" {
-		version = "*" // explicit force unless caller asks otherwise via query
-	}
-	actor := actorFor(r)
-	var err error
-	switch cat.Shape {
-	case store.ShapeSingleton:
-		err = s.FileStore.DeleteSingleton(key, version, actor)
-	case store.ShapeCollection:
-		// Wholesale collection delete requires confirm=true to avoid
-		// accidental drops.
-		if r.URL.Query().Get("confirm") != "true" {
-			writeError(w, http.StatusBadRequest, "confirmation_required",
-				"deleting a whole collection requires ?confirm=true")
-			return
-		}
-		err = s.FileStore.DeleteCollection(key, actor)
-	case store.ShapeStream:
-		err = s.FileStore.DeleteStream(key, actor)
-	}
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// ---------- Per-item writes ----------
-
-func (s *Server) handleStoreUpsert(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	id := chi.URLParam(r, "id")
-	op := r.URL.Query().Get("op")
-	if op != "" {
-		s.handleStoreAction(w, r, key, id)
-		return
-	}
-
-	var p writePayload
-	if err := readJSONBody(r, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-		return
-	}
-	if len(p.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "missing_value", `body must include {"value": ...}`)
-		return
-	}
-	env, err := s.FileStore.UpsertItem(key, id, p.Value, headerOrBodyVersion(r, p.version()), actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-func (s *Server) handleStoreMergeItem(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	id := chi.URLParam(r, "id")
-	var p writePayload
-	if err := readJSONBody(r, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-		return
-	}
-	if len(p.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "missing_value", `body must include {"value": <patch>}`)
-		return
-	}
-	env, err := s.FileStore.MergeItem(key, id, p.Value, actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-func (s *Server) handleStoreDeleteItem(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	id := chi.URLParam(r, "id")
-	version := r.URL.Query().Get("version")
-	if version == "" {
-		version = "*"
-	}
-	if err := s.FileStore.DeleteItem(key, id, version, actorFor(r)); err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// ---------- Action verbs (?op=...) ----------
-
-// handleStoreAction handles the action-verb endpoints: append, increment,
-// cas. Triggered when the corresponding write/upsert handler sees a
-// non-empty ?op= query. Path: /api/data/{key}?op=... or
-// /api/data/{key}/{id}?op=cas (item-level CAS).
-func (s *Server) handleStoreAction(w http.ResponseWriter, r *http.Request, key, id string) {
-	op := r.URL.Query().Get("op")
-	actor := actorFor(r)
-
-	switch strings.ToLower(op) {
-	case "append":
-		if id != "" {
-			writeError(w, http.StatusBadRequest, "wrong_target", "append targets a stream key, not an item")
-			return
-		}
-		var body struct {
-			Value json.RawMessage   `json:"value"`
-			Items []json.RawMessage `json:"items"`
-		}
-		if err := readJSONBody(r, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-			return
-		}
-		if body.Items != nil {
-			lines, err := s.FileStore.AppendBatch(key, body.Items, actor)
-			if err != nil {
-				translateStoreError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{"appended": len(lines), "lines": lines})
-			return
-		}
-		if len(body.Value) == 0 {
-			writeError(w, http.StatusBadRequest, "missing_value", `pass {"value": ...} or {"items": [...]}`)
-			return
-		}
-		line, err := s.FileStore.Append(key, body.Value, actor)
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		// Inbox dispatch: @mentions inside the appended value land in the
-		// mentioned user's inbox. Same path the singleton/collection
-		// writes use, so a comment carrying "@dana please check" produces
-		// an inbox row exactly like a page edit would.
-		s.dispatchInboxForValueWrite(key, body.Value, actor, "")
-		writeJSON(w, http.StatusOK, line)
-
-	default:
-		// `op=increment` and `op=cas` were removed in Cut 2 — agents
-		// do read-modify-write against the file's _meta.version. The
-		// only structured op now is `op=append` (streams).
-		writeError(w, http.StatusBadRequest, "unknown_op",
-			`?op must be one of: append (streams). Use PUT/PATCH for read-modify-write writes against the file-level CAS.`)
-	}
-}
-
-// ---------- History + activity ----------
-
-func (s *Server) handleStoreHistory(w http.ResponseWriter, r *http.Request) {
-	key := chi.URLParam(r, "key")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	entries, err := s.FileStore.ReadHistory(key, "", limit)
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"key":     key,
-		"entries": entries,
-		"count":   len(entries),
-	})
-}
-
 func (s *Server) handleStoreActivity(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	entries, err := s.FileStore.ReadActivity(store.ReadActivityOpts{
@@ -511,12 +197,19 @@ func (s *Server) handleStoreActivity(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// registerStoreRoutes mounts the store surface on the authenticated
-// /api router. Skips registration when no FileStore is configured so
-// the server still boots in legacy-only mode. Uses a Group instead of
-// a Route("/", ...) — Group scopes middleware without nesting, which
-// avoids chi's "trailing slash" conflict resolution that was eating
-// /api/search registrations.
+// registerStoreRoutes mounts the cross-cutting store endpoints
+// (catalog, search, activity, presigned-upload mint). The per-leaf
+// CRUD routes that used to live under `/data/{key}` got retired in
+// Cut 8 — leaves now live at `/api/<path>` through
+// handlers_unified.go. The four side-channel verbs below stay
+// because they aren't tied to a single leaf:
+//
+//	GET  /api/index               — flat catalog of every leaf
+//	GET  /api/search?q=...        — substring search across values
+//	GET  /api/activity            — global write log
+//	POST /api/files/request-upload — mint a presigned upload URL
+//
+// Skips registration when no FileStore is configured.
 func (s *Server) registerStoreRoutes(r chi.Router) {
 	if s.FileStore == nil {
 		return
@@ -528,40 +221,5 @@ func (s *Server) registerStoreRoutes(r chi.Router) {
 		r.Get("/search", s.handleStoreSearch)
 		r.Get("/activity", s.handleStoreActivity)
 		r.Post("/files/request-upload", s.handleRequestFileUpload)
-
-		r.Route("/data/{key}", func(r chi.Router) {
-			r.Get("/", s.handleStoreRead)
-			r.Put("/", s.handleStoreSet)
-			r.Patch("/", s.handleStoreMerge)
-			r.Post("/", s.handleStoreSet) // POST is the action-verb path (?op=...)
-			r.Delete("/", s.handleStoreDelete)
-
-			r.Get("/history", s.handleStoreHistory)
-
-			r.Get("/{id}", s.handleStoreReadItem)
-			r.Put("/{id}", s.handleStoreUpsert)
-			r.Patch("/{id}", s.handleStoreMergeItem)
-			r.Post("/{id}", s.handleStoreUpsert)
-			r.Delete("/{id}", s.handleStoreDeleteItem)
-		})
 	})
-}
-
-// headerOrBodyVersion picks the version from If-Match (header) or the
-// envelope's _meta.version (body). If both are present they must match;
-// mismatch returns "" so the store rejects with a clear error.
-func headerOrBodyVersion(r *http.Request, body string) string {
-	hdr := strings.Trim(r.Header.Get("If-Match"), `"`)
-	switch {
-	case hdr == "" && body == "":
-		return ""
-	case hdr == "":
-		return body
-	case body == "":
-		return hdr
-	case hdr == body:
-		return hdr
-	default:
-		return "" // contradiction — let store fail with VersionRequired
-	}
 }

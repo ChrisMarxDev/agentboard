@@ -100,7 +100,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 
 	// Restrict to GETs under /api/data/** — the data surface during
 	// the rewrite. Cut 3 collapses this back to /api/data/**.
-	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/data/**","methods":["GET"]}]}`
+	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/**","methods":["GET"]}]}`
 	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users", body, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	// Viewer GET passes auth (rule allows /api/data/** GETs); the
 	// key may not exist yet, so 200 OR 404 both mean "auth let me
 	// through." 401/403 would mean the rule didn't apply.
-	gr, _ := http.NewRequest("GET", ts.URL+"/api/data/foo", nil)
+	gr, _ := http.NewRequest("GET", ts.URL+"/api/foo", nil)
 	gr.Header.Set("Authorization", "Bearer "+tok.Token)
 	gresp, _ := http.DefaultClient.Do(gr)
 	if gresp.StatusCode != 200 && gresp.StatusCode != 404 {
@@ -131,7 +131,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	}
 	gresp.Body.Close()
 
-	pr, _ := http.NewRequest("PUT", ts.URL+"/api/data/foo", strings.NewReader(`{"value":"x"}`))
+	pr, _ := http.NewRequest("PUT", ts.URL+"/api/foo", strings.NewReader(`{"value":"x"}`))
 	pr.Header.Set("Content-Type", "application/json")
 	pr.Header.Set("Authorization", "Bearer "+tok.Token)
 	presp, _ := http.DefaultClient.Do(pr)

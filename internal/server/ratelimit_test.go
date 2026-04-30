@@ -20,7 +20,7 @@ func TestRateLimit_BurstThenThrottle(t *testing.T) {
 
 	pass := 0
 	for i := range writeBurst + 5 {
-		req := httptest.NewRequest(http.MethodPost, "/api/data/k", nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/k", nil)
 		w := httptest.NewRecorder()
 		mw.ServeHTTP(w, req)
 		if w.Code == http.StatusOK {

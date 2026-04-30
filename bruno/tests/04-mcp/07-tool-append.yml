@@ -7,7 +7,7 @@ info:
 # the key back so sync tests can inspect the array length.
 http:
   method: GET
-  url: "{{baseUrl}}/api/data/test.mcp.arr"
+  url: "{{baseUrl}}/api/test.mcp.arr"
 
 runtime:
   scripts:
@@ -17,7 +17,7 @@ runtime:
         const baseUrl = bru.getEnvVar("baseUrl");
 
         // Start clean so repeat runs don't pile up items.
-        await axios.delete(`${baseUrl}/api/data/test.mcp.arr`, { validateStatus: () => true });
+        await axios.delete(`${baseUrl}/api/test.mcp.arr`, { validateStatus: () => true });
 
         for (const n of [1, 2]) {
           const r = await axios.post(`${baseUrl}/mcp`, {

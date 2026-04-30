@@ -165,7 +165,7 @@ describe('Kanban', () => {
       fireEvent.dragEnd(card)
     }
 
-    it('PATCHes /api/data/{source}/{id} with new group value on drop', async () => {
+    it('PATCHes /api/{source}/{id} with new group value on drop', async () => {
       setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
@@ -179,7 +179,7 @@ describe('Kanban', () => {
 
       await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
       const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-      expect(url).toBe('/api/data/sprint.tasks/1')
+      expect(url).toBe('/api/sprint.tasks/1')
       expect(init.method).toBe('PATCH')
       expect(JSON.parse(init.body as string)).toEqual({ status: 'done' })
     })
@@ -293,7 +293,7 @@ describe('Kanban', () => {
       expect(dialogs[0]).toHaveAccessibleName(/confirm delete card/i)
     })
 
-    it('DELETEs /api/data/{source}/{id} when confirmed', async () => {
+    it('DELETEs /api/{source}/{id} when confirmed', async () => {
       setRowsData({
         data: [{ id: '1', title: 'Fix bug', status: 'todo' }],
         loading: false,
@@ -306,7 +306,7 @@ describe('Kanban', () => {
 
       await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
       const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-      expect(url).toBe('/api/data/sprint.tasks/1')
+      expect(url).toBe('/api/sprint.tasks/1')
       expect(init.method).toBe('DELETE')
     })
 

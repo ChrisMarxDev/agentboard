@@ -13,7 +13,7 @@ import (
 // dispatchInboxForValueWrite is the shared data-handler hook. Accepts
 // the raw JSON bytes of a write value (PUT/PATCH) and scans every
 // string leaf for mentions. `rowID` is non-empty when the write was
-// row-scoped (`/api/data/<key>/<id>`).
+// row-scoped (`/api/<key>/<id>`).
 func (s *Server) dispatchInboxForValueWrite(key string, body []byte, actor, rowID string) {
 	if s.Inbox == nil || len(body) == 0 {
 		return
@@ -22,7 +22,7 @@ func (s *Server) dispatchInboxForValueWrite(key string, body []byte, actor, rowI
 	if err := json.Unmarshal(body, &v); err != nil {
 		return
 	}
-	subjectPath := "/api/data/" + key
+	subjectPath := "/api/" + key
 	subjectRef := rowID
 	title := "You were mentioned in " + key
 	if rowID != "" {
@@ -33,7 +33,7 @@ func (s *Server) dispatchInboxForValueWrite(key string, body []byte, actor, rowI
 
 // dispatchInboxForRowUpdate fires both mention detection on the new
 // row AND assignee-diff detection. Called by the row-scoped handlers
-// (`PUT/PATCH /api/data/<key>/<id>`).
+// (`PUT/PATCH /api/<key>/<id>`).
 //
 // `prev` is the row before the write (may be nil if it didn't exist).
 // `next` is the row after.
@@ -49,7 +49,7 @@ func (s *Server) dispatchInboxForRowUpdate(key string, prev, next map[string]any
 			rowID = fmt.Sprintf("%v", id)
 		}
 	}
-	subjectPath := "/api/data/" + key
+	subjectPath := "/api/" + key
 	rowTitle := ""
 	if t, ok := next["title"].(string); ok {
 		rowTitle = t

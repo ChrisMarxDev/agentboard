@@ -62,17 +62,17 @@ func introductionManifest() map[string]any {
 			"endpoints": []map[string]string{
 				{"method": "GET", "path": "/api/health", "summary": "liveness probe"},
 				{"method": "GET", "path": "/api/config", "summary": "project config + public paths"},
-				{"method": "GET", "path": "/api/content", "summary": "list all pages"},
-				{"method": "GET", "path": "/api/content/{path}", "summary": "read one page (markdown+etag)"},
-				{"method": "PUT", "path": "/api/content/{path}", "summary": "write a page (MDX source); If-Match supported"},
-				{"method": "PATCH", "path": "/api/content/{path}", "summary": "merge into frontmatter and/or replace body; If-Match supported"},
-				{"method": "DELETE", "path": "/api/content/{path}", "summary": "delete a page"},
-				{"method": "GET", "path": "/api/data", "summary": "list data keys"},
-				{"method": "GET", "path": "/api/data/{key}", "summary": "read a value"},
-				{"method": "PUT", "path": "/api/data/{key}", "summary": "set a value"},
-				{"method": "PATCH", "path": "/api/data/{key}", "summary": "deep-merge into a value"},
-				{"method": "POST", "path": "/api/data/{key}", "summary": "append to an array value"},
-				{"method": "DELETE", "path": "/api/data/{key}", "summary": "delete a key"},
+				{"method": "GET", "path": "/api/index", "summary": "list all pages"},
+				{"method": "GET", "path": "/api/{path}", "summary": "read one page (markdown+etag)"},
+				{"method": "PUT", "path": "/api/{path}", "summary": "write a page (MDX source); If-Match supported"},
+				{"method": "PATCH", "path": "/api/{path}", "summary": "merge into frontmatter and/or replace body; If-Match supported"},
+				{"method": "DELETE", "path": "/api/{path}", "summary": "delete a page"},
+				{"method": "GET", "path": "/api/index", "summary": "list data keys"},
+				{"method": "GET", "path": "/api/{key}", "summary": "read a value"},
+				{"method": "PUT", "path": "/api/{key}", "summary": "set a value"},
+				{"method": "PATCH", "path": "/api/{key}", "summary": "deep-merge into a value"},
+				{"method": "POST", "path": "/api/{key}", "summary": "append to an array value"},
+				{"method": "DELETE", "path": "/api/{key}", "summary": "delete a key"},
 				{"method": "GET", "path": "/api/files", "summary": "list uploaded files"},
 				{"method": "GET", "path": "/api/components", "summary": "list component catalog (schemas)"},
 				{"method": "GET", "path": "/api/search?q=...", "summary": "full-text search over pages"},
@@ -145,8 +145,8 @@ Everything is a file under the project root.
 
 There are two write paths, distinguished by where state lives:
 
-1. **Page writes — ` + "`/api/content/<path>`" + `.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
-2. **Data writes — ` + "`/api/data/<key>`" + `.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
+1. **Page writes — ` + "`/api/<path>`" + `.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
+2. **Data writes — ` + "`/api/<key>`" + `.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
 
 **Rule of thumb**: if it deserves a URL on the dashboard, it's a page. If it's a number that updates without a story, it's data.
 
@@ -175,7 +175,7 @@ All URLs are relative to this board's origin. Replace ` + "`$B`" + ` with the bo
 ### Read a page
 
 ` + "```bash" + `
-curl -H "Authorization: Bearer $T" $B/api/content/handbook
+curl -H "Authorization: Bearer $T" $B/api/handbook
 # → { "path": "/handbook", "source": "# Handbook\\n…", "frontmatter": {...}, "etag": "...", ... }
 #   NOTE: "source" is the body only; frontmatter travels in the "frontmatter" map.
 ` + "```" + `
@@ -186,7 +186,7 @@ Body is raw MDX source — frontmatter (` + "`---`" + ` block) plus body. Conten
 
 ` + "```bash" + `
 curl -X PUT -H "Authorization: Bearer $T" -H "Content-Type: text/markdown" \
-  --data-binary @- $B/api/content/handbook <<'EOF'
+  --data-binary @- $B/api/handbook <<'EOF'
 ---
 title: Handbook
 tags: [intro, onboarding]
@@ -209,17 +209,17 @@ curl -X PUT -H 'If-Match: "<etag>"' ...   # 200 on match, 412 with current etag 
 ` + "```bash" + `
 # Move a kanban card without rewriting the doc.
 curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
-  $B/api/content/tasks/ship-v2 \
+  $B/api/tasks/ship-v2 \
   -d '{"frontmatter_patch": {"col": "done", "shipped": "2026-04-28"}}'
 
 # Replace just the body, frontmatter preserved.
 curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
-  $B/api/content/handbook \
+  $B/api/handbook \
   -d '{"body": "# Handbook\\n\\nFresh prose."}'
 
 # Delete a frontmatter key (RFC-7396 null = remove).
 curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
-  $B/api/content/tasks/ship-v2 \
+  $B/api/tasks/ship-v2 \
   -d '{"frontmatter_patch": {"deprecated_field": null}}'
 ` + "```" + `
 
@@ -243,7 +243,7 @@ Then PUT cards under the same folder:
 
 ` + "```bash" + `
 curl -X PUT -H "Authorization: Bearer $T" -H "Content-Type: text/markdown" \
-  --data-binary @- $B/api/content/intake/triage <<'EOF'
+  --data-binary @- $B/api/intake/triage <<'EOF'
 ---
 title: Triage support mailbox
 col: todo
@@ -260,7 +260,7 @@ Move a card with one PATCH:
 
 ` + "```bash" + `
 curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
-  $B/api/content/intake/triage -d '{"frontmatter_patch": {"col": "doing"}}'
+  $B/api/intake/triage -d '{"frontmatter_patch": {"col": "doing"}}'
 ` + "```" + `
 
 ` + "`<Sheet>`" + ` and ` + "`<List>`" + ` follow the same auto-attach rule. See the ` + "`kanban`" + ` skill at ` + "`GET /api/skills/kanban`" + ` for a full worked example.
@@ -268,12 +268,12 @@ curl -X PATCH -H "Authorization: Bearer $T" -H "Content-Type: application/json" 
 ### Set a data value
 
 ` + "```bash" + `
-curl -X PUT $B/api/data/team.uptime -d '99.98' -H "Authorization: Bearer $T"
+curl -X PUT $B/api/team.uptime -d '99.98' -H "Authorization: Bearer $T"
 
-curl -X PATCH $B/api/data/team.status -H "Authorization: Bearer $T" \
+curl -X PATCH $B/api/team.status -H "Authorization: Bearer $T" \
   -d '{"detail":"one small blip"}'
 
-curl -X POST $B/api/data/app.log -H "Authorization: Bearer $T" \
+curl -X POST $B/api/app.log -H "Authorization: Bearer $T" \
   -d '{"ts":"2026-04-28T12:00:00Z","level":"info","message":"deploy started"}'
 ` + "```" + `
 
@@ -319,7 +319,7 @@ Every error is JSON ` + "`{code, error}`" + ` with the appropriate HTTP status:
 - ` + "`GET /api/introduction`" + ` → *this document*
 - ` + "`GET /api/config`" + ` → project title, theme, public paths
 - ` + "`GET /api/components`" + ` → what JSX tags this board knows
-- ` + "`GET /api/content`" + ` → page tree (use ` + "`?prefix=`" + ` and ` + "`?fields=`" + ` to slim)
+- ` + "`GET /api/index`" + ` → flat catalog of every leaf (pages + data + streams)
 - ` + "`GET /api/skills`" + ` → installable skill registry
 - ` + "`GET /api/setup/status`" + ` → ` + "`{initialized}`" + ` flag for unclaimed-board detection
 - ` + "`POST /mcp`" + ` with ` + "`{method:\"tools/list\"}`" + ` → MCP tool catalog
@@ -337,7 +337,7 @@ Every error is JSON ` + "`{code, error}`" + ` with the appropriate HTTP status:
 
 - ` + "`GET /api/skills/kanban`" + ` if you've been asked to build a board
 - ` + "`GET /api/skills/agentboard`" + ` for the broader skill that ships on every board
-- ` + "`GET /api/content`" + ` to see what's already authored here
+- ` + "`GET /api/index`" + ` to see what's already authored here
 - ` + "`GET /api/components`" + ` to learn what JSX tags are valid
 
 That's it. You know enough to start.

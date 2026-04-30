@@ -21,6 +21,6 @@ runtime:
         const axios = require('axios');
         test("delete ok", function() { expect(res.status).to.equal(200); });
         test("key is gone (404)", async function() {
-          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/data/test.mcp.val`, { validateStatus: () => true });
+          const r = await axios.get(`${bru.getEnvVar("baseUrl")}/api/test.mcp.val`, { validateStatus: () => true });
           expect(r.status).to.equal(404);
         });

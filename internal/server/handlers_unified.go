@@ -35,21 +35,30 @@ import (
 
 // extractUnifiedPath pulls the leaf path from a chi catch-all route.
 // Strips a trailing `:append` verb so the caller can route POST
-// `/api/<path>:append` to the stream-append path.
+// `/api/<path>:append` to the stream-append path. Applies the
+// SKILL.md → folder collapse via store.NormalizePagePath so
+// `/api/skills/<slug>/SKILL.md` resolves to the skill's folder
+// index page (spec §1 path layout).
 func extractUnifiedPath(r *http.Request) (path string, isAppend bool) {
 	raw := chi.URLParam(r, "*")
-	raw = strings.TrimSuffix(raw, ".md")
 	if strings.HasSuffix(raw, ":append") {
-		return strings.TrimSuffix(raw, ":append"), true
+		return store.NormalizePagePath(strings.TrimSuffix(raw, ":append")), true
 	}
-	return raw, false
+	return store.NormalizePagePath(raw), false
 }
 
 // handleUnifiedRead is GET /api/<path>. Returns the page envelope for
 // a page leaf, the singleton/collection/stream payload for a data
 // leaf, 404 for anything else. Per spec §5 + §6 every read returns
-// the same envelope shape: {frontmatter, body, version}.
+// the same envelope shape: {frontmatter, body, version}. Recognizes
+// the `/history` suffix per spec §5 (`GET /api/<path>/history`) and
+// routes to the per-doc audit log.
 func (s *Server) handleUnifiedRead(w http.ResponseWriter, r *http.Request) {
+	rawPath := chi.URLParam(r, "*")
+	if strings.HasSuffix(rawPath, "/history") {
+		s.handleUnifiedHistory(w, r, store.NormalizePagePath(strings.TrimSuffix(rawPath, "/history")))
+		return
+	}
 	path, _ := extractUnifiedPath(r)
 	if path == "" {
 		path = "index"
@@ -237,14 +246,27 @@ func (s *Server) handleUnifiedWrite(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// dispatchTarget picks where a write should land based on existing
-// state + body shape. Mirrors internal/mcp/handlers.go::writeOne.
+// dispatchTarget picks where a write should land. Decision tree:
+//
+//  1. Existing leaf wins — fetch as the same shape the catalog
+//     reports (page > data-singleton > data-collection-item).
+//  2. New write with content-type text/markdown or text/plain → page.
+//  3. New write with content-type application/json AND the body
+//     carries a top-level `value` key → data tier (the data envelope
+//     shape; collection-item if the path has a slash, singleton if
+//     flat).
+//  4. Otherwise → page (the body is treated as raw MDX).
+//
+// The `{"value": ...}` signal is the disambiguator that lets a
+// nested path like `kanban/task-1` write a data collection-item
+// instead of a page. Without it the unified namespace can't tell
+// `<path>/<id>` (data-item, JSON envelope) from `<folder>/<page>`
+// (page tier, raw MDX).
 func (s *Server) dispatchTarget(path string, body []byte, contentType string) string {
-	// Existing page wins.
+	// Existing leaf wins.
 	if s.Pages != nil && s.Pages.GetPage(path) != nil {
 		return "page"
 	}
-	// Existing data catalog entry wins next.
 	if s.FileStore != nil {
 		if _, ok := s.FileStore.CatalogGet(path); ok {
 			return "data-singleton"
@@ -253,42 +275,45 @@ func (s *Server) dispatchTarget(path string, body []byte, contentType string) st
 			return "data-item"
 		}
 	}
-	// New write — prefer page when the body looks like MDX or the
-	// caller explicitly asked for markdown.
-	if strings.Contains(strings.ToLower(contentType), "text/markdown") {
+
+	// Content-type hints.
+	ct := strings.ToLower(contentType)
+	if strings.Contains(ct, "text/markdown") || strings.Contains(ct, "text/plain") {
 		return "page"
 	}
-	if strings.Contains(strings.ToLower(contentType), "text/plain") {
-		return "page"
-	}
-	if strings.Contains(strings.ToLower(contentType), "application/json") {
-		// Could be a data write. If the path has a slash AND looks
-		// like a collection-item path (key/id where key is a known
-		// collection), route as data-item. Else if the path has a
-		// slash but no matching collection, this is a new nested
-		// page-tree leaf.
-		if s.FileStore != nil {
-			if _, _, ok := splitCollectionAddress(s.FileStore, path); ok {
-				return "data-item"
-			}
-		}
+
+	// JSON envelope shape `{"value": ...}` ⇒ data tier.
+	if strings.Contains(ct, "application/json") && hasTopLevelValueKey(body) {
 		if strings.Contains(path, "/") {
-			return "page"
+			return "data-item"
 		}
 		return "data-singleton"
 	}
-	// No content-type hint: peek at the bytes.
+
+	// Bytes hint for missing/ambiguous content-type.
 	trimmed := strings.TrimLeft(string(body), " \t\r\n")
-	if strings.HasPrefix(trimmed, "---") {
+	if strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "<") {
 		return "page"
 	}
-	if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "<") {
-		return "page"
-	}
+
+	// Default: nested paths land in the page tier (handles arbitrary
+	// nesting), flat keys in the data tier.
 	if strings.Contains(path, "/") {
 		return "page"
 	}
 	return "data-singleton"
+}
+
+// hasTopLevelValueKey reports whether `body` is a JSON object that
+// includes a top-level `"value"` key. Used by dispatchTarget to
+// distinguish a data-envelope write from a generic JSON page body.
+func hasTopLevelValueKey(body []byte) bool {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	_, ok := probe["value"]
+	return ok
 }
 
 // unifiedWritePage runs the same post-write hooks the legacy
@@ -373,13 +398,18 @@ func (s *Server) unifiedWriteDataSingleton(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, env)
 }
 
-// unifiedWriteDataItem is PUT against a `<key>/<id>` collection-item path.
+// unifiedWriteDataItem is PUT against a `<key>/<id>` collection-item
+// path. Auto-creates the collection on first write — the caller hits
+// /api/<key>/<id> with a data envelope and we route to UpsertItem
+// even if the catalog hasn't seen `<key>` as a collection yet.
 func (s *Server) unifiedWriteDataItem(w http.ResponseWriter, r *http.Request, path string, body []byte) {
-	key, id, ok := splitCollectionAddress(s.FileStore, path)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "wrong_target", "expected collection/item path")
+	idx := strings.LastIndex(path, "/")
+	if idx <= 0 || idx == len(path)-1 {
+		writeError(w, http.StatusBadRequest, "wrong_target", "expected <key>/<id> path")
 		return
 	}
+	key := path[:idx]
+	id := path[idx+1:]
 	var p struct {
 		Meta  *store.Meta     `json:"_meta,omitempty"`
 		Value json.RawMessage `json:"value"`
@@ -432,6 +462,16 @@ func (s *Server) handleUnifiedPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Detect page-shape patches (`{"frontmatter_patch": ...}` or
+	// `{"body": "..."}`) and treat them as 404 when the page tier
+	// has no leaf. The legacy /api/content/* PATCH handler returned
+	// 404 explicitly; the unified path keeps that contract so
+	// callers don't see a misleading 400 missing_value.
+	if isPagePatchBody(body) {
+		respondError(w, http.StatusNotFound, "NOT_FOUND", "page not found: "+path)
+		return
+	}
+
 	// Data tier — value-patch.
 	if s.FileStore != nil {
 		var req struct {
@@ -460,6 +500,25 @@ func (s *Server) handleUnifiedPatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondError(w, http.StatusNotFound, "NOT_FOUND", "no leaf at "+path)
+}
+
+// isPagePatchBody peeks at a JSON PATCH body to detect the
+// `frontmatter_patch` / `body` shape. A patch with those keys is
+// page-shaped; on a missing leaf the unified handler returns 404
+// instead of "missing_value: 400" so the caller gets the right
+// recovery hint.
+func isPagePatchBody(body []byte) bool {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return false
+	}
+	if _, ok := probe["frontmatter_patch"]; ok {
+		return true
+	}
+	if _, ok := probe["body"]; ok {
+		return true
+	}
+	return false
 }
 
 // unifiedPatchPage merges a JSON patch body into the page's
@@ -692,6 +751,53 @@ func (s *Server) handleUnifiedAppend(w http.ResponseWriter, r *http.Request) {
 	}
 	s.dispatchInboxForValueWrite(path, body.Value, actor, "")
 	writeJSON(w, http.StatusOK, line)
+}
+
+// handleUnifiedHistory serves GET /api/<path>/history per spec §5.
+// Routes to the per-doc audit log via the data store. Pages share
+// the same history index (writes go through both layers).
+func (s *Server) handleUnifiedHistory(w http.ResponseWriter, r *http.Request, key string) {
+	if s.FileStore == nil {
+		respondError(w, http.StatusServiceUnavailable, "STORE_UNAVAILABLE", "history store not configured")
+		return
+	}
+	limit := 0
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if n, err := parseLimit(raw); err == nil {
+			limit = n
+		}
+	}
+	// `<key>/<id>` — collection-item history.
+	if k, id, ok := splitCollectionAddress(s.FileStore, key); ok {
+		entries, err := s.FileStore.ReadHistory(k, id, limit)
+		if err != nil {
+			translateStoreError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"key": k, "id": id, "entries": entries, "count": len(entries)})
+		return
+	}
+	entries, err := s.FileStore.ReadHistory(key, "", limit)
+	if err != nil {
+		translateStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "entries": entries, "count": len(entries)})
+}
+
+// parseLimit accepts a positive integer string from a `?limit=` query.
+func parseLimit(s string) (int, error) {
+	var n int
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, errors.New("limit must be digits")
+		}
+		n = n*10 + int(r-'0')
+	}
+	if n == 0 {
+		return 0, errors.New("limit must be > 0")
+	}
+	return n, nil
 }
 
 // splitCollectionAddress is the same logic the MCP layer uses

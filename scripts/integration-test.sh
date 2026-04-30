@@ -167,51 +167,51 @@ BEARER_POST=$(authed -o /dev/null -w '%{http_code}' -X POST \
 [ "$BEARER_POST" = "201" ] && pass "Bearer POST skips CSRF → 201" \
   || fail "Bearer skip CSRF" "got $BEARER_POST"
 
-# ----- Files-first store: /api/data/<key> -----
+# ----- Files-first store: /api/<key> -----
 echo ""
 note "Files-first store"
 
-assert_status "PUT singleton"   PUT "/api/data/test.k" 200 \
+assert_status "PUT singleton"   PUT "/api/test.k" 200 \
   -H 'Content-Type: application/json' -d '{"value":42}'
-assert_jq     "GET singleton"   "/api/data/test.k" '.value' "42"
-assert_jq     "shape singleton" "/api/data/test.k" '._meta.shape' "singleton"
+assert_jq     "GET singleton"   "/api/test.k" '.value' "42"
+assert_jq     "shape singleton" "/api/test.k" '._meta.shape' "singleton"
 
-VERSION=$(authed "$URL/api/data/test.k" | jq -r '._meta.version')
-assert_status "PATCH merge create"  PATCH "/api/data/test.cfg" 200 \
+VERSION=$(authed "$URL/api/test.k" | jq -r '._meta.version')
+assert_status "PATCH merge create"  PATCH "/api/test.cfg" 200 \
   -H 'Content-Type: application/json' -d '{"value":{"a":1,"b":2}}'
-assert_status "PATCH merge update"  PATCH "/api/data/test.cfg" 200 \
+assert_status "PATCH merge update"  PATCH "/api/test.cfg" 200 \
   -H 'Content-Type: application/json' -d '{"value":{"a":99,"c":3}}'
-assert_jq     "deep merge a=99"     "/api/data/test.cfg" '.value.a' "99"
-assert_jq     "deep merge b=2"      "/api/data/test.cfg" '.value.b' "2"
-assert_jq     "deep merge c=3"      "/api/data/test.cfg" '.value.c' "3"
+assert_jq     "deep merge a=99"     "/api/test.cfg" '.value.a' "99"
+assert_jq     "deep merge b=2"      "/api/test.cfg" '.value.b' "2"
+assert_jq     "deep merge c=3"      "/api/test.cfg" '.value.c' "3"
 
-assert_status "Upsert collection 1"  PUT "/api/data/test.kanban/task-1" 200 \
+assert_status "Upsert collection 1"  PUT "/api/test.kanban/task-1" 200 \
   -H 'Content-Type: application/json' -d '{"value":{"title":"a","col":"todo"}}'
-assert_status "Upsert collection 2"  PUT "/api/data/test.kanban/task-2" 200 \
+assert_status "Upsert collection 2"  PUT "/api/test.kanban/task-2" 200 \
   -H 'Content-Type: application/json' -d '{"value":{"title":"b","col":"todo"}}'
-assert_jq     "List collection (2)"  "/api/data/test.kanban" '.items | length' "2"
+assert_jq     "List collection (2)"  "/api/test.kanban" '.items | length' "2"
 
-assert_status "Stream append"  POST "/api/data/test.events?op=append" 200 \
+assert_status "Stream append"  POST "/api/test.events:append" 200 \
   -H 'Content-Type: application/json' -d '{"value":{"e":"signup"}}'
-assert_jq "Stream tail" "/api/data/test.events?limit=10" '.lines | length' "1"
+assert_jq "Stream tail" "/api/test.events?limit=10" '.lines | length' "1"
 
 assert_status "Wrong shape (append on singleton) → 409" \
-  POST "/api/data/test.k?op=append" 409 \
+  POST "/api/test.k:append" 409 \
   -H 'Content-Type: application/json' -d '{"value":1}'
 
-assert_status "DELETE singleton" DELETE "/api/data/test.k" 204
+assert_status "DELETE singleton" DELETE "/api/test.k" 204
 
 # ----- Content (MDX pages) -----
 echo ""
 note "Content / MDX pages"
 
-assert_status "GET content list" GET "/api/content" 200
-assert_status "GET index page"   GET "/api/content/index" 200
-assert_status "Write new page"   PUT "/api/content/scratch" 200 \
+assert_status "GET catalog"      GET "/api/index" 200
+assert_status "GET home page"    GET "/api/" 200
+assert_status "Write new page"   PUT "/api/scratch" 200 \
   -H 'Content-Type: text/markdown' -d $'# Scratch\n\nIntegration test page.'
-assert_status "Read it back"     GET "/api/content/scratch" 200
-assert_status "DELETE protected index → 400" DELETE "/api/content/index" 400
-assert_status "DELETE scratch"   DELETE "/api/content/scratch" 200
+assert_status "Read it back"     GET "/api/scratch" 200
+assert_status "DELETE protected index → 400" DELETE "/api/index" 400
+assert_status "DELETE scratch"   DELETE "/api/scratch" 200
 
 # ----- Files (binary upload via presigned URL) -----
 echo ""

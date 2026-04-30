@@ -5,7 +5,7 @@ info:
 
 http:
   method: DELETE
-  url: "{{baseUrl}}/api/content/ops/deploys"
+  url: "{{baseUrl}}/api/ops/deploys"
 
 runtime:
   scripts:

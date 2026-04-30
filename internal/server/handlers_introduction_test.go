@@ -31,7 +31,7 @@ func TestIntroduction_DefaultIsMarkdown(t *testing.T) {
 	if !strings.Contains(s, "# AgentBoard") {
 		t.Errorf("markdown missing top-level heading")
 	}
-	if !strings.Contains(s, "/api/content/") {
+	if !strings.Contains(s, "/api/") {
 		t.Errorf("markdown missing API examples")
 	}
 }

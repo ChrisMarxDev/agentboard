@@ -25,7 +25,7 @@ runtime:
           jsonrpc: "2.0", id: 7, method: "tools/call",
           params: { name: "agentboard_merge", arguments: { key: "test.mcp.obj", value: { b: 2 } } },
         });
-        const r = await axios.get(`${baseUrl}/api/data/test.mcp.obj`);
+        const r = await axios.get(`${baseUrl}/api/test.mcp.obj`);
         bru.setVar("mergedKeys", Object.keys(r.data.value).sort().join(","));
     - type: tests
       code: |-

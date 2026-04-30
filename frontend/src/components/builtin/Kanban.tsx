@@ -590,7 +590,7 @@ interface KanbanCardModalProps {
 //   - body       → multiline textarea (auto-persisted, shown via <RichText>)
 //   - id         → read-only (the row key server-side)
 //
-// Writes go through PATCH /api/data/<source>/<id>. Every saved edit
+// Writes go through PATCH /api/<source>/<id>. Every saved edit
 // fires the existing data.merge.<key> event, which fans out on the
 // webhook bus. Mention-in-title and assignee-add both produce inbox
 // items server-side (see internal/server/inbox_dispatch.go).
@@ -1987,7 +1987,7 @@ function NewTaskBar({ source }: { source: string }) {
   }
 
   async function exists(path: string): Promise<boolean> {
-    const res = await apiFetch(`/api/content/${path}`, { method: 'HEAD' })
+    const res = await apiFetch(`/api/${path}`, { method: 'HEAD' })
     return res.ok
   }
 
@@ -2021,7 +2021,7 @@ col: todo
 created: ${today}
 ---
 `
-      const res = await apiFetch(`/api/content/${folder}/${slug}`, {
+      const res = await apiFetch(`/api/${folder}/${slug}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'text/markdown' },
         body,
@@ -2188,7 +2188,7 @@ function TaskComments({
 
   const refresh = useCallback(async () => {
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(streamKey)}?limit=200`)
+      const res = await apiFetch(`/api/${encodeURIComponent(streamKey)}?limit=200`)
       if (res.status === 404) {
         setComments([])
         return
@@ -2214,7 +2214,7 @@ function TaskComments({
     if (!body) return
     setBusy(true)
     try {
-      const res = await apiFetch(`/api/data/${encodeURIComponent(streamKey)}?op=append`, {
+      const res = await apiFetch(`/api/${encodeURIComponent(streamKey)}:append`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

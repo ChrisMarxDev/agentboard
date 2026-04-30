@@ -67,7 +67,7 @@ func TestScope_AnonymousNeedsPublicMatcher(t *testing.T) {
 	}
 
 	// Matcher allows data/hb.main → anonymous can read that key only.
-	b.PublicMatcher = publicroutes.New([]string{"/api/data/hb.main"})
+	b.PublicMatcher = publicroutes.New([]string{"/api/hb.main"})
 	sWithMatcher, _ := b.Build("handbook", AuthorityAnonymous, nil)
 	if !sWithMatcher.CanReadData("hb.main") {
 		t.Errorf("anonymous with matching public rule should read hb.main")
@@ -98,7 +98,7 @@ func TestScope_AgentRespectsRules(t *testing.T) {
 		Kind:       auth.KindMember,
 		AccessMode: auth.ModeRestrictToList,
 		Rules: []auth.Rule{
-			auth.Allow("/api/data/hb.main", "GET"),
+			auth.Allow("/api/hb.main", "GET"),
 		},
 	}
 	s, _ := b.Build("handbook", AuthorityAgent, agent)

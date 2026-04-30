@@ -56,7 +56,7 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
     setBusy(true)
     setErr(null)
     try {
-      const res = await apiFetch(`/api/content/${encodeURI(pagePath)}`, { method: 'DELETE' })
+      const res = await apiFetch(`/api/${encodeURI(pagePath)}`, { method: 'DELETE' })
       if (!res.ok) {
         const body = await res.text().catch(() => '')
         throw new Error(body || `DELETE ${pagePath} → ${res.status}`)
@@ -94,7 +94,7 @@ export default function PageActionsMenu({ pagePath, pageTitle }: PageActionsMenu
   async function exportPage() {
     setOpen(false)
     try {
-      const res = await apiFetch(`/api/content/${encodeURI(pagePath)}`, {
+      const res = await apiFetch(`/api/${encodeURI(pagePath)}`, {
         headers: { Accept: 'text/markdown' },
       })
       if (!res.ok) throw new Error(`GET ${pagePath} → ${res.status}`)

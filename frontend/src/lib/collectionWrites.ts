@@ -5,10 +5,11 @@
 //
 // Trailing-slash sources (`tasks/`) are folder-of-pages collections.
 // Each row is an .md file under `content/<source>/<id>.md`; mutations
-// flow through `/api/content/*`.
+// flow through `/api/<source>/<id>` (the unified namespace; spec §5).
 //
 // Bare sources (`store.key`) are file-store collections. Mutations go
-// through `/api/data/<source>/<id>` against the files-first store.
+// through `/api/<source>/<id>` against the files-first store. The
+// dispatcher routes by lookup so the same URL covers both cases.
 //
 // Frontmatter-splat sources (a key that the broker pulled from the
 // owning page's YAML) cannot be mutated per-row from a component —
@@ -35,14 +36,14 @@ export async function patchCollectionItem(
 ): Promise<Response> {
   if (isFolderSource(source)) {
     const path = folderPath(source) + '/' + encodeURIComponent(id)
-    return apiFetch(`/api/content/${path}`, {
+    return apiFetch(`/api/${path}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ frontmatter_patch: patch }),
     })
   }
   return apiFetch(
-    `/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+    `/api/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -61,7 +62,7 @@ export async function patchPageFrontmatter(
 ): Promise<Response> {
   const cleaned = pagePath.replace(/^\/+/, '').replace(/\.md$/, '')
   const encoded = cleaned.split('/').map(encodeURIComponent).join('/')
-  return apiFetch(`/api/content/${encoded}`, {
+  return apiFetch(`/api/${encoded}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ frontmatter_patch: patch }),
@@ -82,7 +83,7 @@ export async function patchCollectionItemBody(
     throw new Error('patchCollectionItemBody only works on folder sources')
   }
   const path = folderPath(source) + '/' + encodeURIComponent(id)
-  return apiFetch(`/api/content/${path}`, {
+  return apiFetch(`/api/${path}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ body }),
@@ -99,7 +100,7 @@ export async function readCollectionItemBody(
 ): Promise<string> {
   if (!isFolderSource(source)) return ''
   const path = folderPath(source) + '/' + encodeURIComponent(id)
-  const res = await apiFetch(`/api/content/${path}`, {
+  const res = await apiFetch(`/api/${path}`, {
     headers: { Accept: 'application/json' },
   })
   if (!res.ok) return ''
@@ -134,13 +135,13 @@ export async function createCollectionItem(
       .map(([k, v]) => `${k}: ${JSON.stringify(v ?? '')}`)
       .join('\n')
     const md = `---\n${fm}\n---\n`
-    return apiFetch(`/api/content/${path}`, {
+    return apiFetch(`/api/${path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'text/markdown' },
       body: md,
     })
   }
-  return apiFetch(`/api/data/${encodeURIComponent(source)}`, {
+  return apiFetch(`/api/${encodeURIComponent(source)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(row),
@@ -153,10 +154,10 @@ export async function deleteCollectionItem(
 ): Promise<Response> {
   if (isFolderSource(source)) {
     const path = folderPath(source) + '/' + encodeURIComponent(id)
-    return apiFetch(`/api/content/${path}`, { method: 'DELETE' })
+    return apiFetch(`/api/${path}`, { method: 'DELETE' })
   }
   return apiFetch(
-    `/api/data/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
+    `/api/${encodeURIComponent(source)}/${encodeURIComponent(id)}`,
     { method: 'DELETE' },
   )
 }

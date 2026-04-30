@@ -112,9 +112,11 @@ Conflict response (`412`) embeds the current envelope. Wrong-shape errors (`409`
 
 **Auth surfaces are separate.** `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/invitations/<id>/redeem`, the OAuth `/oauth/*` flow, the admin endpoints `/api/admin/*` and `/api/users/*` — all read and write SQLite tables, not files. They are not part of the content surface.
 
-**Reserved prefixes.** `<path>` does NOT start with one of the operational namespaces (`admin`, `auth`, `users`, `me`, `setup`, `health`, `config`, `index`, `search`, `activity`, `invitations`, `upload`, `view`, `share`, `approval`, `webhooks`, `inbox`, `errors`, `grab`, `events`, `tree`, `files`, `components`, `skills`, `oauth`, `introduction`, `locks`, `teams`). Those mount as their own routes. The chi dispatcher resolves more-specific routes first, so a content path like `tasks/task-42` falls through to the unified handler.
+**Reserved prefixes.** `<path>` does NOT start with one of the operational namespaces (`admin`, `auth`, `users`, `me`, `setup`, `health`, `config`, `index`, `search`, `activity`, `invitations`, `upload`, `view`, `share`, `approval`, `webhooks`, `inbox`, `errors`, `grab`, `events`, `tree`, `files`, `components`, `skills`, `oauth`, `introduction`, `locks`, `teams`, `content`). Those mount as their own routes. The chi dispatcher resolves more-specific routes first, so a content path like `tasks/task-42` falls through to the unified handler. `/api/content` survives only as the page-list + move + bulk-delete operational endpoint; per-leaf CRUD lives at `/api/<path>`.
 
-**Migration footprint.** The unified `/api/<path>` namespace is live. The legacy per-domain routes (`/api/content/<path>`, `/api/data/<key>`, `/api/data/<key>/<id>`, `/api/data/<key>?op=append`) are still accepted for one cycle so the SPA, integration tests, smoke tests, and bruno tests can migrate at their own cadence. They retire in the next cut once every caller has flipped — at which point the dispatcher logic in `internal/server/handlers_unified.go` becomes the single read/write/patch/delete path for the content tier.
+**Dispatcher rules.** The unified handler routes by lookup: page tree first, then data catalog. New writes go to the page tree when `body` is non-empty or the path has a slash; otherwise to the data tier as a flat-key singleton. Data-shaped writes (JSON body with a top-level `value:` key) on a `<key>/<id>` path target the data tier's collection-item upsert.
+
+**Stream verb.** Stream append is `POST /api/<path>:append`. The `:` suffix is the only operator-style verb in the namespace; everything else is path-shaped.
 
 ## 6. MCP surface — eight tools + named extensions, always-plural
 

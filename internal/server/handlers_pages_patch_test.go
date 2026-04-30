@@ -30,7 +30,7 @@ func readPageFromDisk(t *testing.T, srv *Server, path string) string {
 func patchPage(t *testing.T, base, path string, payload any, ifMatch string) *http.Response {
 	t.Helper()
 	body, _ := json.Marshal(payload)
-	req, _ := http.NewRequest(http.MethodPatch, base+"/api/content/"+path, bytes.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, base+"/api/"+path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if ifMatch != "" {
 		req.Header.Set("If-Match", `"`+ifMatch+`"`)

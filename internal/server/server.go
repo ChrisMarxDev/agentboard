@@ -663,14 +663,14 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// board claim now happens via /invite/<id>.
 		r.Get("/setup/status", s.handleSetupStatus)
 
-		// Content endpoints (MDX dashboards + knowledge docs)
+		// Content side-channel endpoints. The legacy /api/content/<path>
+		// CRUD verbs got retired in Cut 8 — pages now live at /api/<path>
+		// alongside data leaves through the unified namespace
+		// (handlers_unified.go). The cross-cutting verbs below are not
+		// content reads, so they keep dedicated routes.
 		r.Get("/content", s.handleListPages)
 		r.Post("/content/move", s.handleMovePage)
 		r.Post("/content/bulk-delete", s.handleBulkDeleteContent)
-		r.Get("/content/*", s.handleGetPage)
-		r.Put("/content/*", s.handleWritePage)
-		r.Patch("/content/*", s.handlePatchPage)
-		r.Delete("/content/*", s.handleDeletePage)
 
 		// Share tokens — per-page public links. Lives under /api/share
 		// (not nested under /content/) so chi's content wildcard doesn't

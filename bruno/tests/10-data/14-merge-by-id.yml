@@ -5,7 +5,7 @@ info:
 
 http:
   method: PATCH
-  url: "{{baseUrl}}/api/data/test.v2.kanban/task-1"
+  url: "{{baseUrl}}/api/test.v2.kanban/task-1"
   headers:
     - name: Content-Type
       value: application/json

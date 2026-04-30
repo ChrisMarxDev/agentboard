@@ -5,11 +5,9 @@ package server
 //   - page tier: PUT/GET/PATCH/DELETE on /api/<page-path>
 //   - data tier: PUT/GET on /api/<flat-key> (singleton)
 //   - reserved prefixes: /api/health, /api/me, /api/index still 200
-//   - both legacy and unified surfaces accept the same write
 //
-// The legacy /api/content/* and /api/data/<key> routes still work
-// during the migration window — the test confirms they match
-// /api/<path>'s semantics so callers can flip incrementally.
+// Cut 8 retired the legacy /api/content/* + /api/data/<key> routes;
+// /api/<path> is now the only content-tier surface.
 
 import (
 	"bytes"
@@ -136,37 +134,7 @@ func TestUnifiedAPI_ReservedPrefixesStillWork(t *testing.T) {
 	}
 }
 
-func TestUnifiedAPI_LegacyAndUnifiedAgree(t *testing.T) {
-	// Writing the same source through /api/content/<path> and reading
-	// back through /api/<path> should produce the same envelope.
-	// Confirms the unified namespace is a transparent alias during
-	// the migration window.
-	_, ts := newTestServer(t)
-
-	src := "---\ntitle: Legacy Echo\n---\n\nSame source\n"
-	req, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/echo", strings.NewReader(src))
-	req.Header.Set("Content-Type", "text/markdown")
-	resp, _ := http.DefaultClient.Do(req)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("legacy PUT: %d", resp.StatusCode)
-	}
-
-	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/echo", nil)
-	g.Header.Set("Accept", "application/json")
-	gResp, gErr := http.DefaultClient.Do(g)
-	if gErr != nil {
-		t.Fatal(gErr)
-	}
-	defer gResp.Body.Close()
-	if gResp.StatusCode != http.StatusOK {
-		t.Fatalf("unified GET after legacy PUT: %d", gResp.StatusCode)
-	}
-	var page struct {
-		Title string `json:"title"`
-	}
-	_ = json.NewDecoder(gResp.Body).Decode(&page)
-	if page.Title != "Legacy Echo" {
-		t.Errorf("unified GET sees title=%q after legacy PUT (want 'Legacy Echo')", page.Title)
-	}
-}
+// TestUnifiedAPI_LegacyAndUnifiedAgree retired in Cut 8 — the
+// legacy /api/content/* and /api/data/<key> routes are gone, so
+// there's nothing to compare unified against. The other tests in
+// this file cover unified-surface behavior.

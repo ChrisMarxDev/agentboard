@@ -100,7 +100,7 @@ describe('PageActionsMenu', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled()
   })
 
-  it('confirm fires DELETE against /api/content/{path} and navigates home', async () => {
+  it('confirm fires DELETE against /api/{path} and navigates home', async () => {
     render(<Harness pagePath="features/kanban" />)
     fireEvent.click(screen.getByLabelText('Page actions'))
     fireEvent.click(screen.getByText('Delete page'))
@@ -108,7 +108,7 @@ describe('PageActionsMenu', () => {
 
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
     const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(url).toBe('/api/content/features/kanban')
+    expect(url).toBe('/api/features/kanban')
     expect(init.method).toBe('DELETE')
   })
 
@@ -143,7 +143,7 @@ describe('PageActionsMenu', () => {
 
       await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1))
       const [url, init] = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0]
-      expect(url).toBe('/api/content/features/kanban')
+      expect(url).toBe('/api/features/kanban')
       // apiFetch normalises headers via `new Headers(...)`, so the init
       // carries a Headers instance rather than the plain object we passed.
       const headers = init.headers as Headers
