@@ -140,6 +140,24 @@ The test: *can I tar the project root, drop the SQLite operational database, res
 
 ---
 
+## 14. Content lives inside its file
+
+A leaf in the tree owns its content. A page's title, status, metric values, kanban columns — they live in *that page's* frontmatter and body, not in a sibling file referenced by key. Components resolve `source=` against the page they render in by default: `<Metric source="value">` reads the rendering page's frontmatter, full stop. There is no "data tier", no `data/<key>` parallel namespace, no scalar-by-id lookup. One container per content unit.
+
+**Three explicit carve-outs, and that's the entire list:**
+
+- **Folder collections** — `<Kanban source="tasks/">` reads every `tasks/*.md` because cards-as-pages is the cleanest way to model many-of-the-same-thing. Trailing slash on the source is the marker.
+- **Streams** — `<Log source="deploys">` tails an NDJSON leaf. Streams are a separate shape because line-append-atomically is a different storage problem from page edits.
+- **Binaries** — `<Image src="/api/files/banner.png">` references an uploaded blob via URL, not a `source=` prop. Treat them like any other static asset.
+
+Anything else — "store this number somewhere, then reference it by key from another page" — is forbidden. The view broker actively refuses to resolve cross-page singleton references (per spec §7), and the write dispatcher refuses to invent a `data/` namespace for JSON-envelope writes; a `PUT` with `{"value": 42}` body lands as frontmatter on a `.md` page at the same path. If two pages need the same value, denormalize, or move both into a folder collection.
+
+This is the unblocker for #5 and #4 on the agent side: a non-technical reader can answer *"where does this value come from?"* by looking at the page in front of them, and an agent that wants to bump a number writes one `PATCH` to one path. It also removes the single biggest trap that previously led agents to invent parallel directory structures — when the docs talked about a "data tier" with "data keys", agents created `roasters/data/cups_today` to mirror the API split. One container per content unit means there's no parallel namespace to extrapolate into.
+
+The test: *delete every other file under content/ and only keep the page you're reading. Does it still render its own scalars?* If the answer is "no, the metric value lived in `dev.users` somewhere else", that's a violation. Folder collections, streams, and binaries are the legitimate exceptions; nothing else.
+
+---
+
 ## How to use this file
 
 Before any non-trivial change, ask which principles it touches and whether it strengthens or weakens them. If a change violates one, either reshape it until it doesn't, or surface the trade-off explicitly in the PR/conversation.

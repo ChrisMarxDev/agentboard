@@ -336,49 +336,12 @@ func (s *Server) writeOne(it writeItem, actor string) writeResult {
 	if norm == "" {
 		return writeResult{Path: it.Path, Success: false, Error: &toolError{Code: "invalid_path", Message: "path required"}}
 	}
-
-	// Routing rules:
-	//   1. Existing page → page tier.
-	//   2. Existing data leaf (singleton / collection / collection-item /
-	//      stream) → data tier.
-	//   3. Brand-new write:
-	//      - Path contains a slash → page tier (data store only accepts
-	//        flat keys; nested layouts live in the page tree).
-	//      - Body supplied → page tier (data leaves don't carry body).
-	//      - Otherwise → data tier as a flat-key singleton.
-	//
-	// This keeps existing data writes working (no churn on
-	// `dev.features.foo.bar`) while honouring spec §1's "one tree with
-	// arbitrary nesting" via the page tier.
-	hasBody := it.Body != nil
-	existingPage := s.Pages != nil && s.Pages.GetPage(norm) != nil
-	existingDataLeaf := false
-	if s.FileStore != nil {
-		if _, ok := s.FileStore.CatalogGet(norm); ok {
-			existingDataLeaf = true
-		} else if _, ok := splitCollectionPath(s.FileStore, norm); ok {
-			existingDataLeaf = true
-		}
-	}
-
-	target := "page"
-	switch {
-	case existingPage:
-		target = "page"
-	case existingDataLeaf:
-		target = "data"
-	case strings.Contains(norm, "/"):
-		target = "page"
-	case hasBody:
-		target = "page"
-	default:
-		target = "data"
-	}
-
-	if target == "page" {
-		return s.writePage(norm, it, actor)
-	}
-	return s.writeData(norm, it, actor)
+	// CORE_GUIDELINES §14: every write lands as a page leaf. The old
+	// "data tier" branch (singleton .md files in <project>/data/) is
+	// retired so agents can't accidentally invent a parallel `data/`
+	// namespace. Frontmatter-only writes still work — they produce a
+	// page with frontmatter and an empty body.
+	return s.writePage(norm, it, actor)
 }
 
 func (s *Server) writePage(path string, it writeItem, actor string) writeResult {
@@ -503,66 +466,50 @@ func (s *Server) patchOne(it patchItem, actor string) writeResult {
 		return writeResult{Path: norm, Success: false, Error: &toolError{Code: "invalid_value", Message: "frontmatter_patch and/or body required"}}
 	}
 
-	// Page tier — current page must exist (we can't patch what's not
-	// there). Body is preserved when nil.
-	if s.Pages != nil {
-		if cur := s.Pages.GetPage(norm); cur != nil {
-			merged := map[string]any{}
-			for k, v := range cur.Frontmatter {
-				merged[k] = v
-			}
-			for k, v := range it.FrontmatterPatch {
-				if v == nil {
-					delete(merged, k)
-				} else {
-					merged[k] = v
-				}
-			}
-			body := cur.Source
-			if it.Body != nil {
-				body = *it.Body
-			}
-			source, err := store.AssemblePageSource(merged, body)
-			if err != nil {
-				return writeResult{Path: norm, Success: false, Error: &toolError{Code: "assemble", Message: err.Error()}}
-			}
-			if err := s.Pages.WritePageIfMatch(norm, source, it.Version); err != nil {
-				return writeResult{Path: norm, Success: false, Error: pageToolErr(err)}
-			}
-			if s.AfterPageWrite != nil {
-				s.AfterPageWrite(norm, source, actor)
-			}
-			page := s.Pages.GetPage(norm)
-			res := writeResult{Path: norm, Success: true}
-			if page != nil {
-				res.Version = page.Version
-				res.Warnings = store.CheckShape(norm, page.Frontmatter)
-			}
-			return res
+	// CORE_GUIDELINES §14: patches always target a page. The current
+	// page must exist (you can't merge into nothing). Body is preserved
+	// when nil. Legacy data-tier merges that used to auto-create a
+	// singleton via merge-against-missing are gone — agents that want
+	// to create a new leaf write it explicitly.
+	if s.Pages == nil {
+		return writeResult{Path: norm, Success: false, Error: &toolError{Code: "page_unavailable", Message: "page manager not configured"}}
+	}
+	cur := s.Pages.GetPage(norm)
+	if cur == nil {
+		return writeResult{Path: norm, Success: false, Error: &toolError{Code: "not_found", Message: "no page at this path — write it first"}}
+	}
+	merged := map[string]any{}
+	for k, v := range cur.Frontmatter {
+		merged[k] = v
+	}
+	for k, v := range it.FrontmatterPatch {
+		if v == nil {
+			delete(merged, k)
+		} else {
+			merged[k] = v
 		}
 	}
-
-	// Data tier — RFC-7396 merge against the singleton/collection-item.
-	if s.FileStore != nil {
-		patchBytes, err := json.Marshal(it.FrontmatterPatch)
-		if err != nil {
-			return writeResult{Path: norm, Success: false, Error: &toolError{Code: "encode", Message: err.Error()}}
-		}
-		if cat, ok := splitCollectionPath(s.FileStore, norm); ok {
-			env, err := s.FileStore.MergeItem(cat.key, cat.id, patchBytes, actor)
-			if err != nil {
-				return writeResult{Path: norm, Success: false, Error: storeToolErr(err)}
-			}
-			return finalizeWriteResult(norm, env, it.FrontmatterPatch)
-		}
-		env, err := s.FileStore.Merge(norm, patchBytes, actor)
-		if err != nil {
-			return writeResult{Path: norm, Success: false, Error: storeToolErr(err)}
-		}
-		return finalizeWriteResult(norm, env, it.FrontmatterPatch)
+	body := cur.Source
+	if it.Body != nil {
+		body = *it.Body
 	}
-
-	return writeResult{Path: norm, Success: false, Error: &toolError{Code: "not_found", Message: "no leaf at this path"}}
+	source, err := store.AssemblePageSource(merged, body)
+	if err != nil {
+		return writeResult{Path: norm, Success: false, Error: &toolError{Code: "assemble", Message: err.Error()}}
+	}
+	if err := s.Pages.WritePageIfMatch(norm, source, it.Version); err != nil {
+		return writeResult{Path: norm, Success: false, Error: pageToolErr(err)}
+	}
+	if s.AfterPageWrite != nil {
+		s.AfterPageWrite(norm, source, actor)
+	}
+	page := s.Pages.GetPage(norm)
+	res := writeResult{Path: norm, Success: true}
+	if page != nil {
+		res.Version = page.Version
+		res.Warnings = store.CheckShape(norm, page.Frontmatter)
+	}
+	return res
 }
 
 // ---------- agentboard_append ----------

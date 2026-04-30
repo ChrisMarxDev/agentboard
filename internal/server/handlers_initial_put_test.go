@@ -2,9 +2,12 @@ package server
 
 // Regression coverage for ISSUES.md #3 (initial PUT must succeed without
 // If-Match) and ISSUES.md #4 (PATCH error message must match the parser's
-// real accepted shape). Both surfaces — pages under /api/content/* and
-// data under /api/data/* — go through the same checks. Spec §5: "A PUT
-// to a path with no existing leaf MUST succeed without `If-Match`."
+// real accepted shape). Spec §5: "A PUT to a path with no existing leaf
+// MUST succeed without `If-Match`."
+//
+// Post-§14: every write lands as a page leaf, so the JSON `{"value":…}`
+// envelope shape that used to write a singleton now writes a page with
+// `value:` in the frontmatter.
 
 import (
 	"bytes"
@@ -15,9 +18,9 @@ import (
 	"testing"
 )
 
-// TestInitialPut_DataNoIfMatch — fresh /api/data/<key> writes succeed
-// without any If-Match header AND without _meta.version in the body.
-// Issue 3.
+// TestInitialPut_DataNoIfMatch — fresh PUT with `{"value":…}` body
+// succeeds without If-Match and lands as a page with `value:` in the
+// frontmatter (per §14, every write is a page leaf).
 func TestInitialPut_DataNoIfMatch(t *testing.T) {
 	_, ts := newTestServer(t)
 
@@ -34,7 +37,7 @@ func TestInitialPut_DataNoIfMatch(t *testing.T) {
 		t.Fatalf("PUT initial: status=%d body=%s", resp.StatusCode, raw)
 	}
 
-	// Read it back, confirm the value landed.
+	// Read it back; the value lives in the page's frontmatter.
 	g, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/never-existed", nil)
 	gResp, err := http.DefaultClient.Do(g)
 	if err != nil {
@@ -45,11 +48,11 @@ func TestInitialPut_DataNoIfMatch(t *testing.T) {
 		t.Fatalf("GET after initial PUT: status=%d", gResp.StatusCode)
 	}
 	var got struct {
-		Value json.RawMessage `json:"value"`
+		Frontmatter map[string]any `json:"frontmatter"`
 	}
 	_ = json.NewDecoder(gResp.Body).Decode(&got)
-	if string(got.Value) != "42" {
-		t.Errorf("round-trip value: got %q want %q", got.Value, "42")
+	if v, ok := got.Frontmatter["value"]; !ok || v != float64(42) {
+		t.Errorf("round-trip frontmatter.value: got %v want 42", v)
 	}
 }
 
@@ -111,18 +114,15 @@ func TestPatchData_ErrorMessageMatchesShape(t *testing.T) {
 		t.Fatalf("PATCH wrong shape: status=%d (want 400)", resp.StatusCode)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	var errBody struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
+	body := string(raw)
+	// Post-§14 the PATCH parser names the page-shaped fields plus the
+	// translated `{"value": <patch>}` envelope. Either reference is
+	// enough — both are accepted.
+	if !strings.Contains(body, `frontmatter_patch`) && !strings.Contains(body, `{\"value\": <patch>}`) {
+		t.Errorf("PATCH error must name an accepted shape; got: %s", body)
 	}
-	if err := json.Unmarshal(raw, &errBody); err != nil {
-		t.Fatalf("decode err body: %v (raw=%s)", err, raw)
-	}
-	if !strings.Contains(errBody.Message, `{"value": <patch>}`) {
-		t.Errorf("PATCH error must name the accepted shape; got: %s", errBody.Message)
-	}
-	if strings.Contains(errBody.Message, "top-level patch object") {
-		t.Errorf("PATCH error still mentions the never-supported 'top-level patch object' shape: %s", errBody.Message)
+	if strings.Contains(body, "top-level patch object") {
+		t.Errorf("PATCH error still mentions the never-supported 'top-level patch object' shape: %s", body)
 	}
 
 	// And the documented shape works.

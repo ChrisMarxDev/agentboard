@@ -2,21 +2,20 @@ package server
 
 // Cut 7: REST namespace unification. Spec §5 says one namespace —
 // `/api/<path>` GET/PUT/PATCH/DELETE/POST :append — covers the entire
-// content tier. The dispatcher routes by lookup: page tree first
-// (handles arbitrary nesting), then the data catalog. New writes go
-// to the page tree when `body` is present or the path has a slash;
-// otherwise to the data tier as a flat-key singleton. Same routing
-// rules the MCP layer uses (internal/mcp/handlers.go::writeOne).
+// content tier.
+//
+// Cut 11 (CORE_GUIDELINES §14): write dispatch collapses. Every write
+// lands as a `.md` page leaf in the page tree. JSON `{"value": …}`
+// bodies are translated to YAML frontmatter at the boundary. The old
+// "data tier" branch (singleton .md files in `<project>/data/`) is
+// retired — pages are the only authoring shape. Streams stay because
+// append-atomically is a different storage problem; binaries stay as
+// uploaded blobs. Reads still resolve existing FileStore singletons
+// during the migration window.
 //
 // Reserved /api/* prefixes (admin, auth, view, files, components, etc.)
 // are registered before this catch-all wildcard so they win the chi
 // dispatcher; everything else is content.
-//
-// The legacy `/api/content/*` and `/api/data/{key}` routes call into
-// the same underlying store/page-manager primitives, so a path
-// reachable via the unified namespace also writes the same bytes
-// regardless of which surface the agent picks. The next cut retires
-// the legacy routes once SPA + tests + bruno have all migrated.
 
 import (
 	"encoding/json"
@@ -210,16 +209,16 @@ func (s *Server) respondUnifiedPage(w http.ResponseWriter, r *http.Request, page
 	respondJSON(w, http.StatusOK, payload)
 }
 
-// handleUnifiedWrite is PUT /api/<path>. Body is raw bytes:
-//   - text/markdown (or unspecified) → page tier (full-source write)
-//   - application/json → data tier (singleton write with `{value}`
-//     envelope or a frontmatter-only object)
+// handleUnifiedWrite is PUT /api/<path>. Every write lands as a `.md`
+// page leaf. Two body shapes are accepted:
 //
-// The dispatcher prefers existing-leaf tier match. Page-only when the
-// path already exists as a page. Data-only when the path already
-// exists in the store catalog. New writes pick page when the body
-// looks like MDX (has a frontmatter block or explicit content-type
-// text/markdown), otherwise data.
+//   - text/markdown / text/plain / unspecified → raw MDX source. The
+//     body is written as-is (frontmatter block + body) into the
+//     page tree.
+//   - application/json `{"value": <X>}` (with optional `_meta.version`)
+//     → translated to a frontmatter-only page with `value: <X>`. This
+//     keeps the legacy data-envelope wire shape working while the
+//     leaf itself lives as a page (per CORE_GUIDELINES §14).
 func (s *Server) handleUnifiedWrite(w http.ResponseWriter, r *http.Request) {
 	path, _ := extractUnifiedPath(r)
 	if path == "" {
@@ -233,80 +232,79 @@ func (s *Server) handleUnifiedWrite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target := s.dispatchTarget(path, body, r.Header.Get("Content-Type"))
-	switch target {
-	case "page":
-		s.unifiedWritePage(w, r, path, string(body))
-	case "data-item":
-		s.unifiedWriteDataItem(w, r, path, body)
-	case "data-singleton":
-		s.unifiedWriteDataSingleton(w, r, path, body)
-	default:
-		respondError(w, http.StatusBadRequest, "INVALID_KEY", "unable to route path: "+path)
+	// JSON `{"value": …}` envelope → translate to MDX frontmatter so
+	// the leaf lands as a page. Honors `_meta.version` as If-Match,
+	// matching the legacy data-tier behavior.
+	if isValueEnvelopeBody(body, r.Header.Get("Content-Type")) {
+		src, version, terr := translateValueEnvelopeToPageSource(body)
+		if terr != nil {
+			writeError(w, http.StatusBadRequest, "bad_body", terr.Error())
+			return
+		}
+		if version != "" && r.Header.Get("If-Match") == "" {
+			r.Header.Set("If-Match", `"`+version+`"`)
+		}
+		s.unifiedWritePage(w, r, path, src)
+		return
 	}
+
+	s.unifiedWritePage(w, r, path, string(body))
 }
 
-// dispatchTarget picks where a write should land. Decision tree:
-//
-//  1. Existing leaf wins — fetch as the same shape the catalog
-//     reports (page > data-singleton > data-collection-item).
-//  2. New write with content-type text/markdown or text/plain → page.
-//  3. New write with content-type application/json AND the body
-//     carries a top-level `value` key → data tier (the data envelope
-//     shape; collection-item if the path has a slash, singleton if
-//     flat).
-//  4. Otherwise → page (the body is treated as raw MDX).
-//
-// The `{"value": ...}` signal is the disambiguator that lets a
-// nested path like `kanban/task-1` write a data collection-item
-// instead of a page. Without it the unified namespace can't tell
-// `<path>/<id>` (data-item, JSON envelope) from `<folder>/<page>`
-// (page tier, raw MDX).
-func (s *Server) dispatchTarget(path string, body []byte, contentType string) string {
-	// Existing leaf wins.
-	if s.Pages != nil && s.Pages.GetPage(path) != nil {
-		return "page"
-	}
-	if s.FileStore != nil {
-		if _, ok := s.FileStore.CatalogGet(path); ok {
-			return "data-singleton"
-		}
-		if _, _, ok := splitCollectionAddress(s.FileStore, path); ok {
-			return "data-item"
-		}
-	}
-
-	// Content-type hints.
+// isValueEnvelopeBody reports whether a body should be treated as a
+// `{"value": …}` data envelope rather than raw MDX. Triggers on JSON
+// content-type with a top-level `value` key, OR on an unspecified
+// content-type when the body parses as such an object (so REST callers
+// who forget the header still route correctly).
+func isValueEnvelopeBody(body []byte, contentType string) bool {
 	ct := strings.ToLower(contentType)
 	if strings.Contains(ct, "text/markdown") || strings.Contains(ct, "text/plain") {
-		return "page"
+		return false
 	}
-
-	// JSON envelope shape `{"value": ...}` ⇒ data tier.
-	if strings.Contains(ct, "application/json") && hasTopLevelValueKey(body) {
-		if strings.Contains(path, "/") {
-			return "data-item"
+	if !strings.Contains(ct, "application/json") {
+		// No content-type hint either way — peek at the bytes. MDX
+		// pages typically start with `---` (frontmatter), `#`, or `<`;
+		// JSON starts with `{`.
+		trimmed := strings.TrimLeft(string(body), " \t\r\n")
+		if !strings.HasPrefix(trimmed, "{") {
+			return false
 		}
-		return "data-singleton"
 	}
+	return hasTopLevelValueKey(body)
+}
 
-	// Bytes hint for missing/ambiguous content-type.
-	trimmed := strings.TrimLeft(string(body), " \t\r\n")
-	if strings.HasPrefix(trimmed, "---") || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "<") {
-		return "page"
+// translateValueEnvelopeToPageSource converts `{"value": <X>, "_meta": {…}}`
+// JSON into an MDX source with `value: <X>` in the frontmatter and an
+// empty body. Returns the assembled source plus the optional version
+// (so the caller can echo it as If-Match).
+func translateValueEnvelopeToPageSource(body []byte) (string, string, error) {
+	var p struct {
+		Meta  *store.Meta     `json:"_meta,omitempty"`
+		Value json.RawMessage `json:"value"`
 	}
-
-	// Default: nested paths land in the page tier (handles arbitrary
-	// nesting), flat keys in the data tier.
-	if strings.Contains(path, "/") {
-		return "page"
+	if err := json.Unmarshal(body, &p); err != nil {
+		return "", "", errors.New("body must be JSON: " + err.Error())
 	}
-	return "data-singleton"
+	if len(p.Value) == 0 {
+		return "", "", errors.New(`body must include {"value": …}`)
+	}
+	var decoded any
+	if err := json.Unmarshal(p.Value, &decoded); err != nil {
+		return "", "", errors.New("could not decode value: " + err.Error())
+	}
+	src, err := store.AssemblePageSource(map[string]any{"value": decoded}, "")
+	if err != nil {
+		return "", "", err
+	}
+	version := ""
+	if p.Meta != nil {
+		version = p.Meta.Version
+	}
+	return src, version, nil
 }
 
 // hasTopLevelValueKey reports whether `body` is a JSON object that
-// includes a top-level `"value"` key. Used by dispatchTarget to
-// distinguish a data-envelope write from a generic JSON page body.
+// includes a top-level `"value"` key.
 func hasTopLevelValueKey(body []byte) bool {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(body, &probe); err != nil {
@@ -366,82 +364,14 @@ func (s *Server) unifiedWritePage(w http.ResponseWriter, r *http.Request, path, 
 	respondJSON(w, http.StatusOK, resp)
 }
 
-// unifiedWriteDataSingleton is PUT against a flat-key singleton.
-// Body is `{"value": ..., "_meta": {"version": "..."}}` — the same
-// shape the legacy /api/data handler accepted.
-func (s *Server) unifiedWriteDataSingleton(w http.ResponseWriter, r *http.Request, key string, body []byte) {
-	var p struct {
-		Meta  *store.Meta     `json:"_meta,omitempty"`
-		Value json.RawMessage `json:"value"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", "body must be JSON: "+err.Error())
-		return
-	}
-	if len(p.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "missing_value", `body must include {"value": ...}`)
-		return
-	}
-	version := ""
-	if p.Meta != nil {
-		version = p.Meta.Version
-	}
-	hdr := strings.Trim(r.Header.Get("If-Match"), `"`)
-	if hdr != "" {
-		version = hdr
-	}
-	env, err := s.FileStore.Set(key, p.Value, version, actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-// unifiedWriteDataItem is PUT against a `<key>/<id>` collection-item
-// path. Auto-creates the collection on first write — the caller hits
-// /api/<key>/<id> with a data envelope and we route to UpsertItem
-// even if the catalog hasn't seen `<key>` as a collection yet.
-func (s *Server) unifiedWriteDataItem(w http.ResponseWriter, r *http.Request, path string, body []byte) {
-	idx := strings.LastIndex(path, "/")
-	if idx <= 0 || idx == len(path)-1 {
-		writeError(w, http.StatusBadRequest, "wrong_target", "expected <key>/<id> path")
-		return
-	}
-	key := path[:idx]
-	id := path[idx+1:]
-	var p struct {
-		Meta  *store.Meta     `json:"_meta,omitempty"`
-		Value json.RawMessage `json:"value"`
-	}
-	if err := json.Unmarshal(body, &p); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_body", err.Error())
-		return
-	}
-	if len(p.Value) == 0 {
-		writeError(w, http.StatusBadRequest, "missing_value", `body must include {"value": ...}`)
-		return
-	}
-	version := ""
-	if p.Meta != nil {
-		version = p.Meta.Version
-	}
-	hdr := strings.Trim(r.Header.Get("If-Match"), `"`)
-	if hdr != "" {
-		version = hdr
-	}
-	env, err := s.FileStore.UpsertItem(key, id, p.Value, version, actorFor(r))
-	if err != nil {
-		translateStoreError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, env)
-}
-
-// handleUnifiedPatch is PATCH /api/<path>. Page tier: RFC-7396 merge
-// into frontmatter + optional body replace. Data tier: RFC-7396 merge
-// into the singleton's value, or `{"value": <patch>}` for the
-// singleton's value blob.
+// handleUnifiedPatch is PATCH /api/<path>. Three accepted body shapes:
+//
+//   - `{"frontmatter_patch": …, "body": …}` → page-shaped patch.
+//   - `{"value": <patch>}` → translated to `frontmatter_patch: {value: <patch>}`
+//     so the legacy data-envelope wire shape continues to work
+//     against pages (per CORE_GUIDELINES §14).
+//   - All-frontmatter shapes (no `frontmatter_patch` key, no `body`,
+//     no `value`) — rejected.
 func (s *Server) handleUnifiedPatch(w http.ResponseWriter, r *http.Request) {
 	path, _ := extractUnifiedPath(r)
 	if path == "" {
@@ -454,7 +384,13 @@ func (s *Server) handleUnifiedPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Page tier — frontmatter merge.
+	// `{"value": <patch>}` → translate to a page frontmatter patch so
+	// the legacy data-envelope wire shape merges into the page's
+	// `value` frontmatter field instead of routing to a separate tier.
+	if translated, ok := translateValuePatchToPageFrontmatter(body); ok {
+		body = translated
+	}
+
 	if s.Pages != nil {
 		if cur := s.Pages.GetPage(store.NormalizePagePath(path)); cur != nil {
 			s.unifiedPatchPage(w, r, path, body, cur)
@@ -462,63 +398,36 @@ func (s *Server) handleUnifiedPatch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Detect page-shape patches (`{"frontmatter_patch": ...}` or
-	// `{"body": "..."}`) and treat them as 404 when the page tier
-	// has no leaf. The legacy /api/content/* PATCH handler returned
-	// 404 explicitly; the unified path keeps that contract so
-	// callers don't see a misleading 400 missing_value.
-	if isPagePatchBody(body) {
-		respondError(w, http.StatusNotFound, "NOT_FOUND", "page not found: "+path)
-		return
-	}
-
-	// Data tier — value-patch.
-	if s.FileStore != nil {
-		var req struct {
-			Value json.RawMessage `json:"value"`
-		}
-		if err := json.Unmarshal(body, &req); err != nil || len(req.Value) == 0 {
-			writeError(w, http.StatusBadRequest, "missing_value", `body must be {"value": <patch>}`)
-			return
-		}
-		if key, id, ok := splitCollectionAddress(s.FileStore, path); ok {
-			env, err := s.FileStore.MergeItem(key, id, req.Value, actorFor(r))
-			if err != nil {
-				translateStoreError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, env)
-			return
-		}
-		env, err := s.FileStore.Merge(path, req.Value, actorFor(r))
-		if err != nil {
-			translateStoreError(w, err)
-			return
-		}
-		writeJSON(w, http.StatusOK, env)
-		return
-	}
-
-	respondError(w, http.StatusNotFound, "NOT_FOUND", "no leaf at "+path)
+	respondError(w, http.StatusNotFound, "NOT_FOUND", "page not found: "+path)
 }
 
-// isPagePatchBody peeks at a JSON PATCH body to detect the
-// `frontmatter_patch` / `body` shape. A patch with those keys is
-// page-shaped; on a missing leaf the unified handler returns 404
-// instead of "missing_value: 400" so the caller gets the right
-// recovery hint.
-func isPagePatchBody(body []byte) bool {
+// translateValuePatchToPageFrontmatter converts a `{"value": <patch>}`
+// PATCH body into `{"frontmatter_patch": {"value": <patch>}}` so the
+// legacy data-envelope wire shape lands as a frontmatter merge on a
+// page leaf. Returns ok=false when the body is already page-shaped or
+// not a value patch.
+func translateValuePatchToPageFrontmatter(body []byte) ([]byte, bool) {
 	var probe map[string]json.RawMessage
 	if err := json.Unmarshal(body, &probe); err != nil {
-		return false
+		return nil, false
 	}
 	if _, ok := probe["frontmatter_patch"]; ok {
-		return true
+		return nil, false
 	}
 	if _, ok := probe["body"]; ok {
-		return true
+		return nil, false
 	}
-	return false
+	raw, ok := probe["value"]
+	if !ok {
+		return nil, false
+	}
+	out, err := json.Marshal(map[string]any{
+		"frontmatter_patch": map[string]json.RawMessage{"value": raw},
+	})
+	if err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // unifiedPatchPage merges a JSON patch body into the page's
@@ -539,7 +448,7 @@ func (s *Server) unifiedPatchPage(w http.ResponseWriter, r *http.Request, path s
 		return
 	}
 	if req.FrontmatterPatch == nil && req.Body == nil {
-		respondError(w, http.StatusBadRequest, "INVALID_VALUE", "patch must set frontmatter_patch and/or body")
+		respondError(w, http.StatusBadRequest, "INVALID_VALUE", `patch must set "frontmatter_patch" and/or "body" (or {"value": <patch>} which is translated to a frontmatter merge)`)
 		return
 	}
 	merged := map[string]any{}
@@ -603,9 +512,12 @@ func (s *Server) unifiedPatchPage(w http.ResponseWriter, r *http.Request, path s
 	respondJSON(w, http.StatusOK, resp)
 }
 
-// handleUnifiedDelete is DELETE /api/<path>. Page tier: drop the page
-// + meta + approval + refs + FTS row. Data tier: drop the leaf at the
-// matching shape.
+// handleUnifiedDelete is DELETE /api/<path>. Drops the page leaf if
+// present (along with meta + approval + refs + FTS row), or the
+// stream leaf when the FileStore catalogs it as a stream. Existing
+// singleton / collection FileStore leaves from before the §14
+// dispatcher collapse are still deletable here so operators can clean
+// them up; new writes never create those shapes anymore.
 func (s *Server) handleUnifiedDelete(w http.ResponseWriter, r *http.Request) {
 	path, _ := extractUnifiedPath(r)
 	if path == "" {
@@ -625,7 +537,7 @@ func (s *Server) handleUnifiedDelete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Data tier — singleton, item, collection, stream.
+	// Stream + legacy-singleton cleanup path.
 	if s.FileStore != nil {
 		actor := actorFor(r)
 		if key, id, ok := splitCollectionAddress(s.FileStore, path); ok {

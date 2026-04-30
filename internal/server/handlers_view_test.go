@@ -12,26 +12,26 @@ import (
 )
 
 // TestView_AuthedOpen — a bearer-carrying admin POSTs view/open and
-// gets back a bundle with source + data keys scoped to the page AST.
+// gets back a bundle with source + same-page frontmatter resolved.
+// Per CORE_GUIDELINES §14, source bindings resolve against the
+// rendering page's own frontmatter (or folder collections), never
+// against another page's scalars.
 func TestView_AuthedOpen(t *testing.T) {
 	_, ts := newTestServer(t)
 
-	// Seed a page that references one data key.
-	seed := bytes.NewBufferString(`# Hello
+	// Seed a page whose frontmatter holds the metric value its body
+	// references.
+	seed := bytes.NewBufferString(`---
+counter_value: 42
+---
+# Hello
 
-<Metric source="counter.value" />
+<Metric source="counter_value" />
 `)
 	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/hello", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
-
-	// Seed counter.value through the file-store v2 endpoint. The
-	// envelope wraps the value; the broker unwraps before bundling.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/counter.value", strings.NewReader(`{"value":42}`))
-	dr.Header.Set("Content-Type", "application/json")
-	drResp, _ := http.DefaultClient.Do(dr)
-	drResp.Body.Close()
 
 	// view/open as admin.
 	body, _ := json.Marshal(map[string]any{"path": "hello"})
@@ -57,11 +57,11 @@ func TestView_AuthedOpen(t *testing.T) {
 	if bundle.Authority != "admin" && bundle.Authority != "agent" {
 		t.Errorf("authority = %q, want admin or agent", bundle.Authority)
 	}
-	if !strings.Contains(bundle.Source, "counter.value") {
+	if !strings.Contains(bundle.Source, "counter_value") {
 		t.Errorf("source missing the metric reference")
 	}
-	if v, ok := bundle.Data["counter.value"]; !ok || v != float64(42) {
-		t.Errorf("data[counter.value] = %v, want 42", v)
+	if v, ok := bundle.Data["counter_value"]; !ok || v != float64(42) {
+		t.Errorf("data[counter_value] = %v, want 42", v)
 	}
 }
 
@@ -147,18 +147,18 @@ func TestView_AnonymousOnPrivateIs401(t *testing.T) {
 func TestView_RedeemCookieFlow(t *testing.T) {
 	_, ts := newTestServer(t)
 
-	// Seed a page.
-	seed := bytes.NewBufferString(`# Shareme
-<Metric source="share.demo" />`)
+	// Seed a page whose own frontmatter holds the metric value.
+	// (Per CORE_GUIDELINES §14, source bindings resolve against the
+	// rendering page's frontmatter, not a sibling singleton.)
+	seed := bytes.NewBufferString(`---
+share_demo: ok
+---
+# Shareme
+<Metric source="share_demo" />`)
 	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/shareme", seed)
 	wr.Header.Set("Content-Type", "text/markdown")
 	seedResp, _ := http.DefaultClient.Do(wr)
 	seedResp.Body.Close()
-	// Seed the referenced data — v2 endpoint expects an envelope.
-	dr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/share.demo", strings.NewReader(`{"value":"ok"}`))
-	dr.Header.Set("Content-Type", "application/json")
-	drResp, _ := http.DefaultClient.Do(dr)
-	drResp.Body.Close()
 
 	// Mint a share.
 	mintBody, _ := json.Marshal(map[string]any{"path": "/shareme"})
@@ -214,23 +214,23 @@ func TestView_RedeemCookieFlow(t *testing.T) {
 	if b.Authority != "share" {
 		t.Errorf("authority = %q, want share", b.Authority)
 	}
-	if _, ok := b.Data["share.demo"]; !ok {
-		t.Errorf("share visitor missing resolved data key")
+	if _, ok := b.Data["share_demo"]; !ok {
+		t.Errorf("share visitor missing resolved frontmatter field")
 	}
 
-	// Cookie → /api/data/* must 401.
-	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/share.demo", nil)
+	// Cookie → bare /api/<other-page> must 401.
+	dreq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/other", nil)
 	dresp, err := bare.Do(dreq)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dresp.Body.Close()
 	if dresp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("cookie direct data: status = %d, want 401", dresp.StatusCode)
+		t.Errorf("cookie direct read: status = %d, want 401", dresp.StatusCode)
 	}
 
 	// Cookie → write must 401.
-	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/share.demo", strings.NewReader(`"x"`))
+	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/shareme", strings.NewReader(`"x"`))
 	wresp, err := bare.Do(wreq)
 	if err != nil {
 		t.Fatal(err)
