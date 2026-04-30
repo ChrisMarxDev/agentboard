@@ -15,23 +15,15 @@ After every cut lands, walk this list and prune entries the cut resolved.
 
 ## Open
 
-### Data singleton drops user-supplied `value:` field on read round-trip `[needs-decision]`
-
-Writing `{"value": {"label": "DAU", "value": 42}}` to a singleton splats `label` + inner `value` into the frontmatter on disk. On read, `UnmarshalDoc` treats `value:` as the envelope wrapper and drops it when other keys are present (`internal/store/envelope.go::UnmarshalDoc` "Drop a stray `value:` if other keys are present — the object shape wins"). Net: writing `{label, value: 42}` round-trips as `{label}`, losing the `value: 42` field.
-
-Pre-dates Cuts 5–7 (deliberate design call when the splat encoding landed). Hits any agent that authors a singleton with a literal `value` key. Decide:
-
-- a) Reserved-key documentation: `value` is a reserved frontmatter key for top-level singletons — agents must rename to `quantity` / `score` / etc. Document in spec §3.
-- b) On-disk encoding switches to nested: `_meta:` + `value:` always at top level, never splatted. More verbose YAML but no collision.
-- c) Detect: if the user-supplied frontmatter object contains a `value` key, marshal it as `value: <object>` (not splat) so the round-trip is symmetric.
-
-Lean (c) — least breaking, preserves agent intent. Workaround until then: pick a different field name for the literal value.
-
-
+_(empty after Cuts 5–9)_
 
 Cut 5 closed: initial PUT no-If-Match (regression test), PATCH error message contradicts shape (regression test).
 
 Cut 6 closed: MCP value double-stringification (`agentboard_write` regression test), MCP merge object-shape clobber (`agentboard_patch` regression test), `agentboard_search_pages` malformed response (tool removed), `agentboard_read_page` body-only (tool removed), MCP writes attribute to "agent" instead of bearer's user (`Server.resolveActor` reads from auth context), frontmatter `order:` semantics (spec §3 clarified — user `order` is opaque, server-derived order travels under `_meta.order`).
+
+Cut 7 + Cut 8 closed: REST namespace unification (spec §5) — `/api/<path>` ships, legacy `/api/content/*` and `/api/data/<key>[/<id>]` retired, `/api/<path>:append` for streams, `/api/<path>/history` for per-doc audit.
+
+Cut 9 closed: `value:` field collision in data singletons. `MarshalDoc` now nests user objects under `value:` when the object itself contains a `value` key; the splat path remains the default for objects without a collision. Round-trip is symmetric for every shape.
 
 ---
 

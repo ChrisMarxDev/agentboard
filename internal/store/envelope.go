@@ -68,11 +68,25 @@ func MarshalDoc(env *Envelope) ([]byte, error) {
 		front["_meta"] = env.Meta
 	}
 
-	// Splat the user's value into frontmatter. JSON objects become
-	// top-level keys; primitives/arrays live under `value:`.
+	// Splat the user's value into frontmatter. JSON objects normally
+	// become top-level keys (so frontmatter reads naturally), but if
+	// the object itself contains a `value` key the splat would
+	// collide with the envelope's own `value:` slot on read — the
+	// caller's `value` field would round-trip as the entire envelope
+	// payload instead. Detect that case and nest the whole object
+	// under `value:` so it round-trips intact. Primitives + arrays
+	// + collisions all live under `value:`. (See ISSUES.md
+	// `[needs-decision]` from Cut 7 — option (c).)
 	if len(env.Value) > 0 && !bytes.Equal(env.Value, []byte("null")) {
 		var asObject map[string]any
+		canSplat := false
 		if err := json.Unmarshal(env.Value, &asObject); err == nil && asObject != nil {
+			canSplat = true
+			if _, collides := asObject["value"]; collides {
+				canSplat = false
+			}
+		}
+		if canSplat {
 			for k, v := range asObject {
 				if k == "_meta" {
 					// The user can't write _meta — server owns it.

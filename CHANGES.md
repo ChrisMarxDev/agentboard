@@ -1,3 +1,44 @@
+# Cut 9 — fix `value:` field collision in singletons (2026-04-30)
+
+Closes the last open `[needs-decision]` from Cut 7's audit. Writing a
+data singleton with a user-supplied `value:` key inside the object —
+e.g. `{label: "DAU", value: 42}` — used to drop the inner `value: 42`
+on read because `MarshalDoc` splatted both keys to the top of the
+frontmatter, and `UnmarshalDoc` then prefers "object form" (drops the
+ambiguous `value:` slot) when both `value:` and other keys are present.
+
+## What changed
+
+- **`internal/store/envelope.go::MarshalDoc`** detects the collision
+  before splatting. When the user-supplied JSON object contains a
+  `value` key, the whole object is nested under `value:` instead of
+  splatted across the YAML block. The frontmatter is slightly less
+  human-readable in this narrow case but the round-trip is symmetric
+  — `{label, value: 42}` reads back as `{label, value: 42}`.
+- The splat path still wins for non-colliding objects, so the common
+  case (frontmatter that doesn't reuse `value:` as a field name) keeps
+  the natural top-level YAML it had before.
+
+## Validation
+
+- `internal/store/envelope_value_collision_test.go` — 5 cases covering:
+  - Value-only object (`{value: 42}`).
+  - Value plus siblings (the canonical bug).
+  - Value as a nested object (`{label, value: {latency_ms, ok}}`).
+  - Value as an array.
+  - Plus the no-collision splat-still-works guard.
+- `go test ./...` — 16 packages green.
+- `scripts/integration-test.sh`: 45/45.
+- `scripts/smoke-test.sh`: 35/35.
+- `go vet`, `gofmt` clean.
+
+## Spec status after Cut 9
+
+`ISSUES.md` is empty. `spec.md §13` (Open questions) still says "None
+— every load-bearing decision is locked." Wire matches spec.
+
+---
+
 # Cut 8 — retire legacy /api/content/* + /api/data/<key> routes (2026-04-30)
 
 Closes the last gap in the REST namespace migration started in Cut 7.
