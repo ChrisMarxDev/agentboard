@@ -83,6 +83,33 @@ func ResolveAuthority(r *http.Request, authStore *auth.Store, sessions *SessionS
 				return AuthorityAnonymous, nil, nil, err
 			}
 		}
+
+		// Browser-session cookie path. Humans sign in via /api/auth/
+		// login → agentboard_session HttpOnly cookie. The view broker
+		// must accept it the same way it accepts a Bearer token, or
+		// every page open from the SPA 401s and bounces the user to
+		// /login. Distinct from the view-share cookie (ab_view_session)
+		// handled below — that's for redeemed share links, not real
+		// users.
+		if c, err := r.Cookie(auth.SessionCookieName); err == nil && c.Value != "" {
+			user, _, err := authStore.ResolveSession(c.Value)
+			if err == nil && user != nil {
+				if user.Kind == auth.KindAdmin {
+					return AuthorityAdmin, user, nil, nil
+				}
+				return AuthorityAgent, user, nil, nil
+			}
+			if err != nil &&
+				!errors.Is(err, auth.ErrSessionInvalid) &&
+				!errors.Is(err, auth.ErrSessionRevoked) &&
+				!errors.Is(err, auth.ErrSessionExpired) &&
+				!errors.Is(err, auth.ErrUserDeactivated) {
+				// Treat the SQLite-hiccup case the same way as the
+				// bearer path: return transient so the handler 503s
+				// instead of 401-bouncing the user.
+				return AuthorityAnonymous, nil, nil, err
+			}
+		}
 	}
 	if sessions != nil {
 		if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {

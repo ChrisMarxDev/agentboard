@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/christophermarx/agentboard/internal/auth"
 )
 
 // TestView_AuthedOpen — a bearer-carrying admin POSTs view/open and
@@ -60,6 +62,56 @@ func TestView_AuthedOpen(t *testing.T) {
 	}
 	if v, ok := bundle.Data["counter.value"]; !ok || v != float64(42) {
 		t.Errorf("data[counter.value] = %v, want 42", v)
+	}
+}
+
+// TestView_SessionCookieAccepted — a browser-session cookie minted
+// via /api/auth/login authenticates /api/view/open the same way a
+// bearer token does. Regression guard: before this landed, the view
+// broker only knew about bearer + share-cookie + anonymous, so a
+// cookie-logged-in user got 401 on every page open and bounced to
+// /login?reason=unauthorized.
+func TestView_SessionCookieAccepted(t *testing.T) {
+	srv, ts := newTestServer(t)
+	seedUserWithPassword(t, srv, "alice", "view-cookie-pw-1234", auth.KindAdmin)
+
+	// Seed a page.
+	seed := bytes.NewBufferString(`# Hello
+
+<Metric source="counter.value" />
+`)
+	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/content/hello", seed)
+	wr.Header.Set("Content-Type", "text/markdown")
+	sr, err := http.DefaultClient.Do(wr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr.Body.Close()
+
+	// Log in via /api/auth/login with a cookie jar — same shape the
+	// SPA uses.
+	c := loginClient(t)
+	loginAs(t, ts.URL, c, "alice", "view-cookie-pw-1234").Body.Close()
+
+	// view/open with the session cookie. No bearer header.
+	body, _ := json.Marshal(map[string]any{"path": "hello"})
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/view/open", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("cookie-authed view/open: status = %d, body = %s", resp.StatusCode, raw)
+	}
+	var bundle struct {
+		Authority string `json:"authority"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&bundle)
+	if bundle.Authority != "admin" && bundle.Authority != "agent" {
+		t.Errorf("authority = %q, want admin or agent (NOT share or anonymous)", bundle.Authority)
 	}
 }
 
