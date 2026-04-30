@@ -8,51 +8,40 @@ import (
 
 const welcomeIndexMd = `# Welcome to AgentBoard
 
-This dashboard updates live as your agents work.
-You're looking at MDX — markdown with embedded components.
+A single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST or MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
 
-## At a glance
-
-<Deck>
-  <Card title="Users">
-    <Metric source="welcome.users" />
-  </Card>
-  <Card title="Status">
-    <Status source="welcome.status" />
-  </Card>
-  <Card title="Onboarding">
-    <Progress source="welcome.progress" />
-  </Card>
-</Deck>
-
-## Try it
-
-Run this in your terminal:
-
-    agentboard set welcome.users 42
-
-The number above updates in real time.
-
-## Tasks
-
-<Card title="Backlog" span={2}>
-  <Kanban source="welcome.tasks" groupBy="status" />
-</Card>
+You're looking at MDX — markdown with embedded React components. The page updates live as data behind it changes.
 
 ## Connect Claude
 
-    claude mcp add agentboard http://localhost:3000/mcp
+` + "```" + `
+claude mcp add agentboard http://localhost:3000/mcp
+` + "```" + `
 
-Then ask Claude to build you something. For example:
+Then ask Claude to build you something:
 
-  "Track my daily reading progress with a chart."
+> "Set up a kanban board for my reading list under /reading."
+
+It'll write pages and data via the API; this site updates live.
+
+## Where things live
+
+- **Pages** — ` + "`<project>/content/<path>.md`" + ` (MDX with YAML frontmatter)
+- **Data** — ` + "`<project>/data/<key>.{md,ndjson}`" + `, or a folder of pages for collections
+- **Files (binary)** — ` + "`<project>/content/files/<name>`" + `; mint upload URLs via ` + "`agentboard_request_file_upload`" + `
+- **Custom components** — drop a ` + "`.jsx`" + ` into ` + "`<project>/components/`" + `; the watcher registers it on the next render
+- **Skills** — ` + "`<project>/content/skills/<slug>/SKILL.md`" + `; agents discover them via ` + "`GET /api/skills`" + `
+
+## Conventions worth knowing
+
+- **Inline first.** A scalar shown in one place lives inline (` + "`<Metric value={14} label=\"Users\" />`" + `), not in its own page. Per spec §7, only folder collections may cross-reference (` + "`<Kanban source=\"tasks/\" />`" + `).
+- **One namespace.** ` + "`/api/<path>`" + ` covers pages, singletons, collection items, streams, and binaries. The 10-tool MCP surface dispatches the same way.
+- **Direct disk writes are a product violation** — they bypass auth, attribution, history, and concurrency. Always go through REST or MCP.
 
 ## Learn more
 
-- Edit this page: open index.md in your project folder
-- Add pages and docs to content/
-- Add custom components to components/
-- Docs: https://agentboard.dev/docs
+- Browse the ` + "`agentboard`" + ` skill for the full agent contract (` + "`/skills/agentboard/SKILL`" + `).
+- Source: <https://github.com/ChrisMarxDev/agentboard>
 `
 
 const welcomeConfig = `title: "AgentBoard"

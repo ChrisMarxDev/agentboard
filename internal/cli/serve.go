@@ -33,7 +33,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	serveCmd.Flags().BoolVar(&noOpen, "no-open", false, "Don't open browser on startup")
-	serveCmd.Flags().BoolVar(&allowComponentUpload, "allow-component-upload", false, "Enable PUT/DELETE /api/components/:name and MCP write/delete component tools. UNSAFE: components run as arbitrary JS in every visitor's browser.")
+	serveCmd.Flags().BoolVar(&allowComponentUpload, "allow-component-upload", false, "Enable PUT/DELETE /api/components/:name (REST). UNSAFE: components run as arbitrary JS in every visitor's browser.")
 	serveCmd.Flags().StringVar(&authToken, "auth-token", "", "Shared token required for every request (except /api/health). Accepts Bearer, Basic Auth, or ?token= query. Falls back to AGENTBOARD_AUTH_TOKEN env var.")
 }
 

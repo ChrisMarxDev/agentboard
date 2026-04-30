@@ -31,7 +31,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&port, "port", 0, "Server port (default from config or 3000)")
 	rootCmd.PersistentFlags().BoolVar(&devMode, "dev", false, "Run in development mode")
 	rootCmd.Flags().BoolVar(&noOpen, "no-open", false, "Don't open browser on startup")
-	rootCmd.Flags().BoolVar(&allowComponentUpload, "allow-component-upload", false, "Enable PUT/DELETE /api/components/:name and MCP write/delete component tools. UNSAFE: components run as arbitrary JS in every visitor's browser.")
+	rootCmd.Flags().BoolVar(&allowComponentUpload, "allow-component-upload", false, "Enable PUT/DELETE /api/components/:name (REST). UNSAFE: components run as arbitrary JS in every visitor's browser.")
 
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(initCmd)
