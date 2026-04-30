@@ -2,13 +2,16 @@
 
 Single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST/MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
 
-> **Start with [`REWRITE.md`](./REWRITE.md).** AgentBoard went through a structural rewrite (cuts 1–4): SQLite KV gone, files-first MDX with YAML frontmatter, `.md` + `.ndjson` as the only content leaf types, single tree under the project root, no `v2` framing. The doc summarizes what changed, what got deleted, where things live now, and the gotchas that bit during the cuts.
+> **Source of truth — read both before any non-trivial change:**
 >
-> **Read [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) before making non-trivial changes.** It defines the 12 product invariants, the stable API/MCP/component contracts, what's in vs out of scope, and the pre-flight checklist for risky changes. The locked rewrite contract is in [`spec-rework.md`](./spec-rework.md); full design is in [`spec.md`](./spec.md); auth is in [`AUTH.md`](./AUTH.md).
+> - **[`spec.md`](./spec.md)** — the locked design contract. File layout, leaf rules, frontmatter contract, REST + MCP surface, auth-as-files, and the cut order for the next rewrite. If reality drifts from this doc, the doc wins (or update the doc in the same PR).
+> - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the 13 product principles. When a proposal conflicts with a principle, the principle wins or the trade-off gets surfaced explicitly.
 >
-> **Before widening the trust boundary** (binding to non-loopback, adding hosted multi-tenant mode, turning on `--allow-component-upload`, etc.) re-read [`seams_to_watch.md`](./seams_to_watch.md) — it lists the security and architectural concerns we've consciously deferred.
+> **Domain contracts:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`spec-plugins.md`](./spec-plugins.md) (component contract — companion to principle §10), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).
 >
-> **Aspirational / superseded specs** (drafts, brainstorms) live under [`docs/archive/`](./docs/archive/). Don't reference them from agent-facing code or skills; they exist for design history only.
+> **Plan + bug list:** [`ROADMAP.md`](./ROADMAP.md) is what ships next. [`ISSUES.md`](./ISSUES.md) is the single canonical bug list — but **the spec wins ties**: a bug in a feature the spec deletes is obsolete, not a fix-target. Don't restore deleted features to satisfy old bug reports.
+>
+> **Historical context:** earlier rewrite snapshots and aspirational drafts live under [`docs/archive/`](./docs/archive/). They are not load-bearing; do not link from agent-facing code or skills.
 
 ## UI conventions
 

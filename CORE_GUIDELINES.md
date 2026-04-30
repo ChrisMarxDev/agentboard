@@ -118,6 +118,26 @@ This is the positive counterpart to #8: #8 says *don't reject content for format
 
 The test: *if an agent calls this wrong, does the response tell it how to succeed?* If the answer is "read the docs," the response is wrong.
 
+## 13. Content is files; operational state stays in the database
+
+The surface that humans and agents directly compose — pages, dashboards, data values, collection items (tasks, customers, runbooks…), user-authored streams, skills, binary uploads, components — lives as files under one tree. Three leaf types: `.md` (YAML frontmatter + optional MDX body), `.ndjson` (append-only stream), and binary. Folders are collections.
+
+Backup is `tar` the project root. Migration is `mv`. Audit is `grep`. A new content type is a path convention, not a new product feature.
+
+**Operational state stays in SQLite.** Users, tokens, sessions, invitations, teams + members, webhook subscriptions, OAuth clients, page locks, the activity log, the content_history index, FTS5 search index, the rate-limit bucket — none of these are composed by hand. They're machine-managed indexes that an admin reads through dedicated UIs, never as raw text. Putting them in files would buy nothing and cost concurrent-write safety, indexed lookups, and atomicity guarantees SQLite already gives us.
+
+The line: *do agents and humans compose this directly?* If yes, it's a file. If no, it's a row.
+
+This is the unblocker for #4 and #9 on the content side: agents author, read, and reason about everything they author through one CRUD primitive over one tree, and new content types arrive as path conventions instead of new product features. It's also what enables the small, principled MCP surface in `spec.md §6`.
+
+**Carve-outs.**
+
+- **Server-owned `_meta` fields** (version, modified_by, created_at) live in frontmatter but the server writes them; agents echo `_meta.version` for CAS but cannot forge other fields.
+- **Operational rows are not "missing files."** Don't relocate users, tokens, etc. into `_system/` paths to satisfy this principle — the principle has already opted them out.
+- **Ephemeral state** — open SSE connections, request-scoped caches, the in-flight rate-limit bucket — does not need to land anywhere durable. Anything you'd lose on a process restart and not miss is fair game for memory.
+
+The test: *can I tar the project root, drop the SQLite operational database, restore both, and have the dashboard come back identical?* If a piece of *content* lives only in a row, that's a smell — move it to the tree. If a piece of *operational state* lives only in a file, that's also a smell — move it to a row.
+
 ---
 
 ## How to use this file
