@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Pencil, Plus, Send, Trash2, Users, X } from 'lucide-react'
+import {
+  Calendar,
+  Check,
+  Copy,
+  Filter,
+  GitBranch,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react'
 import { useData } from '../../hooks/useData'
 import { useDataContext } from '../../hooks/DataContext'
 import { apiFetch } from '../../lib/session'
@@ -97,6 +111,22 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
   const [confirmDelete, setConfirmDelete] = useState<Record<string, unknown> | null>(null)
   const draggingIdRef = useRef<string | null>(null)
 
+  // Filter state — search text + assignee filter + label filter. All
+  // applied client-side on `items` before grouping so empty columns
+  // still render (they signal "no results in this lane" rather than
+  // disappearing). Kept loose so non-technical users can pile in any
+  // term — `priority:1`, `due:today` etc. all just substring-match.
+  const [filterQ, setFilterQ] = useState('')
+  const [filterAssignees, setFilterAssignees] = useState<string[]>([])
+  const [filterLabels, setFilterLabels] = useState<string[]>([])
+
+  // Card menu (overflow ⋯) + inline title edit + column drag — all
+  // single-target state; opening one closes any other.
+  const [menuCardId, setMenuCardId] = useState<string | null>(null)
+  const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
+  const [draggingColId, setDraggingColId] = useState<string | null>(null)
+  const [dropColTargetId, setDropColTargetId] = useState<string | null>(null)
+
   if (loading) {
     return <div className="p-4 text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</div>
   }
@@ -112,10 +142,51 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
 
   const items = (Array.isArray(data) ? data : []) as Record<string, unknown>[]
 
+  // Universe of label / assignee strings present on the board, used to
+  // populate the filter dropdowns. Built once, stable order.
+  const allLabels = Array.from(
+    new Set(items.flatMap(c => stringList(c.labels))),
+  ).sort()
+  const allAssignees = Array.from(
+    new Set(items.flatMap(c => stringList(c.assignees).map(a => a.replace(/^@/, '')))),
+  ).sort()
+
+  // Apply filters before grouping so empty columns still render.
+  const q = filterQ.trim().toLowerCase()
+  const filteredItems = items.filter(card => {
+    if (filterAssignees.length > 0) {
+      const cardAssignees = stringList(card.assignees).map(a => a.replace(/^@/, ''))
+      if (!filterAssignees.some(a => cardAssignees.includes(a))) return false
+    }
+    if (filterLabels.length > 0) {
+      const cardLabels = stringList(card.labels)
+      if (!filterLabels.some(l => cardLabels.includes(l))) return false
+    }
+    if (q) {
+      // Match across title + id + body-less fields. We don't have body
+      // in the bundle, but title + assignees + labels + id usually
+      // covers what a board search wants.
+      const haystack = [
+        card[titleField],
+        card.id,
+        ...stringList(card.assignees),
+        ...stringList(card.labels),
+        card.priority,
+        card.due,
+      ]
+        .map(v => (v == null ? '' : String(v)))
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(q)) return false
+    }
+    return true
+  })
+  const filterActive = q !== '' || filterAssignees.length > 0 || filterLabels.length > 0
+
   // Group cards by column, preserving the array index on each card so we
   // can both render a stable order AND compute new `order` values on drop.
   const groups = new Map<string, { card: Record<string, unknown>; idx: number }[]>()
-  items.forEach((card, idx) => {
+  filteredItems.forEach((card, idx) => {
     const group = String(card[groupBy] ?? 'other')
     if (!groups.has(group)) groups.set(group, [])
     groups.get(group)!.push({ card, idx })
@@ -158,9 +229,15 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
       ? (fmColumns as ReadonlyArray<string | { id: string; label?: string }>)
       : null
   const explicitColumns = columns ?? fmColumnsArr
+  // Default-column inference reads the *unfiltered* item set so a board
+  // with no columns prop doesn't lose empty lanes the moment the user
+  // types in the search box.
+  const presentCols = Array.from(
+    new Set(items.map(c => String(c[groupBy] ?? 'other'))),
+  )
   const normalisedColumns: NormalizedColumn[] =
     explicitColumns?.map(normalizeCol) ??
-    defaultColOrder(Array.from(groups.keys()), groupBy).map(id => normalizeCol(id))
+    defaultColOrder(presentCols, groupBy).map(id => normalizeCol(id))
   const colOrder = normalisedColumns.map(c => c.id)
   const labelFor = (id: string) =>
     normalisedColumns.find(c => c.id === id)?.label ?? colLabels[id] ?? prettify(id)
@@ -205,6 +282,95 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
   function removeLane(id: string) {
     if (normalisedColumns.length <= 1) return
     void persistColumns(normalisedColumns.filter(c => c.id !== id))
+  }
+
+  // moveColumn drops `srcId` immediately before `targetId` in the
+  // ordering. No-op if the source isn't found or already sits in the
+  // target slot.
+  function moveColumn(srcId: string, targetId: string) {
+    if (srcId === targetId) return
+    const fromIdx = normalisedColumns.findIndex(c => c.id === srcId)
+    const toIdx = normalisedColumns.findIndex(c => c.id === targetId)
+    if (fromIdx < 0 || toIdx < 0) return
+    const next = normalisedColumns.slice()
+    const [moved] = next.splice(fromIdx, 1)
+    const insertAt = next.findIndex(c => c.id === targetId)
+    next.splice(insertAt < 0 ? next.length : insertAt, 0, moved)
+    void persistColumns(next)
+  }
+
+  // createCard writes a fresh `.md` to the folder collection at a
+  // unique slug derived from `title`. Used by NewTaskBar (board-level
+  // add) and by ColumnQuickAdd (per-column add). Pre-fills `col` when
+  // supplied so a card created from inside a column lands there.
+  async function createCard(title: string, columnId: string | null = null): Promise<void> {
+    const t = title.trim()
+    if (!t || !isFolderBoard) return
+    const folder = effectiveSource.replace(/\/$/, '')
+    const baseSlug = slugifyTitle(t)
+    let slug = baseSlug
+    for (let i = 2; await pathExists(`${folder}/${slug}`); i++) {
+      slug = `${baseSlug}-${i}`
+      if (i > 200) throw new Error('too many name collisions')
+    }
+    const today = new Date().toISOString().slice(0, 10)
+    const colValue = columnId ?? (groupBy === 'col' ? 'todo' : '')
+    const fmLines = [`title: ${JSON.stringify(t)}`]
+    if (colValue) fmLines.push(`${groupBy}: ${colValue}`)
+    fmLines.push(`created: ${today}`)
+    const body = `---\n${fmLines.join('\n')}\n---\n`
+    const res = await apiFetch(`/api/${folder}/${slug}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/markdown' },
+      body,
+    })
+    if (!res.ok) {
+      let msg = `create ${res.status}`
+      try {
+        const j = (await res.json()) as { error?: string; message?: string }
+        msg = j.error ?? j.message ?? msg
+      } catch { /* ignore */ }
+      throw new Error(msg)
+    }
+  }
+
+  // duplicateCard reads the source card's full envelope (frontmatter +
+  // body) and writes a copy at a fresh slug. Title gets a "Copy"
+  // suffix; col / order etc. carry over so the duplicate appears next
+  // to the original.
+  async function duplicateCard(card: Record<string, unknown>): Promise<void> {
+    if (!isFolderBoard) return
+    const id = card.id != null ? String(card.id) : ''
+    if (!id) return
+    const folder = effectiveSource.replace(/\/$/, '')
+    const origRes = await apiFetch(`/api/${folder}/${id}`, { method: 'GET' })
+    if (!origRes.ok) {
+      throw new Error(`read ${origRes.status}`)
+    }
+    const orig = (await origRes.json()) as { frontmatter?: Record<string, unknown>; source?: string }
+    const fm = { ...(orig.frontmatter ?? {}) }
+    delete fm.id
+    delete fm._meta
+    const origTitle = String(fm[titleField] ?? '')
+    const newTitle = origTitle ? `${origTitle} (copy)` : `${id} (copy)`
+    fm[titleField] = newTitle
+    const baseSlug = slugifyTitle(newTitle)
+    let slug = baseSlug
+    for (let i = 2; await pathExists(`${folder}/${slug}`); i++) {
+      slug = `${baseSlug}-${i}`
+      if (i > 200) throw new Error('too many name collisions')
+    }
+    const body = orig.source ?? ''
+    const fmYaml = Object.entries(fm)
+      .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+      .join('\n')
+    const src = `---\n${fmYaml}\n---\n${body}`
+    const res = await apiFetch(`/api/${folder}/${slug}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/markdown' },
+      body: src,
+    })
+    if (!res.ok) throw new Error(`duplicate ${res.status}`)
   }
 
   // computeInsertOrder returns an `order` value that places the dragged
@@ -275,6 +441,40 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
     }
   }
 
+  async function renameCard(id: string, newTitle: string) {
+    const trimmed = newTitle.trim()
+    if (!trimmed) return
+    try {
+      const res = await patchCollectionItem(effectiveSource, id, { [titleField]: trimmed })
+      if (!res.ok) throw new Error(`rename ${res.status}`)
+      resetBeacon('Kanban', effectiveSource)
+    } catch (e) {
+      beaconError({
+        component: 'Kanban',
+        source: effectiveSource,
+        error: e instanceof Error ? e.message : 'rename failed',
+      })
+    }
+  }
+
+  async function moveCardToColumn(card: Record<string, unknown>, targetCol: string) {
+    const id = card.id != null ? String(card.id) : ''
+    if (!id) return
+    const currentCol = String(card[groupBy] ?? '')
+    if (currentCol === targetCol) return
+    try {
+      const res = await patchCollectionItem(effectiveSource, id, { [groupBy]: targetCol })
+      if (!res.ok) throw new Error(`move ${res.status}`)
+      resetBeacon('Kanban', effectiveSource)
+    } catch (e) {
+      beaconError({
+        component: 'Kanban',
+        source: effectiveSource,
+        error: e instanceof Error ? e.message : 'move failed',
+      })
+    }
+  }
+
   async function handleDelete(card: Record<string, unknown>) {
     const id = card.id != null ? String(card.id) : null
     if (!id) return
@@ -298,44 +498,92 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
   //  demo data), skip the button. The flag is computed near the top of
   //  the function alongside the empty-board early-render logic.)
 
+  // Sub-task counts are computed against the unfiltered set so a child
+  // hidden by the current filter still counts on its parent's pill.
+  const subTasksByParent = new Map<string, { total: number; done: number }>()
+  for (const c of items) {
+    const parent = typeof c.parent_id === 'string' ? c.parent_id : ''
+    if (!parent) continue
+    const stats = subTasksByParent.get(parent) ?? { total: 0, done: 0 }
+    stats.total += 1
+    if (String(c[groupBy] ?? '') === 'done') stats.done += 1
+    subTasksByParent.set(parent, stats)
+  }
+
+  const columnsReorderable = columnsEditable
+
   return (
     <>
-      {isFolderBoard && <NewTaskBar source={effectiveSource} />}
-      {/* Trello-style horizontal lanes. Fixed-ish column width
-          (min 16rem, max 20rem) so:
-            - the board reads as a board, not a stretched table;
-            - many columns reliably overflow and trigger the
-              horizontal scroll on the wrapper;
-            - cards inside a column don't reflow as the viewport
-              changes width.
-          The wrapper sets `overflow-x-auto` and a small bottom
-          padding so the scrollbar doesn't clip the bottom card. */}
+      <BoardToolbar
+        isFolderBoard={isFolderBoard}
+        effectiveSource={effectiveSource}
+        onCreate={createCard}
+        filterQ={filterQ}
+        setFilterQ={setFilterQ}
+        filterAssignees={filterAssignees}
+        setFilterAssignees={setFilterAssignees}
+        filterLabels={filterLabels}
+        setFilterLabels={setFilterLabels}
+        allAssignees={allAssignees}
+        allLabels={allLabels}
+        users={users}
+        filterActive={filterActive}
+        visibleCount={filteredItems.length}
+        totalCount={items.length}
+      />
+      {/* Trello-style horizontal lanes. Each column has a fixed-ish
+          width so the board reads as a board, not a stretched table;
+          the wrapper handles horizontal overflow when there are many
+          lanes or the viewport is narrow. */}
       <div className="flex gap-3 overflow-x-auto my-4 pb-3" style={{ scrollbarGutter: 'stable' }}>
         {colOrder.map(col => {
           const colItems = groups.get(col) ?? []
           const isOver = dragOverCol === col
+          const isColDropTarget = dropColTargetId === col && draggingColId !== null && draggingColId !== col
           return (
             <div
               key={col}
               onDragOver={e => {
                 e.preventDefault()
+                // Two distinct drag flavours land here:
+                //   - a card being moved (draggingIdRef set)
+                //   - a column being reordered (draggingColId set)
+                if (draggingColId && draggingColId !== col) {
+                  if (dropColTargetId !== col) setDropColTargetId(col)
+                  return
+                }
                 if (dragOverCol !== col) setDragOverCol(col)
               }}
-              onDragLeave={() => setDragOverCol(prev => (prev === col ? null : prev))}
+              onDragLeave={() => {
+                setDragOverCol(prev => (prev === col ? null : prev))
+                setDropColTargetId(prev => (prev === col ? null : prev))
+              }}
               onDrop={e => {
                 e.preventDefault()
+                if (draggingColId && draggingColId !== col) {
+                  moveColumn(draggingColId, col)
+                  setDraggingColId(null)
+                  setDropColTargetId(null)
+                  return
+                }
                 void handleDrop(col)
               }}
               className="rounded-lg p-3 flex-shrink-0"
               style={{
                 background: 'var(--bg-secondary)',
                 border: '1px solid var(--border)',
-                outline: isOver ? '2px solid var(--accent)' : undefined,
-                outlineOffset: isOver ? '-2px' : undefined,
+                outline:
+                  isColDropTarget
+                    ? '2px dashed var(--accent)'
+                    : isOver
+                    ? '2px solid var(--accent)'
+                    : undefined,
+                outlineOffset: isColDropTarget || isOver ? '-2px' : undefined,
                 transition: 'outline-color 120ms ease-out',
                 minWidth: '16rem',
                 maxWidth: '20rem',
                 width: '18rem',
+                opacity: draggingColId === col ? 0.5 : 1,
               }}
             >
               <ColumnHeader
@@ -345,16 +593,25 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                 canRemove={columnsEditable && normalisedColumns.length > 1}
                 onRename={(label) => renameColumn(col, label)}
                 onRemove={() => removeLane(col)}
+                draggable={columnsReorderable}
+                onDragStart={() => setDraggingColId(col)}
+                onDragEnd={() => {
+                  setDraggingColId(null)
+                  setDropColTargetId(null)
+                }}
               />
               <div className="space-y-2">
                 {colItems.map(({ card: item }, i) => {
                   const id = item.id != null ? String(item.id) : null
                   const draggable = id !== null
                   const isInsertTarget = id !== null && dropBeforeId === id && dragOverCol === col
+                  const isEditingTitle = editingTitleId === id
+                  const isMenuOpen = menuCardId === id
+                  const subStats = id ? subTasksByParent.get(id) : undefined
                   return (
                     <div
                       key={id ?? i}
-                      draggable={draggable}
+                      draggable={draggable && !isEditingTitle}
                       onDragStart={e => {
                         if (!id) return
                         draggingIdRef.current = id
@@ -366,9 +623,6 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                         setDropBeforeId(null)
                       }}
                       onDragOver={e => {
-                        // Only insert-before tracking here — the column-level
-                        // onDragOver still fires (events bubble) and handles
-                        // setting dragOverCol.
                         if (!id || !draggingIdRef.current || draggingIdRef.current === id) return
                         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                         const midpoint = rect.top + rect.height / 2
@@ -376,13 +630,14 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                         if (before !== dropBeforeId) setDropBeforeId(before)
                       }}
                       onClick={e => {
-                        // Don't open the modal when the trash icon was clicked.
                         if ((e.target as HTMLElement).closest('[data-card-action]')) return
+                        if (isEditingTitle) return
                         setOpenCard(item)
                       }}
                       role="button"
                       tabIndex={0}
                       onKeyDown={e => {
+                        if (isEditingTitle) return
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
                           setOpenCard(item)
@@ -396,43 +651,62 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                           ? '2px solid var(--accent)'
                           : '1px solid var(--border)',
                         color: 'var(--text)',
-                        cursor: draggable ? 'grab' : 'pointer',
+                        cursor: draggable && !isEditingTitle ? 'grab' : 'pointer',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '0.5rem',
+                        gap: '0.4rem',
                       }}
                     >
-                      <RichText text={String(item[titleField] ?? item.name ?? item.id ?? '')} />
+                      <CardLabelStrip labels={item.labels} />
+                      <CardTitleRow
+                        item={item}
+                        titleField={titleField}
+                        editable={Boolean(id)}
+                        editing={isEditingTitle}
+                        onStartEdit={() => id && setEditingTitleId(id)}
+                        onCommit={(next) => {
+                          if (id) void renameCard(id, next)
+                          setEditingTitleId(null)
+                        }}
+                        onCancel={() => setEditingTitleId(null)}
+                      />
+                      <CardMetaRow
+                        due={typeof item.due === 'string' ? item.due : ''}
+                        priority={typeof item.priority === 'number' ? item.priority : null}
+                        subStats={subStats}
+                      />
                       <AssigneeStrip assignees={item.assignees} users={users} teams={teams} />
                       {draggable && (
-                        <button
-                          type="button"
-                          data-card-action="delete"
-                          aria-label="Delete card"
-                          onClick={e => {
-                            e.stopPropagation()
+                        <CardMenu
+                          open={isMenuOpen}
+                          columns={normalisedColumns}
+                          currentCol={String(item[groupBy] ?? '')}
+                          onOpenChange={(o) => setMenuCardId(o ? id : null)}
+                          onMove={(target) => {
+                            void moveCardToColumn(item, target)
+                            setMenuCardId(null)
+                          }}
+                          onDuplicate={() => {
+                            void duplicateCard(item).catch((e) =>
+                              beaconError({
+                                component: 'Kanban',
+                                source: effectiveSource,
+                                error: e instanceof Error ? e.message : 'duplicate failed',
+                              }),
+                            )
+                            setMenuCardId(null)
+                          }}
+                          onCopyId={() => {
+                            if (id && navigator.clipboard) {
+                              void navigator.clipboard.writeText(id)
+                            }
+                            setMenuCardId(null)
+                          }}
+                          onDelete={() => {
                             setConfirmDelete(item)
+                            setMenuCardId(null)
                           }}
-                          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                          style={{
-                            position: 'absolute',
-                            top: '0.375rem',
-                            right: '0.375rem',
-                            width: '22px',
-                            height: '22px',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderRadius: '6px',
-                            background: 'var(--bg-secondary)',
-                            border: '1px solid var(--border)',
-                            color: 'var(--text-secondary)',
-                            cursor: 'pointer',
-                            padding: 0,
-                          }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        />
                       )}
                     </div>
                   )
@@ -442,8 +716,21 @@ export function Kanban({ source, groupBy, columns, titleField = 'title' }: Kanba
                     className="text-xs py-4 text-center"
                     style={{ color: 'var(--text-secondary)' }}
                   >
-                    Empty
+                    {filterActive ? 'No matches' : 'Empty'}
                   </div>
+                )}
+                {isFolderBoard && (
+                  <ColumnQuickAdd
+                    onAdd={(t) =>
+                      createCard(t, col).catch((e) =>
+                        beaconError({
+                          component: 'Kanban',
+                          source: effectiveSource,
+                          error: e instanceof Error ? e.message : 'create failed',
+                        }),
+                      )
+                    }
+                  />
                 )}
               </div>
             </div>
@@ -1807,6 +2094,9 @@ function ColumnHeader({
   canRemove,
   onRename,
   onRemove,
+  draggable,
+  onDragStart,
+  onDragEnd,
 }: {
   label: string
   count: number
@@ -1814,6 +2104,9 @@ function ColumnHeader({
   canRemove: boolean
   onRename: (next: string) => void
   onRemove: () => void
+  draggable?: boolean
+  onDragStart?: () => void
+  onDragEnd?: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(label)
@@ -1853,7 +2146,18 @@ function ColumnHeader({
   return (
     <div
       className="text-sm font-medium mb-3 flex items-center justify-between gap-2 sticky top-0 group"
-      style={{ color: 'var(--text-secondary)' }}
+      style={{
+        color: 'var(--text-secondary)',
+        cursor: draggable ? 'grab' : undefined,
+      }}
+      draggable={draggable}
+      onDragStart={e => {
+        if (!draggable) return
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+        onDragStart?.()
+      }}
+      onDragEnd={() => onDragEnd?.()}
+      title={draggable ? 'Drag to reorder column' : undefined}
     >
       <button
         type="button"
@@ -1971,35 +2275,17 @@ function NewLaneCard({ onAdd }: { onAdd: (label: string) => void }) {
   )
 }
 
-function NewTaskBar({ source }: { source: string }) {
+function NewTaskBar({
+  source: _source,
+  onCreate,
+}: {
+  source: string
+  onCreate: (title: string) => Promise<void>
+}) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-
-  function slugify(s: string): string {
-    return s
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'task'
-  }
-
-  async function exists(path: string): Promise<boolean> {
-    const res = await apiFetch(`/api/${path}`, { method: 'HEAD' })
-    return res.ok
-  }
-
-  async function uniqueSlug(base: string): Promise<string> {
-    const folder = source.replace(/\/$/, '')
-    let slug = base
-    for (let i = 2; await exists(`${folder}/${slug}`); i++) {
-      slug = `${base}-${i}`
-      if (i > 200) throw new Error('too many name collisions')
-    }
-    return slug
-  }
 
   async function submit(e: FormEvent) {
     e.preventDefault()
@@ -2008,35 +2294,9 @@ function NewTaskBar({ source }: { source: string }) {
     setBusy(true)
     setErr(null)
     try {
-      const slug = await uniqueSlug(slugify(t))
-      const folder = source.replace(/\/$/, '')
-      const today = new Date().toISOString().slice(0, 10)
-      // Body is empty — the description editor in the card detail
-      // pane writes prose to the MDX body, so seeding a `# Title`
-      // heading would just make every new card start with redundant
-      // content the user has to delete.
-      const body = `---
-title: ${JSON.stringify(t)}
-col: todo
-created: ${today}
----
-`
-      const res = await apiFetch(`/api/${folder}/${slug}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/markdown' },
-        body,
-      })
-      if (!res.ok) {
-        let msg = `create ${res.status}`
-        try {
-          const j = (await res.json()) as { error?: string; message?: string }
-          msg = j.error ?? j.message ?? msg
-        } catch { /* ignore */ }
-        throw new Error(msg)
-      }
+      await onCreate(t)
       setTitle('')
       setOpen(false)
-      // SSE will broadcast the file-updated event; useData refetches.
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'create failed')
     } finally {
@@ -2379,6 +2639,880 @@ function formatValue(v: unknown): string {
     }
   }
   return String(v)
+}
+
+// stringList coerces a frontmatter value into a clean string[]. Tolerant
+// of unset / wrong-shape inputs — the kanban data tier holds anything.
+function stringList(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string' && x.length > 0)
+}
+
+function slugifyTitle(s: string): string {
+  return (
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 64) || 'task'
+  )
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  const res = await apiFetch(`/api/${path}`, { method: 'HEAD' })
+  return res.ok
+}
+
+// labelColor maps an arbitrary label string to a stable HSL pair (bg +
+// border). Hash-based so `urgent` always renders the same colour across
+// cards and across reloads, without us needing a registry.
+function labelColor(label: string): { bg: string; fg: string; border: string } {
+  let h = 0
+  for (let i = 0; i < label.length; i++) {
+    h = (h * 31 + label.charCodeAt(i)) >>> 0
+  }
+  const hue = h % 360
+  return {
+    bg: `hsl(${hue}deg 65% 88%)`,
+    fg: `hsl(${hue}deg 60% 25%)`,
+    border: `hsl(${hue}deg 50% 70%)`,
+  }
+}
+
+// dueStatus turns a due-date string into a small status bucket so the
+// pill can colour itself. Accepts ISO dates (`2026-05-01`) and ISO
+// timestamps; anything unparseable returns null and the pill renders
+// neutral.
+function dueStatus(due: string): 'overdue' | 'today' | 'soon' | 'later' | null {
+  const t = Date.parse(due)
+  if (Number.isNaN(t)) return null
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  const target = new Date(t).setHours(0, 0, 0, 0)
+  const diffDays = Math.round((target - today) / 86400000)
+  if (diffDays < 0) return 'overdue'
+  if (diffDays === 0) return 'today'
+  if (diffDays <= 3) return 'soon'
+  return 'later'
+}
+
+function formatDueShort(due: string): string {
+  const t = Date.parse(due)
+  if (Number.isNaN(t)) return due
+  const d = new Date(t)
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  return d.toLocaleDateString(undefined, sameYear
+    ? { month: 'short', day: 'numeric' }
+    : { year: 'numeric', month: 'short', day: 'numeric' })
+}
+
+// CardLabelStrip renders the `labels: string[]` frontmatter field as
+// coloured chips at the top of the card face. Hidden when there are no
+// labels (no empty row reserved).
+function CardLabelStrip({ labels }: { labels: unknown }) {
+  const list = stringList(labels)
+  if (list.length === 0) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
+      {list.map(l => {
+        const c = labelColor(l)
+        return (
+          <span
+            key={l}
+            style={{
+              fontSize: '0.625rem',
+              fontWeight: 600,
+              padding: '0.075rem 0.45rem',
+              borderRadius: '4px',
+              background: c.bg,
+              color: c.fg,
+              border: `1px solid ${c.border}`,
+              lineHeight: 1.4,
+              letterSpacing: '0.01em',
+            }}
+          >
+            {l}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+// CardTitleRow shows the card's title; double-click (or pencil hover
+// click) flips it into an inline input. Enter saves; Escape cancels.
+function CardTitleRow({
+  item,
+  titleField,
+  editable,
+  editing,
+  onStartEdit,
+  onCommit,
+  onCancel,
+}: {
+  item: Record<string, unknown>
+  titleField: string
+  editable: boolean
+  editing: boolean
+  onStartEdit: () => void
+  onCommit: (next: string) => void
+  onCancel: () => void
+}) {
+  const initial = String(item[titleField] ?? item.name ?? item.id ?? '')
+  const [draft, setDraft] = useState(initial)
+  useEffect(() => {
+    if (!editing) setDraft(initial)
+  }, [initial, editing])
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onClick={e => e.stopPropagation()}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            onCommit(draft)
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            onCancel()
+          }
+        }}
+        onBlur={() => onCommit(draft)}
+        style={{
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--accent)',
+          borderRadius: 4,
+          color: 'var(--text)',
+          font: 'inherit',
+          outline: 'none',
+          padding: '0.125rem 0.4rem',
+          width: '100%',
+        }}
+      />
+    )
+  }
+
+  return (
+    <div className="flex items-start gap-1.5" style={{ minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, wordBreak: 'break-word' }}>
+        <RichText text={initial} />
+      </div>
+      {editable && (
+        <button
+          type="button"
+          data-card-action="rename"
+          aria-label="Rename card"
+          onClick={e => {
+            e.stopPropagation()
+            onStartEdit()
+          }}
+          className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            padding: 2,
+            borderRadius: 4,
+            flexShrink: 0,
+          }}
+          title="Rename"
+        >
+          <Pencil size={11} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// CardMetaRow surfaces the structured fields readers care about at a
+// glance — due date, priority, sub-task progress. Empty when none of
+// the three are set so the card stays compact.
+function CardMetaRow({
+  due,
+  priority,
+  subStats,
+}: {
+  due: string
+  priority: number | null
+  subStats: { total: number; done: number } | undefined
+}) {
+  const hasDue = Boolean(due)
+  const hasPriority = priority !== null && Number.isFinite(priority)
+  const hasSubs = subStats && subStats.total > 0
+  if (!hasDue && !hasPriority && !hasSubs) return null
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+      {hasDue && <DueDatePill due={due} />}
+      {hasPriority && <PriorityBadge priority={priority as number} />}
+      {hasSubs && <SubTaskCount stats={subStats!} />}
+    </div>
+  )
+}
+
+function DueDatePill({ due }: { due: string }) {
+  const status = dueStatus(due)
+  const palette: Record<string, { bg: string; fg: string; border: string }> = {
+    overdue: { bg: 'rgba(220, 38, 38, 0.12)', fg: 'rgb(185, 28, 28)', border: 'rgba(220, 38, 38, 0.45)' },
+    today:   { bg: 'rgba(245, 158, 11, 0.15)', fg: 'rgb(180, 83, 9)',  border: 'rgba(245, 158, 11, 0.5)' },
+    soon:    { bg: 'rgba(234, 179, 8, 0.12)',  fg: 'rgb(133, 77, 14)', border: 'rgba(234, 179, 8, 0.4)' },
+    later:   { bg: 'var(--bg-secondary)',      fg: 'var(--text-secondary)', border: 'var(--border)' },
+    none:    { bg: 'var(--bg-secondary)',      fg: 'var(--text-secondary)', border: 'var(--border)' },
+  }
+  const c = palette[status ?? 'none']
+  return (
+    <span
+      title={due}
+      style={{
+        fontSize: '0.6875rem',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.25rem',
+        padding: '0.075rem 0.45rem',
+        borderRadius: '4px',
+        background: c.bg,
+        color: c.fg,
+        border: `1px solid ${c.border}`,
+        lineHeight: 1.4,
+        fontWeight: 500,
+      }}
+    >
+      <Calendar size={10} />
+      {formatDueShort(due)}
+    </span>
+  )
+}
+
+function PriorityBadge({ priority }: { priority: number }) {
+  // Lower number = higher priority. P1/P2 burn red/amber; P3+ stays
+  // neutral so the eye lands on the urgent ones.
+  const label = `P${priority}`
+  let bg = 'var(--bg-secondary)'
+  let fg = 'var(--text-secondary)'
+  let border = 'var(--border)'
+  if (priority === 1) {
+    bg = 'rgba(220, 38, 38, 0.12)'
+    fg = 'rgb(185, 28, 28)'
+    border = 'rgba(220, 38, 38, 0.45)'
+  } else if (priority === 2) {
+    bg = 'rgba(245, 158, 11, 0.15)'
+    fg = 'rgb(180, 83, 9)'
+    border = 'rgba(245, 158, 11, 0.5)'
+  }
+  return (
+    <span
+      title={`Priority ${priority}`}
+      style={{
+        fontSize: '0.6875rem',
+        padding: '0.075rem 0.45rem',
+        borderRadius: '4px',
+        background: bg,
+        color: fg,
+        border: `1px solid ${border}`,
+        lineHeight: 1.4,
+        fontWeight: 600,
+        letterSpacing: '0.02em',
+      }}
+    >
+      {label}
+    </span>
+  )
+}
+
+function SubTaskCount({ stats }: { stats: { total: number; done: number } }) {
+  const allDone = stats.done === stats.total && stats.total > 0
+  return (
+    <span
+      title="Sub-tasks (done / total)"
+      style={{
+        fontSize: '0.6875rem',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '0.2rem',
+        padding: '0.075rem 0.45rem',
+        borderRadius: '4px',
+        background: 'var(--bg-secondary)',
+        color: allDone ? 'var(--success, #16a34a)' : 'var(--text-secondary)',
+        border: '1px solid var(--border)',
+        lineHeight: 1.4,
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <GitBranch size={10} />
+      {stats.done}/{stats.total}
+    </span>
+  )
+}
+
+// CardMenu is the overflow (⋯) on each card — Move to <col>, Duplicate,
+// Copy ID, Delete. Single-target state at the Kanban level keeps only
+// one card menu open at a time. Click-outside to close.
+function CardMenu({
+  open,
+  columns,
+  currentCol,
+  onOpenChange,
+  onMove,
+  onDuplicate,
+  onCopyId,
+  onDelete,
+}: {
+  open: boolean
+  columns: ReadonlyArray<{ id: string; label: string }>
+  currentCol: string
+  onOpenChange: (next: boolean) => void
+  onMove: (target: string) => void
+  onDuplicate: () => void
+  onCopyId: () => void
+  onDelete: () => void
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        onOpenChange(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onOpenChange(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onOpenChange])
+
+  return (
+    <div
+      ref={ref}
+      data-card-action="menu"
+      style={{ position: 'absolute', top: '0.375rem', right: '0.375rem' }}
+    >
+      <button
+        type="button"
+        aria-label="Card actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={e => {
+          e.stopPropagation()
+          onOpenChange(!open)
+        }}
+        className={open ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity'}
+        style={{
+          width: '22px',
+          height: '22px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: '6px',
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <MoreHorizontal size={12} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          onClick={e => e.stopPropagation()}
+          className="text-xs rounded-md py-1"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            right: 0,
+            minWidth: '11rem',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+            zIndex: 20,
+            color: 'var(--text)',
+          }}
+        >
+          <div
+            className="px-3 pt-1.5 pb-1 uppercase tracking-wide"
+            style={{ color: 'var(--text-secondary)', fontSize: '0.625rem' }}
+          >
+            Move to
+          </div>
+          {columns
+            .filter(c => c.id !== currentCol)
+            .map(c => (
+              <CardMenuItem key={c.id} onClick={() => onMove(c.id)}>
+                {c.label}
+              </CardMenuItem>
+            ))}
+          {columns.filter(c => c.id !== currentCol).length === 0 && (
+            <div
+              className="px-3 py-1 italic"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              (only one column)
+            </div>
+          )}
+          <div
+            className="my-1 border-t"
+            style={{ borderColor: 'var(--border)' }}
+          />
+          <CardMenuItem onClick={onDuplicate} icon={<Copy size={11} />}>
+            Duplicate
+          </CardMenuItem>
+          <CardMenuItem onClick={onCopyId} icon={<Copy size={11} />}>
+            Copy ID
+          </CardMenuItem>
+          <CardMenuItem onClick={onDelete} icon={<Trash2 size={11} />} danger>
+            Delete
+          </CardMenuItem>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CardMenuItem({
+  children,
+  onClick,
+  icon,
+  danger,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  icon?: React.ReactNode
+  danger?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="block w-full text-left px-3 py-1 hover:opacity-100"
+      style={{
+        background: 'transparent',
+        border: 'none',
+        color: danger ? 'var(--error)' : 'inherit',
+        cursor: 'pointer',
+        font: 'inherit',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.5rem',
+      }}
+      onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+    >
+      {icon}
+      {children}
+    </button>
+  )
+}
+
+// ColumnQuickAdd renders a footer "+ Add a card" at the bottom of each
+// column. Clicking opens an inline input; Enter creates a card with the
+// matching `col` value (passed in by the parent through onAdd) so it
+// lands directly in this lane. Escape closes without writing.
+function ColumnQuickAdd({ onAdd }: { onAdd: (title: string) => Promise<void> | void }) {
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="w-full text-left text-xs rounded-md px-2.5 py-1.5"
+        style={{
+          background: 'transparent',
+          border: '1px dashed var(--border)',
+          color: 'var(--text-secondary)',
+          cursor: 'pointer',
+        }}
+      >
+        + Add a card
+      </button>
+    )
+  }
+
+  async function submit() {
+    const t = draft.trim()
+    if (!t) {
+      setOpen(false)
+      return
+    }
+    setBusy(true)
+    try {
+      await onAdd(t)
+      setDraft('')
+      setOpen(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="rounded-md p-2"
+      style={{ background: 'var(--bg)', border: '1px solid var(--accent)' }}
+    >
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            void submit()
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            setDraft('')
+            setOpen(false)
+          }
+        }}
+        placeholder="Card title"
+        disabled={busy}
+        className="w-full text-sm rounded px-1.5 py-1"
+        style={{
+          background: 'var(--bg-secondary)',
+          border: '1px solid var(--border)',
+          color: 'var(--text)',
+          outline: 'none',
+        }}
+      />
+      <div className="flex items-center gap-1 mt-2">
+        <button
+          type="button"
+          onClick={() => void submit()}
+          disabled={busy || !draft.trim()}
+          className="text-xs rounded-md px-2.5 py-1"
+          style={{
+            background: draft.trim() ? 'var(--accent)' : 'var(--bg-secondary)',
+            color: draft.trim() ? 'white' : 'var(--text-secondary)',
+            border: 'none',
+            cursor: draft.trim() ? 'pointer' : 'default',
+          }}
+        >
+          Add
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft('')
+            setOpen(false)
+          }}
+          aria-label="Cancel"
+          className="text-xs rounded-md px-1.5 py-1"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// BoardToolbar wraps NewTaskBar with the filter affordances. The bar
+// stays a single row on wide screens and wraps onto two on narrow.
+function BoardToolbar({
+  isFolderBoard,
+  effectiveSource,
+  onCreate,
+  filterQ,
+  setFilterQ,
+  filterAssignees,
+  setFilterAssignees,
+  filterLabels,
+  setFilterLabels,
+  allAssignees,
+  allLabels,
+  users,
+  filterActive,
+  visibleCount,
+  totalCount,
+}: {
+  isFolderBoard: boolean
+  effectiveSource: string
+  onCreate: (title: string, columnId?: string | null) => Promise<void>
+  filterQ: string
+  setFilterQ: (s: string) => void
+  filterAssignees: string[]
+  setFilterAssignees: (a: string[]) => void
+  filterLabels: string[]
+  setFilterLabels: (l: string[]) => void
+  allAssignees: string[]
+  allLabels: string[]
+  users: PublicUser[]
+  filterActive: boolean
+  visibleCount: number
+  totalCount: number
+}) {
+  return (
+    <div
+      className="flex items-center gap-2 flex-wrap"
+      style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}
+    >
+      {isFolderBoard && (
+        <NewTaskBar source={effectiveSource} onCreate={(t) => onCreate(t, null)} />
+      )}
+      <div style={{ flex: '1 1 auto' }} />
+      <BoardSearchBox value={filterQ} onChange={setFilterQ} />
+      {allAssignees.length > 0 && (
+        <FilterMultiSelect
+          label="Assignee"
+          options={allAssignees}
+          value={filterAssignees}
+          onChange={setFilterAssignees}
+          users={users}
+        />
+      )}
+      {allLabels.length > 0 && (
+        <FilterMultiSelect
+          label="Label"
+          options={allLabels}
+          value={filterLabels}
+          onChange={setFilterLabels}
+          colorize
+        />
+      )}
+      {filterActive && (
+        <span
+          className="text-xs"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {visibleCount} / {totalCount}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function BoardSearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div
+      className="inline-flex items-center gap-1.5 rounded-md px-2"
+      style={{
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
+      }}
+    >
+      <Search size={12} />
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder="Search…"
+        className="text-sm py-1"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'var(--text)',
+          outline: 'none',
+          minWidth: 140,
+        }}
+      />
+      {value && (
+        <button
+          type="button"
+          aria-label="Clear search"
+          onClick={() => onChange('')}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            padding: 2,
+            display: 'inline-flex',
+          }}
+        >
+          <X size={11} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// FilterMultiSelect renders a dropdown of selectable strings. `value`
+// is the current selection (array). Clicking a row toggles. The
+// trigger badges the count when any are selected.
+function FilterMultiSelect({
+  label,
+  options,
+  value,
+  onChange,
+  users,
+  colorize,
+}: {
+  label: string
+  options: string[]
+  value: string[]
+  onChange: (next: string[]) => void
+  users?: PublicUser[]
+  colorize?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    function onDown(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  function toggle(opt: string) {
+    if (value.includes(opt)) onChange(value.filter(v => v !== opt))
+    else onChange([...value, opt])
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="text-sm inline-flex items-center gap-1.5 rounded-md px-2.5 py-1"
+        style={{
+          background: value.length > 0 ? 'var(--accent-light, var(--bg-secondary))' : 'var(--bg)',
+          border: '1px solid var(--border)',
+          color: value.length > 0 ? 'var(--accent)' : 'var(--text-secondary)',
+          cursor: 'pointer',
+        }}
+      >
+        <Filter size={12} />
+        {label}
+        {value.length > 0 && (
+          <span
+            className="text-xs px-1.5 rounded-full"
+            style={{ background: 'var(--accent)', color: 'white' }}
+          >
+            {value.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          className="rounded-md py-1"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            right: 0,
+            zIndex: 30,
+            minWidth: '14rem',
+            maxHeight: 280,
+            overflowY: 'auto',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          }}
+        >
+          {value.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="w-full text-left text-xs px-3 py-1"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              Clear all
+            </button>
+          )}
+          {options.map(opt => {
+            const selected = value.includes(opt)
+            const u = users ? findUser(users, opt) : null
+            const c = colorize ? labelColor(opt) : null
+            return (
+              <button
+                key={opt}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => toggle(opt)}
+                className="w-full text-left text-sm px-3 py-1.5 flex items-center gap-2"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text)',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              >
+                <span
+                  style={{
+                    width: 14,
+                    height: 14,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 3,
+                    border: '1px solid var(--border)',
+                    background: selected ? 'var(--accent)' : 'transparent',
+                    color: 'white',
+                    flexShrink: 0,
+                  }}
+                >
+                  {selected && <Check size={10} strokeWidth={3} />}
+                </span>
+                {c && (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: 2,
+                      background: c.bg,
+                      border: `1px solid ${c.border}`,
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                {u && (
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: u.avatar_color ?? 'var(--border)',
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <span className="truncate">{opt}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // AssigneeStrip renders the `assignees: string[]` field on a card as a

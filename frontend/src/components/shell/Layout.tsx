@@ -201,7 +201,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         />
       )}
 
-      <main className="flex-1 p-4 md:p-8 max-w-5xl mx-auto w-full relative">
+      <main className="flex-1 p-4 md:p-8 w-full relative">
         {!kiosk && (isMobile || collapsed) && !drawerOpen && (
           <button
             onClick={() => setCollapsed(false)}

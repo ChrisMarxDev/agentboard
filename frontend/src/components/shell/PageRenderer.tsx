@@ -217,40 +217,47 @@ export default function PageRenderer() {
     void resolveFallback()
   }, [bundle, dataContext.loading, dataContext.error, compileBundle, resolveFallback])
 
+  // Capped container for short/transient renders (loading, errors,
+  // file viewer, folder index). Page renders below choose their own
+  // width based on `frontmatter.wide`.
+  const cappedWrap = (node: React.ReactNode) => (
+    <div className="w-full max-w-5xl mx-auto">{node}</div>
+  )
+
   if (loading) {
-    return (
+    return cappedWrap(
       <div className="flex items-center justify-center h-64" style={{ color: 'var(--text-secondary)' }}>
         Loading...
-      </div>
+      </div>,
     )
   }
 
   if (error === '__AUTH__') {
-    return <AuthRequiredPanel pagePath={pagePath} />
+    return cappedWrap(<AuthRequiredPanel pagePath={pagePath} />)
   }
   if (error) {
-    return (
+    return cappedWrap(
       <div className="p-4 rounded-md" style={{ background: 'var(--bg-secondary)', color: 'var(--error)' }}>
         {error}
-      </div>
+      </div>,
     )
   }
 
   if (!resolved) return null
 
   if (resolved.kind === 'file') {
-    return <FileViewer />
+    return cappedWrap(<FileViewer />)
   }
 
   if (resolved.kind === 'folder') {
-    return <FolderView folder={resolved.folder} />
+    return cappedWrap(<FolderView folder={resolved.folder} />)
   }
 
   if (resolved.kind === 'missing') {
-    return (
+    return cappedWrap(
       <div className="p-4 rounded-md" style={{ background: 'var(--bg-secondary)', color: 'var(--error)' }}>
         Not found: {location.pathname}
-      </div>
+      </div>,
     )
   }
 
@@ -265,8 +272,16 @@ export default function PageRenderer() {
       ? autoSkillSlug
       : null
 
+  // Pages opt out of the prose-width cap with `wide: true` in their
+  // frontmatter — boards (Kanban, big tables) want every horizontal
+  // pixel; long-form prose stays capped for readability.
+  const wide = Boolean(bundle?.frontmatter?.wide)
+  const containerClass = wide
+    ? 'relative w-full'
+    : 'relative w-full max-w-5xl mx-auto'
+
   return (
-    <div className="relative">
+    <div className={containerClass}>
       <PageActionsMenu pagePath={pagePath} pageTitle={resolved.title} />
       <PageMetaBar
         pagePath={pagePath}
