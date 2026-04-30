@@ -295,13 +295,10 @@ func (pm *PageManager) WritePageIfMatch(pagePath, source, expectedVersion string
 		return err
 	}
 
-	// Ensure parent directory exists
-	dir := filepath.Dir(filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(filePath, []byte(stamped), 0644); err != nil {
+	// Atomic write: temp file + fsync + rename. Without this, the
+	// file watcher and any concurrent reader (frontend SSE refresh,
+	// Obsidian-style sync clients) can observe a torn page mid-write.
+	if err := writeFileAtomic(filePath, []byte(stamped)); err != nil {
 		return err
 	}
 

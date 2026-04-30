@@ -813,12 +813,22 @@ type toolError struct {
 // normalizeLeafPath strips a leading slash + `.md` suffix and rejects
 // the obvious traversal cases. Empty input returns "" so callers can
 // distinguish "no path" from a normalized one.
+//
+// Any segment beginning with a dot is rejected — this is the dotfile
+// blocklist that keeps user-supplied paths out of `.agentboard/`,
+// `.git/`, `.trash/`, and friends. It also catches `..` traversal as
+// a side effect.
 func normalizeLeafPath(p string) string {
 	p = strings.TrimSpace(p)
 	p = strings.TrimPrefix(p, "/")
 	p = strings.TrimSuffix(p, ".md")
-	if strings.Contains(p, "..") {
+	if p == "" {
 		return ""
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || strings.HasPrefix(seg, ".") {
+			return ""
+		}
 	}
 	return p
 }

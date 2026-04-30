@@ -493,6 +493,10 @@ func (s *Server) handleMovePage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "path must not contain '..'")
 		return
 	}
+	if hasDotSegment(from) || hasDotSegment(to) {
+		respondError(w, http.StatusBadRequest, "INVALID_KEY", "path segments must not begin with '.'")
+		return
+	}
 	if from == to {
 		respondError(w, http.StatusBadRequest, "INVALID_KEY", "from and to must differ")
 		return
@@ -544,4 +548,19 @@ func normalizePagePath(p string) string {
 	p = strings.TrimPrefix(p, "/")
 	p = strings.TrimSuffix(p, ".md")
 	return p
+}
+
+// hasDotSegment reports whether any `/`-separated segment of p starts
+// with `.`. This is the dotfile blocklist that keeps user-supplied
+// move targets from landing under `.agentboard/`, `.git/`, `.trash/`,
+// etc. (a defense-in-depth complement to the `..` traversal check —
+// pages already live under content/ so escape is not currently
+// possible, but the blocklist holds even if the layout changes).
+func hasDotSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
 }

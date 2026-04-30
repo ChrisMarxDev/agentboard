@@ -572,8 +572,10 @@ func (m *Manager) WriteComponent(name, source string) error {
 		return fmt.Errorf("ensure components dir: %w", err)
 	}
 
+	// Atomic write: temp file + fsync + rename so the watcher and
+	// the JSX bundler never observe a half-written component.
 	filePath := filepath.Join(dir, name+".jsx")
-	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+	if err := writeFileAtomic(filePath, []byte(source)); err != nil {
 		return fmt.Errorf("write component: %w", err)
 	}
 
