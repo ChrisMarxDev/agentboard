@@ -272,6 +272,32 @@ func New(cfg ServerConfig) *Server {
 		Auth:      cfg.Auth,
 		// WebhookDispatcher is set below after the dispatcher is built.
 	}
+	// AfterPageWrite — Cut 10. Run the same post-write hooks the REST
+	// handler runs whenever an MCP write lands a page. The file
+	// watcher's debounce can race with directory-create events on
+	// rapid batch writes, leaving page_refs and the FTS index stale.
+	// Running the hooks synchronously here makes MCP-driven writes
+	// indistinguishable from REST-driven writes downstream.
+	mcpServer.AfterPageWrite = func(pagePath, source, actor string) {
+		normalized := store.NormalizePagePath(pagePath)
+		if metaStore != nil {
+			_ = metaStore.Record(normalized, actor)
+		}
+		if searchStore != nil {
+			if p := pageManager.GetPage(normalized); p != nil {
+				_ = searchStore.IndexPage(p.Path, p.Title, p.Source)
+			}
+		}
+		if refStore != nil {
+			if p := pageManager.GetPage(normalized); p != nil {
+				_ = refStore.Record(normalized, store.ExtractRefs(p.Source, normalized))
+			}
+		}
+		broadcaster.Broadcast(SSEEvent{
+			Type: "page-updated",
+			Data: []byte(`{"path":"` + pagePath + `"}`),
+		})
+	}
 	// Wire the upload-token mint into MCP. The base URL needs a host;
 	// for now we use localhost + port, which works for every Claude
 	// Code or Codex agent connecting to the same machine. Hosted-mode

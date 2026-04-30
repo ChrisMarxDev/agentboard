@@ -48,6 +48,17 @@ type Server struct {
 	// in by the HTTP server (mcp tests stub it). Returns the URL and
 	// expiry. Nil means the upload feature isn't configured.
 	MintUploadToken func(name, actor string, sizeBytes int64) (uploadURL, expiresAt string, maxBytes int64, ok bool)
+
+	// AfterPageWrite runs after every successful page write through
+	// the MCP layer. The HTTP server wires this to the same post-write
+	// hooks the REST handlers run: PageMeta.Record, PageRefs.Record,
+	// Search.IndexPage, mention dispatch, SSE broadcast. Without it the
+	// MCP-driven page writes rely entirely on the file watcher to pick
+	// up the change — fine for direct-disk drops but unreliable for
+	// rapid batch writes where directory-create races can drop events.
+	// Nil → no post-write hook (tests stub it; the unified watcher
+	// still picks up the change on a 500ms debounce as a safety net).
+	AfterPageWrite func(path, source, actor string)
 }
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.

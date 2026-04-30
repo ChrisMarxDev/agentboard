@@ -400,7 +400,16 @@ func (s *Server) writePage(path string, it writeItem, actor string) writeResult 
 	if err := s.Pages.WritePageIfMatch(path, source, it.Version); err != nil {
 		return writeResult{Path: path, Success: false, Error: pageToolErr(err)}
 	}
-	_ = actor // attribution for pages flows through the post-write hooks in cli/serve.go
+	// Run the same post-write hooks the REST handler runs (PageMeta,
+	// PageRefs, Search, mention dispatch, SSE broadcast). The file
+	// watcher would also pick up the change on its 500 ms debounce,
+	// but rapid batch writes through MCP can race with directory-
+	// create events so we run the hooks synchronously here as the
+	// canonical path. The HTTP server injects AfterPageWrite at boot
+	// (cli/serve.go); tests can leave it nil.
+	if s.AfterPageWrite != nil {
+		s.AfterPageWrite(path, source, actor)
+	}
 	page := s.Pages.GetPage(path)
 	res := writeResult{Path: path, Success: true}
 	if page != nil {
@@ -519,6 +528,9 @@ func (s *Server) patchOne(it patchItem, actor string) writeResult {
 			}
 			if err := s.Pages.WritePageIfMatch(norm, source, it.Version); err != nil {
 				return writeResult{Path: norm, Success: false, Error: pageToolErr(err)}
+			}
+			if s.AfterPageWrite != nil {
+				s.AfterPageWrite(norm, source, actor)
 			}
 			page := s.Pages.GetPage(norm)
 			res := writeResult{Path: norm, Success: true}
