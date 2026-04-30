@@ -459,13 +459,12 @@ skill; the folder's location and the manifest are the only signal.
 
 When working in this repo and a new skill needs hosting or updating:
 
-1. Write the manifest via `PUT /api/files/skills/<slug>/SKILL.md` (or the MCP
-   tool `agentboard_write_file` with path `skills/<slug>/SKILL.md`). A `.md`
+1. Write the manifest via `PUT /api/content/skills/<slug>/SKILL.md` (or the MCP
+   tool `agentboard_write({items: [{path: "skills/<slug>/SKILL", frontmatter: {…}, body: "…"}]})`). A `.md`
    upload triggers an inline page reindex, so the SKILL renders at
    `/skills/<slug>/SKILL` and is full-text searchable immediately.
-2. Upload any supporting files to the same folder.
-3. Verify with `agentboard_list_skills` — the skill should appear with its
-   slug, name, and description.
+2. Upload any supporting files to the same folder via `agentboard_request_file_upload`.
+3. Verify with `agentboard_list({path: "skills/"})` — the skill folder should appear.
 4. Test the bundle endpoint: `GET /api/skills/<slug>` returns a zip.
 
 Avoid teaching users about `content/skills/` directly — they should go

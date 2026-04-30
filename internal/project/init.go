@@ -66,7 +66,7 @@ history_retention_days: 30
 // <ApiList/> built-in against /api/skills — see CORE_GUIDELINES §9.
 const skillsPageMd = `# Skills
 
-Anthropic-format skills hosted on this AgentBoard. Agents discover them via ` + "`GET /api/skills`" + ` (or the ` + "`agentboard_list_skills`" + ` MCP tool) and fetch a zip bundle from ` + "`GET /api/skills/<slug>`" + `.
+Anthropic-format skills hosted on this AgentBoard. Agents discover them via ` + "`GET /api/skills`" + ` (or ` + "`agentboard_list({path: \"skills/\"})`" + ` over MCP) and fetch a zip bundle from ` + "`GET /api/skills/<slug>`" + `.
 
 A skill is any folder under ` + "`content/skills/<slug>/`" + ` containing ` + "`SKILL.md`" + ` with ` + "`name`" + ` and ` + "`description`" + ` in YAML frontmatter. Uploads go through the ` + "`/api/files/`" + ` endpoint; on disk they land in the content tree (content/ and files/ are one consolidated folder — see CORE_GUIDELINES §9). Nothing on disk is marked as special — the location + manifest are the only signal.
 
@@ -92,7 +92,7 @@ A skill is any folder under ` + "`content/skills/<slug>/`" + ` containing ` + "`
 </Card>
 
 <Card title="Or via MCP">
-Use ` + "`agentboard_write_file`" + ` with path ` + "`skills/my-skill/SKILL.md`" + ` and the SKILL.md body as content. The list above refreshes automatically when the file lands.
+Use ` + "`agentboard_write({items: [{path: \"skills/my-skill/SKILL\", frontmatter: {name, description}, body: \"…\"}]})`" + `. The list above refreshes automatically when the file lands.
 </Card>
 `
 
@@ -136,14 +136,28 @@ No token / revoked token / deactivated user → ` + "`401 Unauthorized`" + `. Do
 - **Optimistic concurrency** (when available): read first, get the ` + "`ETag`" + ` or ` + "`version`" + ` field, send it back as ` + "`If-Match`" + ` on the write. ` + "`412 Precondition Failed`" + ` means someone else wrote meanwhile — re-read, merge semantically, retry.
 - **Never edit files under ` + "`<project>/content/`" + ` directly.** The file watcher would accept the edit and the UI would update, but the write has no actor, no history row, no activity entry, and can clobber concurrent edits silently. This is a product violation.
 
-## Surfaces
+## MCP surface (10 tools, generic over paths)
 
-| What | How to write | How to read |
-|---|---|---|
-| Pages (MDX) | ` + "`agentboard_write_page`, `agentboard_patch_page`" + ` (or ` + "`PUT/PATCH /api/content/<path>`" + `) | ` + "`agentboard_read_page`, `agentboard_list_pages`" + ` |
-| Data (key/value) | ` + "`agentboard_set`, `agentboard_merge`, `agentboard_append`" + ` | ` + "`agentboard_get`, `agentboard_list_keys`" + ` |
-| Files (binary) | ` + "`agentboard_write_file`" + ` | ` + "`agentboard_list_files`, `GET /api/files/<name>`" + ` |
-| Skills | write a folder under ` + "`content/skills/<slug>/`" + ` with ` + "`SKILL.md`" + ` via the page API | ` + "`agentboard_list_skills`, `agentboard_get_skill`" + ` |
+The MCP server exposes a single CRUD surface that dispatches by path — pages, data singletons, streams, and folders all live in the same ` + "`/api/<path>`" + ` namespace. Always-plural batch shape: every call takes an array, partial success per item, native JSON values.
+
+` + "```" + `
+agentboard_read(paths)              — paths: [string]; returns one envelope per path
+agentboard_list(path)               — folder children + frontmatter snippets
+agentboard_search(q, scope?)        — full-text + substring across the tree
+agentboard_write(items)             — items: [{path, frontmatter?, body?, version?}]
+agentboard_patch(items)             — items: [{path, frontmatter_patch?, body?, version?}]
+agentboard_append(path, items)      — items: [any]; one stream per call; race-free
+agentboard_delete(items)            — items: [{path, version?}]
+agentboard_request_file_upload(items) — items: [{name, size_bytes}]; returns presigned PUTs
+agentboard_grab(picks)              — cross-page materializer; assembles agent-ready text
+agentboard_fire_event(event, payload?) — emit on the webhook bus
+` + "```" + `
+
+REST equivalents are available at ` + "`PUT/PATCH/GET/DELETE /api/<path>`" + ` if you can't speak MCP.
+
+**Single-item operations wrap in a one-element array** — there is no singular form. ` + "`agentboard_write({items: [{path, frontmatter}]})`" + ` for one write; same call shape for twenty.
+
+**Admin operations are NOT on MCP.** Webhook subscribe/revoke/list, page locks, team management, user invitations all live on ` + "`/api/admin/*`" + ` and the ` + "`agentboard admin`" + ` CLI. MCP is the agent realm.
 
 ## Folder collections (the most useful pattern)
 
@@ -212,9 +226,10 @@ Share a skill with a teammate by sending them the URL ` + "`<server>/api/skills/
 
 ## Conventions
 
-- **Data changes often, pages rarely.** Push live values to data keys; let page MDX reference them via ` + "`source`" + ` props.
+- **Data changes often, pages rarely.** Push live values to data-store keys; let page MDX reference them via ` + "`source`" + ` props.
+- **Inline first.** A scalar that's only displayed in one place lives inline (` + "`<Metric value={14} label=\"Appointments\" />`" + `), not in its own page. Per spec §7, the only cross-doc ` + "`source`" + ` reference is a folder collection (e.g. ` + "`<Kanban source=\"tasks/\" />`" + `). Same-page frontmatter and data-store keys are also fine.
 - **Keep prose short.** Humans glance; they don't read essays.
-- **Use components for visualizations**, prose for context. See ` + "`agentboard_list_components`" + ` for the catalog.
+- **Use components for visualizations**, prose for context. The full catalog is documented in the AgentBoard repo's component reference.
 - **Errors surface on the dashboard** via the errors beacon — broken diagrams, missing images, bad data refs show up without anyone asking.
 
 ## Quick examples
@@ -227,25 +242,43 @@ See ` + "`examples.md`" + ` in this skill for common patterns (building a dashbo
 // the manifest.
 const seededSkillExamples = `# AgentBoard examples
 
+Every example uses the ` + "`agentboard_*`" + ` MCP tools. REST equivalents at ` + "`/api/<path>`" + ` work the same.
+
 ## Track a counter
 
+Create the page with the value inline (preferred for one-off scalars):
+
 ` + "```" + `
-agentboard_set({ key: "coffee.today", value: 0 })
-agentboard_write_page({
-  path: "coffee",
-  source: "# Coffee\n\n<Metric source=\"coffee.today\" label=\"Cups\" />"
+agentboard_write({
+  items: [
+    {
+      path: "coffee",
+      frontmatter: { title: "Coffee", today: 3 },
+      body: "# Coffee\n\n<Metric source=\"today\" label=\"Cups\" />"
+    }
+  ]
 })
 ` + "```" + `
 
-Later:
+The ` + "`<Metric source=\"today\" />`" + ` reads the page's own frontmatter — no cross-page lookup, no orphan singletons.
+
+To bump it later:
+
 ` + "```" + `
-agentboard_merge({ key: "coffee", value: { today: 3 } })
+agentboard_patch({
+  items: [{ path: "coffee", frontmatter_patch: { today: 4 } }]
+})
 ` + "```" + `
 
 ## Append to a log
 
+Streams live in the same path namespace; ` + "`agentboard_append`" + ` writes one NDJSON line atomically.
+
 ` + "```" + `
-agentboard_append({ key: "deploys", item: { ts: "2026-04-21T10:00Z", msg: "Shipped v1.4" } })
+agentboard_append({
+  path: "deploys",
+  items: [{ ts: "2026-04-21T10:00Z", msg: "Shipped v1.4" }]
+})
 ` + "```" + `
 
 Render it:
@@ -256,9 +289,13 @@ Render it:
 
 ## Host an image
 
-Upload binary content:
+Files take a two-step upload — request a presigned PUT, then upload the bytes.
+
 ` + "```" + `
-agentboard_write_file({ name: "banner.png", content_base64: "..." })
+const { items } = await agentboard_request_file_upload({
+  items: [{ name: "banner.png", size_bytes: 24576 }]
+})
+// items[0].url is a presigned PUT — upload the bytes via fetch().
 ` + "```" + `
 
 Reference it:
