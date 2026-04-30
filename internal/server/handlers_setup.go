@@ -36,7 +36,7 @@ func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
 			// production via a reverse proxy, honour X-Forwarded-Proto
 			// when present.
 			scheme := "http"
-			if r.TLS != nil {
+			if requestIsSecure(r) {
 				scheme = "https"
 			}
 			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {

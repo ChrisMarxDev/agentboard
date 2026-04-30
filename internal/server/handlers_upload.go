@@ -73,7 +73,7 @@ func (s *Server) handleRequestFileUpload(w http.ResponseWriter, r *http.Request)
 	// the agent already knows where the server lives because it just
 	// spoke to it; reflect the same scheme + host back.
 	scheme := "http"
-	if r.TLS != nil {
+	if requestIsSecure(r) {
 		scheme = "https"
 	}
 	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {

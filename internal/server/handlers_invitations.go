@@ -216,7 +216,7 @@ func (s *Server) handleRedeemInvitation(w http.ResponseWriter, r *http.Request) 
 		_, plainSession, err := s.Auth.CreateSession(user.Username, r.UserAgent(), clientIP(r), 0)
 		if err == nil {
 			if csrf, err := auth.GenerateCSRFToken(); err == nil {
-				setSessionCookies(w, plainSession, csrf, auth.DefaultSessionTTL, r.TLS != nil)
+				setSessionCookies(w, plainSession, csrf, auth.DefaultSessionTTL, requestIsSecure(r))
 			}
 		}
 	}

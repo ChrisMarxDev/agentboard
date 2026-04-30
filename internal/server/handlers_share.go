@@ -61,7 +61,7 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if requestIsSecure(r) || r.Header.Get("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	host := r.Host
@@ -228,7 +228,7 @@ func (s *Server) handleRedeemShare(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   requestIsSecure(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 	respondJSON(w, http.StatusOK, map[string]any{

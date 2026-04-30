@@ -92,7 +92,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		respondError(w, 500, "internal", "csrf gen failed")
 		return
 	}
-	setSessionCookies(w, plain, csrf, auth.DefaultSessionTTL, r.TLS != nil)
+	setSessionCookies(w, plain, csrf, auth.DefaultSessionTTL, requestIsSecure(r))
 
 	pu := toPublic(user)
 	respondJSON(w, 200, authResponse{User: pu})
@@ -114,7 +114,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 			_ = s.Auth.RevokeSession(sess.ID)
 		}
 	}
-	clearSessionCookies(w, r.TLS != nil)
+	clearSessionCookies(w, requestIsSecure(r))
 	respondJSON(w, 200, map[string]string{"status": "logged_out"})
 }
 
