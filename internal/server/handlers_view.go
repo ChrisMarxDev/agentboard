@@ -76,8 +76,7 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve data keys in scope. Three layered sources, in priority
-	// order:
+	// Resolve data keys in scope. Three sources, in priority order:
 	//
 	//   1. The rendering page's own frontmatter — `<Status source="col" />`
 	//      resolves to `frontmatter.col`. Primary path; data lives
@@ -85,8 +84,15 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 	//   2. Folder-source `source="path/"` (trailing slash) — walks the
 	//      page tree for children under `path/` and bundles each
 	//      child's frontmatter as a row. Powers `<Kanban source="tasks/">`
-	//      against a real folder of `.md` cards.
+	//      against a real folder of `.md` cards. Per spec §7, folder
+	//      collections are the *only* permitted cross-doc reference.
 	//   3. The files-first store — for store-only data keys.
+	//
+	// Cross-page scalar references (`source="some/other-page"`) are
+	// deliberately not resolved: spec §7 forbids them, and the previous
+	// fallback that read another page's frontmatter as a value masked
+	// authoring mistakes (silently dropping label/trend/comparison
+	// when only a `value` field was unwrapped).
 	dataOut := map[string]any{}
 	for k, v := range page.Frontmatter {
 		if !scope.CanReadData(k) {
@@ -111,16 +117,11 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 			dataOut[key] = v
 			continue
 		}
-		// Cut 10: fall back to the page tree. After the unified
-		// `/api/<path>` namespace, leaves like `vet/metrics/wait_time_avg`
-		// can live as PAGES (frontmatter holds the structured value).
-		// `<Metric source="vet/metrics/wait_time_avg" />` should then
-		// resolve to that page's frontmatter, not 404. Without this
-		// fallback the source-resolver only checks the data store and
-		// pages stay invisible to component-source bindings.
-		if v, ok := readPageAsValue(s.Pages, key); ok {
-			dataOut[key] = v
-		}
+		// No page-tree fallback: cross-page `source="other-page"`
+		// bindings are forbidden by spec §7. Folder collections
+		// (handled above with the trailing-slash branch) are the only
+		// allowed cross-doc reference. Scalars belong inline on the
+		// rendering page or in the data-store.
 	}
 
 	// Filter files.
@@ -585,37 +586,6 @@ func folderChildren(pm *store.PageManager, key string) ([]map[string]any, bool) 
 	// with the + New task affordance instead of falling back to a
 	// non-folder lookup and then a no-data render.
 	return rows, true
-}
-
-// readPageAsValue resolves a `source=` reference against the page
-// tree. Returns the page's frontmatter as the value when the page
-// exists. Used by the view broker as a fallback after the data store
-// misses, so component bindings like `<Metric source="vet/metrics/x" />`
-// resolve when the metric lives as a page (frontmatter-only doc) in
-// the unified namespace. Returns ok=false when no matching page.
-func readPageAsValue(pm *store.PageManager, key string) (any, bool) {
-	if pm == nil {
-		return nil, false
-	}
-	p := pm.GetPage(key)
-	if p == nil {
-		return nil, false
-	}
-	if len(p.Frontmatter) == 0 {
-		// A page with no frontmatter has nothing to bind. Return false
-		// so the broker leaves the key out of the bundle and the
-		// component renders its missing-source affordance.
-		return nil, false
-	}
-	// If the frontmatter has a `value:` field, that's the canonical
-	// scalar/array slot (matches the data-tier envelope semantic per
-	// spec §3). Otherwise return the whole frontmatter map so
-	// components that splat their props (Kanban groupBy, etc.) get
-	// what they expect.
-	if v, ok := p.Frontmatter["value"]; ok {
-		return v, true
-	}
-	return p.Frontmatter, true
 }
 
 // readV2Unwrapped pulls a key from the files-first store and returns
