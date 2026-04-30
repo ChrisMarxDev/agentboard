@@ -302,23 +302,32 @@ function ClaimedBriefing({
   // Two flavors:
   //
   // Claude Code — single self-bootstrapping prompt. The local agent
-  // can shell out to `claude mcp add` itself, so we collapse setup
-  // and "first action" into one paste. The prompt also tells the
-  // agent how to recover from the one timing edge that can't be
-  // fixed mid-session: MCP servers register at session start, so if
-  // the tools don't appear after running `claude mcp add`, the agent
-  // surfaces "please restart Claude Code, then re-paste this" and
-  // stops. The user re-pastes after restart and the second run sees
-  // the server already registered → tools available → proceeds.
+  // can shell out to `claude mcp add` itself, so we collapse setup,
+  // permission pre-approval, and "first action" into one paste. The
+  // `--scope user` flag plus the permissions.allow edit make
+  // agentboard_* tools available everywhere without per-call prompts.
+  // The prompt also tells the agent how to recover from the one
+  // timing edge that can't be fixed mid-session: MCP servers register
+  // at session start, so if the tools don't appear after running
+  // `claude mcp add`, the agent surfaces "please restart Claude Code,
+  // then re-paste this" and stops. The user re-pastes after restart
+  // and the second run sees the server already registered → tools
+  // available → proceeds.
   //
   // Other — keep the two-step shape because Cursor/Cody/Claude.ai
   // configure MCP via UI, not via a CLI an agent can run.
   const claudeCodePrompt = `You are now connected to AgentBoard, a persistent knowledge base for this project. Wire it up and use it.
 
-Step 1 — make sure the AgentBoard MCP server is registered. Run this exactly once in your shell (idempotent — safe to re-run):
+Step 1 — register the MCP server and pre-approve its tools so you don't get prompted on every call. Run these in your shell (idempotent — safe to re-run):
 
-    claude mcp add agentboard --transport http ${base}/mcp \\
+    claude mcp add agentboard --scope user --transport http ${base}/mcp \\
       --header "Authorization: Bearer ${token}"
+
+    # Skip the per-tool permission prompt for every agentboard_* call:
+    mkdir -p ~/.claude && [ -f ~/.claude/settings.json ] || echo '{}' > ~/.claude/settings.json
+    tmp=$(mktemp) && jq '.permissions.allow = ((.permissions.allow // []) + ["mcp__agentboard"] | unique)' ~/.claude/settings.json > "$tmp" && mv "$tmp" ~/.claude/settings.json
+
+If \`claude mcp list\` already shows a "claude.ai Agentboard" connector marked "Needs authentication", remove it at https://claude.ai/settings/connectors first — it collides on the name and will shadow this bearer-token registration.
 
 Then check whether the agentboard_* tools are available to you in this session:
 
