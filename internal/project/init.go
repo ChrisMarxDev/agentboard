@@ -24,19 +24,24 @@ Then ask Claude to build you something:
 
 It'll write pages and data via the API; this site updates live.
 
-## Where things live
+## One namespace, many shapes
 
-- **Pages** — ` + "`<project>/content/<path>.md`" + ` (MDX with YAML frontmatter)
-- **Data** — ` + "`<project>/data/<key>.{md,ndjson}`" + `, or a folder of pages for collections
-- **Files (binary)** — ` + "`<project>/content/files/<name>`" + `; mint upload URLs via ` + "`agentboard_request_file_upload`" + `
-- **Custom components** — drop a ` + "`.jsx`" + ` into ` + "`<project>/components/`" + `; the watcher registers it on the next render
-- **Skills** — ` + "`<project>/content/skills/<slug>/SKILL.md`" + `; agents discover them via ` + "`GET /api/skills`" + `
+Every leaf lives at ` + "`/api/<path>`" + ` — pages, scalar values, collection items, streams, binaries. There is no separate ` + "`data/`" + ` prefix to write into; the server routes to the right backend based on path shape and content-type. Custom JSX components and skills are special-cased folders, not separate APIs.
+
+A leaf takes one of these shapes; you pick by what you write, not where:
+
+- **Page** — ` + "`.md`" + ` with YAML frontmatter and an MDX body. The page renders at ` + "`/<path>`" + ` in the browser.
+- **Singleton / collection item** — ` + "`.md`" + ` with frontmatter only (no body), or JSON ` + "`{\"value\": …}`" + `. Reads return the structured value; ` + "`<Metric source=\"<key>\" />`" + ` resolves to it.
+- **Stream** — ` + "`POST /api/<path>:append`" + ` adds an NDJSON line; reads tail the file. Used for activity feeds, logs.
+- **Binary** — ` + "`agentboard_request_file_upload`" + ` mints a presigned ` + "`PUT`" + ` URL.
+- **Component** — drop a ` + "`.jsx`" + ` into ` + "`<project>/components/`" + ` and the watcher registers it.
+- **Skill** — ` + "`<project>/content/skills/<slug>/SKILL.md`" + ` with ` + "`name`" + ` + ` + "`description`" + ` frontmatter; appears in ` + "`GET /api/skills`" + `.
 
 ## Conventions worth knowing
 
-- **Inline first.** A scalar shown in one place lives inline (` + "`<Metric value={14} label=\"Users\" />`" + `), not in its own page. Per spec §7, only folder collections may cross-reference (` + "`<Kanban source=\"tasks/\" />`" + `).
-- **One namespace.** ` + "`/api/<path>`" + ` covers pages, singletons, collection items, streams, and binaries. The 10-tool MCP surface dispatches the same way.
-- **Direct disk writes are a product violation** — they bypass auth, attribution, history, and concurrency. Always go through REST or MCP.
+- **Inline first.** A scalar shown in one place lives inline (` + "`<Metric value={14} label=\"Users\" />`" + `), not in its own leaf. If two pages need the same value, denormalize OR use a folder collection (` + "`<Kanban source=\"tasks/\" />`" + `) — per spec §7 those are the only legitimate cross-doc references.
+- **No invented prefixes.** Don't write to ` + "`data/<key>`" + ` or ` + "`metrics/<key>/data/<x>`" + ` — pick the path you want the leaf to *appear* at and write there directly. The server decides whether it's a page or a singleton from the body.
+- **Direct disk writes are a product violation.** They bypass auth, attribution, history, and concurrency. Always go through REST or MCP.
 
 ## Learn more
 
@@ -165,7 +170,7 @@ assignees: [chris]
 ---
 
 Free-form description goes here. The card's detail-pane editor reads
-and writes this body via ` + "`PATCH /api/content/<path>` `{body: \"...\"}`" + `.
+and writes this body via ` + "`PATCH /api/<path>` `{body: \"...\"}`" + `.
 Frontmatter and body are independent — patches to one don't touch the
 other.
 ` + "```" + `
@@ -173,7 +178,7 @@ other.
 To move a card across lanes, ` + "`PATCH`" + ` only the field that changed:
 
 ` + "```bash" + `
-curl -X PATCH "$B/api/content/tasks/ship-v2" \
+curl -X PATCH "$B/api/tasks/ship-v2" \
   -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
   -d '{"frontmatter_patch": {"col": "done"}}'
 ` + "```" + `
@@ -194,7 +199,7 @@ columns:
 <Kanban groupBy="col" />
 ` + "```" + `
 
-Renames are pure presentation: change the ` + "`label`" + ` and existing cards keep their ` + "`col`" + ` ids. Adding a lane = appending a ` + "`{id, label}`" + ` object via ` + "`PATCH /api/content/<board> {frontmatter_patch:{columns:[...]}}`" + `.
+Renames are pure presentation: change the ` + "`label`" + ` and existing cards keep their ` + "`col`" + ` ids. Adding a lane = appending a ` + "`{id, label}`" + ` object via ` + "`PATCH /api/<board> {frontmatter_patch:{columns:[...]}}`" + `.
 
 If you've been asked to build a board, fetch ` + "`GET /api/skills/kanban`" + ` for a fully worked recipe.
 

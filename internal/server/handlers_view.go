@@ -168,18 +168,31 @@ func (s *Server) handleViewOpen(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Scrubbed frontmatter for the metadata panel: drop the internal
+	// `_meta` envelope (created_at / version) so the panel shows the
+	// author's keys, not bookkeeping. The reader already has access to
+	// this page; per-key data scope only affects cross-page bindings.
+	frontmatter := make(map[string]any, len(page.Frontmatter))
+	for k, v := range page.Frontmatter {
+		if k == "_meta" {
+			continue
+		}
+		frontmatter[k] = v
+	}
+
 	payload := map[string]any{
-		"path":       scopeRoot,
-		"title":      page.Title,
-		"source":     page.Source,
-		"etag":       page.Etag,
-		"data":       dataOut,
-		"files":      filesOut,
-		"subpages":   subs,
-		"authority":  authorityName(authority),
-		"last_actor": lastActor,
-		"last_at":    lastAt,
-		"approval":   approval,
+		"path":        scopeRoot,
+		"title":       page.Title,
+		"source":      page.Source,
+		"etag":        page.Etag,
+		"frontmatter": frontmatter,
+		"data":        dataOut,
+		"files":       filesOut,
+		"subpages":    subs,
+		"authority":   authorityName(authority),
+		"last_actor":  lastActor,
+		"last_at":     lastAt,
+		"approval":    approval,
 	}
 	// Embed-friendly headers when the response is intended for
 	// anonymous consumption (share or public). frame-ancestors=* lets

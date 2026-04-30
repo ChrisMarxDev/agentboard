@@ -151,9 +151,16 @@ For primitives/arrays, use `value:` instead of splatting top-level keys.
 - `GET    /api/<path>/history` — per-doc NDJSON history
 - `GET    /api/activity` — global write log
 
-`<path>` covers any content leaf — pages, singletons, collection items, streams. The dispatcher resolves page tree first, then data catalog. A path with a slash defaults to the page tree on new writes; flat keys default to the data tier as singletons. Reserved `/api/*` prefixes (admin, auth, view, files, etc.) take precedence per chi's specific-first routing.
+`<path>` covers every leaf — pages, singletons, collection items, streams. There is **no separate `data/` namespace to write into**: pick the path you want the leaf to *appear* at and write there directly. The server picks the storage shape from path + content-type:
 
-The legacy `/api/content/<path>` and `/api/data/<key>[/<id>]` routes still work during the migration window. Prefer `/api/<path>` in new code.
+- `text/markdown` body, or path with a slash → page (`.md` in the page tree).
+- `application/json {"value": …}` → singleton (flat key) or collection-item (path with slash).
+- `:append` verb → stream (NDJSON line).
+- An existing leaf at the path keeps its shape — re-writes match what's already there.
+
+So `roasters/cups_today` and `metrics/dau` aren't "data keys" — they're paths. Whether the leaf at one of those paths is a page or a singleton depends on what was written, not on a directory prefix. Reserved `/api/*` prefixes (admin, auth, view, files, etc.) take precedence per chi's specific-first routing.
+
+The legacy `/api/content/<path>` and `/api/data/<key>[/<id>]` routes were retired in Cut 8. Use `/api/<path>` for everything.
 
 **Atomic ops are gone** — no INCREMENT, no field-level CAS. Agents read-modify-write the whole doc; the file-level `_meta.version` CAS handles concurrent writers.
 
@@ -233,8 +240,8 @@ Adding a shape is a one-liner in `internal/store/shapes.go` plus a new subsectio
 
 If the user just shipped something (landed a commit, says "we shipped X", asks for the dashboard to reflect new work), update the dashboard in this order:
 
-1. **Write a feature page** under `content/features/<slug>.md` via `PUT /api/content/features/<slug>` or MCP `agentboard_write({items: [{path: "features/<slug>", frontmatter: {…}, body: "…"}]})`. Use the feature-page template below.
-2. **Update the feature list data** at `dev.features.shipped` (array of `{id, title, status: "done", landed_at}`) via `agentboard_write({items: [{path: "dev.features.shipped", frontmatter: {value: [...]}}]})` or `PUT /api/data/dev.features.shipped`. The home page Kanban/List reads from this.
+1. **Write a feature page** under `features/<slug>` via `PUT /api/features/<slug>` or MCP `agentboard_write({items: [{path: "features/<slug>", frontmatter: {…}, body: "…"}]})`. Use the feature-page template below.
+2. **Update the feature list singleton** at `dev.features.shipped` (array of `{id, title, status: "done", landed_at}`) via `agentboard_write({items: [{path: "dev.features.shipped", frontmatter: {value: [...]}}]})` or `PUT /api/dev.features.shipped`. The home page Kanban/List reads from this.
 3. **Bump relevant metrics** — `dev.components.count`, `dev.mcp.tools`, `dev.tests.passing`, etc.
 4. **If the session was a bigger phase** (multi-day push, rewrote a subsystem, shipped a cohort of related features together), **also write a `/showcase/<session-slug>` page** — see the "Showcase folder" section below.
 
@@ -434,12 +441,12 @@ When the user asks to "update the dashboard", "add a feature page", or "show the
 
 When the user says "record this metric" or "the test count changed":
 
-1. PUT the new value to the appropriate `dev.*` key via REST (`PUT /api/data/dev.foo`) or MCP (`agentboard_write({items: [{path: "dev.foo", frontmatter: {value: 42}}]})`).
+1. PUT the new value to the appropriate `dev.*` path via REST (`PUT /api/dev.foo`) or MCP (`agentboard_write({items: [{path: "dev.foo", frontmatter: {value: 42}}]})`). Don't add a `data/` prefix — `dev.foo` IS the path.
 2. SSE broadcasts it within ~100 ms. No page write needed.
 
 When the user asks what's currently on the dashboard:
 
-1. `GET /api/content` — lists all pages.
+1. `GET /api/index` — flat catalog of every leaf.
 2. `GET /api/index` — flat catalog of every leaf in the project, including data keys.
 3. Return a short summary, not a dump.
 

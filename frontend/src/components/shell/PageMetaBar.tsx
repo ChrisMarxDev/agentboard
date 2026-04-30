@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, CircleAlert, CircleDot } from 'lucide-react'
+import { Check, ChevronDown, CircleAlert, CircleDot, Info } from 'lucide-react'
 import { apiFetch, isPublicMode } from '../../lib/session'
 import { beaconError } from '../../lib/errorBeacon'
 
@@ -23,6 +23,7 @@ interface Props {
   lastActor?: string
   lastAt?: string
   approval?: PageApprovalState | null
+  frontmatter?: Record<string, unknown>
   onApprovalChange?: (a: PageApprovalState | null) => void
 }
 
@@ -31,15 +32,21 @@ export function PageMetaBar({
   lastActor,
   lastAt,
   approval,
+  frontmatter,
   onApprovalChange,
 }: Props) {
   const [busy, setBusy] = useState(false)
+  const [metaOpen, setMetaOpen] = useState(false)
   const readOnly = isPublicMode()
   const normalisedPath = pagePath === 'index' ? '/' : '/' + pagePath.replace(/^\//, '')
 
   const hasLast = lastActor && lastActor !== 'anonymous'
+  const fmEntries = frontmatter
+    ? Object.entries(frontmatter).filter(([, v]) => v !== null && v !== undefined)
+    : []
+  const hasMeta = fmEntries.length > 0
   // Render nothing if we have absolutely nothing to show.
-  if (!hasLast && !approval && readOnly) return null
+  if (!hasLast && !approval && !hasMeta && readOnly) return null
 
   async function approve() {
     setBusy(true)
@@ -177,27 +184,135 @@ export function PageMetaBar({
     </span>
   ) : null
 
-  // Three-column grid: left = last-edited, center = approval, right =
-  // reserved whitespace so the absolute-positioned PageActionsMenu (⋯)
-  // in the parent doesn't collide with the approval chip. Auto columns
-  // on each side keep centering true regardless of the edited-chip's
-  // width.
-  return (
-    <div
-      className="mb-4 pb-3 border-b flex items-center flex-wrap gap-2"
+  const metaToggle = hasMeta ? (
+    <button
+      type="button"
+      onClick={() => setMetaOpen(v => !v)}
+      aria-expanded={metaOpen}
+      aria-controls={`meta-panel-${pagePath}`}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
+      title={metaOpen ? 'Hide metadata' : 'Show frontmatter metadata'}
       style={{
-        borderColor: 'var(--border)',
-        display: 'grid',
-        gridTemplateColumns: '1fr auto 1fr',
-        alignItems: 'center',
+        background: metaOpen ? 'var(--bg-secondary)' : 'transparent',
+        border: '1px solid var(--border)',
+        color: 'var(--text-secondary)',
+        cursor: 'pointer',
       }}
     >
-      <div style={{ justifySelf: 'start' }}>{editedChip}</div>
-      <div style={{ justifySelf: 'center' }}>{approvalChip}</div>
-      {/* Empty slot — reserved for the floating ⋯ actions menu. */}
-      <div style={{ justifySelf: 'end', minWidth: '2.5rem' }} aria-hidden />
+      <Info size={12} />
+      <span>Metadata</span>
+      <ChevronDown
+        size={12}
+        aria-hidden
+        style={{
+          transition: 'transform 180ms ease',
+          transform: metaOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+        }}
+      />
+    </button>
+  ) : null
+
+  // Three-column grid: left = last-edited, center = approval, right =
+  // metadata toggle. The right slot also keeps a minimum width so the
+  // absolute-positioned PageActionsMenu (⋯) in the parent has room to
+  // sit without colliding.
+  return (
+    <div className="mb-4">
+      <div
+        className="pb-3 border-b flex items-center flex-wrap gap-2"
+        style={{
+          borderColor: 'var(--border)',
+          display: 'grid',
+          gridTemplateColumns: '1fr auto 1fr',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ justifySelf: 'start' }}>{editedChip}</div>
+        <div style={{ justifySelf: 'center' }}>{approvalChip}</div>
+        <div
+          style={{
+            justifySelf: 'end',
+            minWidth: '2.5rem',
+            paddingRight: '2.25rem' /* room for the floating ⋯ menu */,
+          }}
+        >
+          {metaToggle}
+        </div>
+      </div>
+      {hasMeta && (
+        <div
+          id={`meta-panel-${pagePath}`}
+          className="grid"
+          style={{
+            gridTemplateRows: metaOpen ? '1fr' : '0fr',
+            transition: 'grid-template-rows 180ms ease',
+          }}
+        >
+          <div style={{ minHeight: 0, overflow: 'hidden' }}>
+            <FrontmatterPanel entries={fmEntries} />
+          </div>
+        </div>
+      )}
     </div>
   )
+}
+
+function FrontmatterPanel({ entries }: { entries: Array<[string, unknown]> }) {
+  return (
+    <div
+      className="mt-2 mb-3 rounded-md text-xs"
+      style={{
+        background: 'var(--bg-secondary)',
+        border: '1px solid var(--border)',
+        padding: '0.5rem 0.75rem',
+      }}
+    >
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <tbody>
+          {entries.map(([k, v]) => (
+            <tr key={k}>
+              <td
+                style={{
+                  verticalAlign: 'top',
+                  padding: '0.25rem 0.75rem 0.25rem 0',
+                  color: 'var(--text-secondary)',
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  whiteSpace: 'nowrap',
+                  width: '1%',
+                }}
+              >
+                {k}
+              </td>
+              <td
+                style={{
+                  padding: '0.25rem 0',
+                  color: 'var(--text)',
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {formatFrontmatterValue(v)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function formatFrontmatterValue(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') return v
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v)
+  // Pretty-print objects/arrays so nested shapes stay readable.
+  try {
+    return JSON.stringify(v, null, 2)
+  } catch {
+    return String(v)
+  }
 }
 
 function relativeTime(iso?: string): string {

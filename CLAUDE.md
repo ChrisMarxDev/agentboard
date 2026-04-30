@@ -188,30 +188,34 @@ curl -c jar.txt -X POST -H 'Content-Type: application/json' \
   -d '{"username":"alice","password":"…"}'
 curl -b jar.txt localhost:3000/api/auth/me
 
-# List pages (bearer)
-curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/content
+# Catalog every leaf in the project (pages, singletons, streams, binaries)
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/index
 
-# Read a page
-curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/content/index
+# Read any leaf
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/index    # the home page
+curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/sales.q3 # a singleton
 
 # Write/replace a page (body is raw MDX with optional YAML frontmatter)
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: text/plain' \
-  localhost:3000/api/content/notes -d '# Notes\n\nHello'
+  localhost:3000/api/notes -d '# Notes\n\nHello'
 
 # Patch a page — RFC 7396 merge into frontmatter, optional body replacement.
 # Setting a frontmatter key to null deletes it.
 curl -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  localhost:3000/api/content/notes \
+  localhost:3000/api/notes \
   -d '{"frontmatter_patch":{"pinned":true},"body":"# Notes\n\nUpdated"}'
 
-# Files-first store (singletons + collections + streams)
+# Write a singleton (JSON envelope with a top-level "value" key picks the data shape)
 curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  localhost:3000/api/data/sales.q3 -d '{"value":{"rev":42000}}'
-curl -H "Authorization: Bearer $TOKEN" \
-  "localhost:3000/api/data/sales.events?limit=10"
+  localhost:3000/api/sales.q3 -d '{"value":{"rev":42000}}'
 
-# Catalog of every leaf
-curl -H "Authorization: Bearer $TOKEN" localhost:3000/api/index
+# Append one line to a stream
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  "localhost:3000/api/sales.events:append" -d '{"item":{"ts":"2026-04-30","amount":99}}'
+
+# Tail a stream
+curl -H "Authorization: Bearer $TOKEN" \
+  "localhost:3000/api/sales.events?limit=10"
 
 # MCP tools list
 curl -X POST -H "Authorization: Bearer $TOKEN" \
@@ -220,4 +224,4 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-The legacy SQLite KV / dotted-key write API is gone. Cross-page values now live at `/api/data/<key>` (files-first store); page-local values live as YAML frontmatter on the rendering page.
+The legacy SQLite KV / dotted-key write API is gone, and so are the old `/api/content/*` and `/api/data/*` namespaces (retired in Cut 8). Everything lives under one `/api/<path>` URL space — pages, singletons, collection items, streams, binaries — and the server picks the storage shape from path + content-type. Don't write to a `data/` prefix; the leaf goes wherever the path you choose puts it.

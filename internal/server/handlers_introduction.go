@@ -62,20 +62,15 @@ func introductionManifest() map[string]any {
 			"endpoints": []map[string]string{
 				{"method": "GET", "path": "/api/health", "summary": "liveness probe"},
 				{"method": "GET", "path": "/api/config", "summary": "project config + public paths"},
-				{"method": "GET", "path": "/api/index", "summary": "list all pages"},
-				{"method": "GET", "path": "/api/{path}", "summary": "read one page (markdown+etag)"},
-				{"method": "PUT", "path": "/api/{path}", "summary": "write a page (MDX source); If-Match supported"},
-				{"method": "PATCH", "path": "/api/{path}", "summary": "merge into frontmatter and/or replace body; If-Match supported"},
-				{"method": "DELETE", "path": "/api/{path}", "summary": "delete a page"},
-				{"method": "GET", "path": "/api/index", "summary": "list data keys"},
-				{"method": "GET", "path": "/api/{key}", "summary": "read a value"},
-				{"method": "PUT", "path": "/api/{key}", "summary": "set a value"},
-				{"method": "PATCH", "path": "/api/{key}", "summary": "deep-merge into a value"},
-				{"method": "POST", "path": "/api/{key}", "summary": "append to an array value"},
-				{"method": "DELETE", "path": "/api/{key}", "summary": "delete a key"},
+				{"method": "GET", "path": "/api/index", "summary": "flat catalog of every leaf in the project"},
+				{"method": "GET", "path": "/api/{path}", "summary": "read a leaf — page envelope, singleton value, collection list, stream tail, or binary"},
+				{"method": "PUT", "path": "/api/{path}", "summary": "write a leaf; body shape decides whether it lands as a page or a singleton; If-Match supported"},
+				{"method": "PATCH", "path": "/api/{path}", "summary": "RFC-7396 merge into frontmatter and/or replace body; If-Match supported"},
+				{"method": "POST", "path": "/api/{path}:append", "summary": "append one NDJSON line to a stream leaf"},
+				{"method": "DELETE", "path": "/api/{path}", "summary": "delete a leaf"},
 				{"method": "GET", "path": "/api/files", "summary": "list uploaded files"},
 				{"method": "GET", "path": "/api/components", "summary": "list component catalog (schemas)"},
-				{"method": "GET", "path": "/api/search?q=...", "summary": "full-text search over pages"},
+				{"method": "GET", "path": "/api/search?q=...", "summary": "substring + full-text search across every leaf"},
 			},
 		},
 		"mcp": map[string]any{
@@ -124,9 +119,9 @@ What AgentBoard is **not**: a database, a general-purpose CMS, a CI/CD tool, a c
 
 ---
 
-## The mental model — one tree, two write paths
+## The mental model — one tree, one URL namespace
 
-Everything is a file under the project root.
+Everything is a file under the project root, and every leaf is reachable at ` + "`/api/<path>`" + ` with the same verbs.
 
 ` + "```" + `
 <project>/
@@ -143,12 +138,17 @@ Everything is a file under the project root.
         examples.md         # supporting file (URL: /skills/kanban/examples)
 ` + "```" + `
 
-There are two write paths, distinguished by where state lives:
+A leaf takes one of these shapes; you don't pick a directory, you pick a body:
 
-1. **Page writes — ` + "`/api/<path>`" + `.** When the thing you're editing is "structure + prose" (a card, a doc, a board), use ` + "`PUT`" + ` (full replace), ` + "`PATCH`" + ` (frontmatter merge / body replace), or ` + "`DELETE`" + `. This is the canonical path.
-2. **Data writes — ` + "`/api/<key>`" + `.** A few use cases need a flat key/value store: counters, scratch values, anonymous append-only logs. ` + "`PUT`" + `/` + "`PATCH`" + `/` + "`POST`" + `/` + "`DELETE`" + ` work as you expect. Most agents will rarely touch this.
+- **Page** — ` + "`PUT`" + ` markdown (` + "`text/markdown`" + ` or a body that starts with ` + "`---`" + ` / ` + "`#`" + `). Renders at ` + "`/<path>`" + ` in the browser.
+- **Singleton** — ` + "`PUT`" + ` JSON ` + "`{\"value\": <anything>}`" + `. ` + "`<Metric source=\"<path>\" />`" + ` resolves to it.
+- **Collection item** — same JSON envelope but at ` + "`<key>/<id>`" + `; the parent ` + "`<key>`" + ` becomes the collection.
+- **Stream** — ` + "`POST /api/<path>:append`" + ` with one NDJSON line; reads tail the file. Used for activity feeds.
+- **Binary** — ` + "`POST /api/files/request-upload`" + ` mints a presigned URL; you ` + "`PUT`" + ` the bytes there.
 
-**Rule of thumb**: if it deserves a URL on the dashboard, it's a page. If it's a number that updates without a story, it's data.
+There is no separate ` + "`data/`" + ` namespace to write into. Path collisions are real — once a leaf exists at ` + "`metrics/dau`" + `, re-writes match its existing shape, and you can't have both a page and a singleton at the same path. Pick the path you want to *appear* at and write there directly.
+
+**Rule of thumb**: if you'd want to navigate to it in the sidebar, write a page; if it's a number a component reads via ` + "`source=`" + `, write a singleton at the same path the component points at.
 
 ---
 

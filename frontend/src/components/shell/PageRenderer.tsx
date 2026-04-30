@@ -273,6 +273,7 @@ export default function PageRenderer() {
         lastActor={resolved.lastActor}
         lastAt={resolved.lastAt}
         approval={resolved.approval ?? null}
+        frontmatter={bundle?.frontmatter}
         onApprovalChange={next =>
           setResolved(prev =>
             prev && prev.kind === 'page' ? { ...prev, approval: next } : prev,

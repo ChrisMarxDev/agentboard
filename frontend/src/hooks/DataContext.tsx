@@ -18,6 +18,7 @@ export interface ViewBundle {
   title?: string
   source: string
   etag?: string
+  frontmatter?: Record<string, unknown>
   data: Record<string, unknown>
   files: string[]
   subpages: Array<{ path: string; title: string }>
