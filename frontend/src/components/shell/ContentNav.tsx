@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Sparkles } from 'lucide-react'
 import type { ContentTreeNode } from '../../lib/contentTree'
+import TreeRowMenu from './TreeRowMenu'
 
 interface ContentNavProps {
   nodes: ContentTreeNode[]
@@ -74,25 +75,40 @@ export default function ContentNav({
           const isActive = activePath === node.href
           const label = node.kind === 'page' ? node.title : node.name
           return (
-            <Link
+            <div
               key={`${node.kind}:${node.href}`}
-              to={node.href}
-              className="flex items-center py-1.5 rounded-md text-sm transition-colors"
+              className="group flex items-stretch rounded-md text-sm transition-colors"
               style={{
-                paddingLeft: ROW_PADDING_X + indent + CHEVRON_WIDTH,
-                paddingRight: ROW_PADDING_X,
                 background: isActive ? 'var(--accent-light)' : 'transparent',
-                color: isActive
-                  ? 'var(--accent)'
-                  : node.kind === 'file'
-                    ? 'var(--text-secondary)'
-                    : 'var(--text-secondary)',
-                fontStyle: node.kind === 'file' ? 'normal' : 'normal',
+                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
                 opacity: node.kind === 'file' ? 0.9 : 1,
               }}
+              onMouseEnter={e => {
+                if (!isActive) e.currentTarget.style.background = 'var(--bg)'
+              }}
+              onMouseLeave={e => {
+                if (!isActive) e.currentTarget.style.background = 'transparent'
+              }}
             >
-              <span className="truncate">{label}</span>
-            </Link>
+              <Link
+                to={node.href}
+                className="flex-1 flex items-center min-w-0 py-1.5"
+                style={{
+                  paddingLeft: ROW_PADDING_X + indent + CHEVRON_WIDTH,
+                  paddingRight: 4,
+                  color: 'inherit',
+                  textDecoration: 'none',
+                }}
+              >
+                <span className="truncate">{label}</span>
+              </Link>
+              <div
+                className="flex items-center"
+                style={{ paddingRight: 6, paddingLeft: 2 }}
+              >
+                <TreeRowMenu node={node} alwaysShow={isActive} />
+              </div>
+            </div>
           )
         }
 
@@ -102,13 +118,18 @@ export default function ContentNav({
         return (
           <div key={`folder:${node.path}`} className="flex flex-col gap-1">
             <div
-              className="flex items-stretch rounded-md text-sm transition-colors"
+              className="group flex items-stretch rounded-md text-sm transition-colors"
               style={{
                 paddingLeft: ROW_PADDING_X + indent,
-                paddingRight: ROW_PADDING_X,
                 background: isActive ? 'var(--accent-light)' : 'transparent',
                 color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
                 minHeight: '2rem',
+              }}
+              onMouseEnter={e => {
+                if (!isActive) e.currentTarget.style.background = 'var(--bg)'
+              }}
+              onMouseLeave={e => {
+                if (!isActive) e.currentTarget.style.background = 'transparent'
               }}
             >
               <button
@@ -138,8 +159,8 @@ export default function ContentNav({
               <Link
                 to={node.href}
                 onClick={() => onExpand(node.path)}
-                className="flex-1 flex items-center truncate py-1.5 gap-1.5"
-                style={{ color: 'inherit', paddingLeft: 4 }}
+                className="flex-1 flex items-center min-w-0 py-1.5 gap-1.5"
+                style={{ color: 'inherit', paddingLeft: 4, paddingRight: 4 }}
               >
                 {(() => {
                   const Icon = depth === 0 ? iconForFolder(node.name) : undefined
@@ -147,6 +168,12 @@ export default function ContentNav({
                 })()}
                 <span className="truncate">{node.title}</span>
               </Link>
+              <div
+                className="flex items-center"
+                style={{ paddingRight: 6, paddingLeft: 2 }}
+              >
+                <TreeRowMenu node={node} alwaysShow={isActive} />
+              </div>
             </div>
             {isOpen && (
               <ContentNav
