@@ -333,14 +333,21 @@ func unauthorized(w http.ResponseWriter, r *http.Request) {
 	// authorization server from a bare 401. RFC 9728 §5.1.
 	w.Header().Add("WWW-Authenticate", BearerChallenge(r))
 
-	// Browser top-level navigations also get a Basic challenge so the
-	// native auth prompt fires — paste the token as the password and
-	// the request retries via r.BasicAuth() → token. Programmatic /
-	// fetch() callers (Sec-Fetch-Mode != "navigate") skip this; the SPA
-	// handles 401 via its /login redirect in apiFetch.
-	if r.Header.Get("Sec-Fetch-Mode") == "navigate" {
-		w.Header().Add("WWW-Authenticate", `Basic realm="AgentBoard"`)
-	}
+	// Basic challenge fires for two distinct callers:
+	//   - Browser top-level navigations — triggers the native auth
+	//     prompt; paste the token as the password and the request
+	//     retries via r.BasicAuth() → token.
+	//   - HTTP clients that only attempt URL-embedded credentials when
+	//     the server advertises Basic auth — most importantly `git`,
+	//     which won't fall back from Bearer to Basic on its own. A
+	//     bootstrap probe (the §15 dogfood test) caught this: agents
+	//     trying `git clone https://_:$TOKEN@host/git/<ws>.git` saw a
+	//     Bearer-only challenge, dropped their creds, and had to fall
+	//     back to `git -c http.extraHeader=...` to get through.
+	//
+	// Programmatic fetch() in the SPA ignores WWW-Authenticate anyway;
+	// apiFetch handles 401 via its /login redirect.
+	w.Header().Add("WWW-Authenticate", `Basic realm="AgentBoard"`)
 	writeJSONError(w, http.StatusUnauthorized, "UNAUTHORIZED", "authentication required")
 }
 

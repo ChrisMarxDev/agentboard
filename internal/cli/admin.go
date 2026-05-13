@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"io"
 	"os"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	dbpkg "github.com/christophermarx/agentboard/internal/db"
+	"github.com/christophermarx/agentboard/internal/gitserver"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/spf13/cobra"
@@ -129,7 +132,66 @@ func init() {
 	adminCmd.AddCommand(adminSetPasswordCmd)
 	adminCmd.AddCommand(adminRevokeSessionsCmd)
 	adminCmd.AddCommand(adminRenameUserCmd)
+	adminCmd.AddCommand(adminSyncSeedCmd)
 	rootCmd.AddCommand(adminCmd)
+}
+
+// adminSyncSeedCmd refreshes the seeded README + SKILL + examples in
+// an existing workspace from the constants compiled into the current
+// binary. Useful when the seeded files evolve (e.g. the MCP surface
+// changes) and you want the live workspaces' bootstrap chain to teach
+// the new shape without reseeding from scratch.
+var adminSyncSeedCmd = &cobra.Command{
+	Use:   "sync-seed <workspace>",
+	Short: "Re-push the seeded README + SKILL + examples into an existing workspace",
+	Long: `Overwrites README.md, skills/agentboard/SKILL.md, and
+skills/agentboard/examples.md in <workspace> with the content shipping
+in this build. Skips writes when the existing blob already matches —
+no empty commits.
+
+Safe to run repeatedly. The operator typically calls this after upgrading
+the binary so live agents see the same bootstrap chain a fresh init would.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		workspaceID := args[0]
+		projPath := resolveProjectPath()
+		conn, err := dbpkg.Open(filepath.Join(projPath, ".agentboard", "data.sqlite"))
+		if err != nil {
+			return fmt.Errorf("open db: %w", err)
+		}
+		defer conn.Close()
+		gitRoot := filepath.Join(projPath, ".agentboard")
+		store, err := gitserver.NewStore(conn.Conn(), gitRoot)
+		if err != nil {
+			return fmt.Errorf("open git workspace store: %w", err)
+		}
+		ctx := context.Background()
+		ws, err := store.Get(ctx, workspaceID)
+		if err != nil {
+			return err
+		}
+		if ws == nil {
+			return fmt.Errorf("workspace %q not found", workspaceID)
+		}
+
+		files := []struct {
+			path string
+			body string
+		}{
+			{"README.md", project.BootstrapReadmeMd},
+			{"skills/agentboard/SKILL.md", project.SeededSkillManifest},
+			{"skills/agentboard/examples.md", project.SeededSkillExamples},
+		}
+		for _, f := range files {
+			if err := store.PutFile(ctx, workspaceID, f.path, f.body, "system",
+				fmt.Sprintf("Refresh %s from build seed", f.path)); err != nil {
+				return fmt.Errorf("sync %s: %w", f.path, err)
+			}
+			fmt.Printf("synced %s\n", f.path)
+		}
+		fmt.Printf("\nDone. Worktree mirror re-checked out from main.\n")
+		return nil
+	},
 }
 
 func openAuthStore() (*auth.Store, func(), error) {

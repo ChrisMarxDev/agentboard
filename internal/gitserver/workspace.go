@@ -188,6 +188,18 @@ func (s *Store) Create(ctx context.Context, id string, createdBy string, seed st
 //
 // Idempotent: if the path already exists, EnsureFile is a no-op.
 func (s *Store) EnsureFile(ctx context.Context, workspaceID, path, body, actor, commitMsg string) error {
+	return s.writeFile(ctx, workspaceID, path, body, actor, commitMsg, false)
+}
+
+// PutFile writes `body` at `path` and commits it, overwriting any
+// existing content at that path. Used by `agentboard admin sync-seed`
+// when an operator wants the latest README + SKILL pushed into an
+// existing workspace.
+func (s *Store) PutFile(ctx context.Context, workspaceID, path, body, actor, commitMsg string) error {
+	return s.writeFile(ctx, workspaceID, path, body, actor, commitMsg, true)
+}
+
+func (s *Store) writeFile(ctx context.Context, workspaceID, path, body, actor, commitMsg string, overwrite bool) error {
 	ws, err := s.Get(ctx, workspaceID)
 	if err != nil {
 		return err
@@ -197,10 +209,22 @@ func (s *Store) EnsureFile(ctx context.Context, workspaceID, path, body, actor, 
 	}
 	bare := s.BarePath(workspaceID)
 
-	// Check whether the file already exists on the default branch.
-	if out, err := runGit("", "--git-dir", bare, "cat-file", "-e", ws.DefaultBranch+":"+path); err == nil {
-		_ = out
-		return nil
+	// EnsureFile semantics: no-op if the file already exists on the
+	// default branch. PutFile semantics: always rewrite.
+	if !overwrite {
+		if out, err := runGit("", "--git-dir", bare, "cat-file", "-e", ws.DefaultBranch+":"+path); err == nil {
+			_ = out
+			return nil
+		}
+	}
+
+	// PutFile: check whether the new body would be a no-op against the
+	// current blob. Avoids creating empty commits when the seed hasn't
+	// actually changed.
+	if overwrite {
+		if existing, err := runGit("", "--git-dir", bare, "show", ws.DefaultBranch+":"+path); err == nil && existing == body {
+			return nil
+		}
 	}
 
 	// Clone, write, commit, push.

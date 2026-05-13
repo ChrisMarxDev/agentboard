@@ -144,102 +144,145 @@ Use ` + "`agentboard_write({items: [{path: \"skills/my-skill/SKILL\", frontmatte
 </Card>
 `
 
+// SeededSkillManifest exposes the seeded SKILL content so admin
+// tooling can re-push it into an existing workspace whenever the seed
+// evolves. Mirrors BootstrapReadmeMd.
+var SeededSkillManifest = seededSkillManifest
+
 // seededSkillManifest is the SKILL.md seeded under content/skills/agentboard/
-// on first-run project init. It documents the skill-hosting convention by
-// being an example of it, and teaches any agent that fetches it how to
-// interact with AgentBoard. Format mirrors Anthropic's skill spec: YAML
-// frontmatter with name + description, followed by free-form markdown.
+// of every fresh workspace. Per CORE_GUIDELINES §15 and spec §1.5 this is
+// what the bootstrap README points the agent at — the place the agent
+// learns the protocol. Keep it accurate; the §15 dogfood test is the
+// canary that catches drift.
 const seededSkillManifest = `---
 name: agentboard
-description: How to use AgentBoard as an agent — authenticate, write data, author pages, manage files, and host skills. Fetch this skill first when asked to use an AgentBoard instance so you know the available surfaces, auth, and conventions.
+description: How to use AgentBoard as an agent — clone the workspace, follow the conventions, propose changes via git or MCP, resolve conflicts. Read this first after the README.
 ---
 
 # AgentBoard for agents
 
-AgentBoard is a content surface for agent teams. You write — dashboards, docs, files, skills — humans read. Every write goes through the REST API or MCP. Never write directly to disk files even if the filesystem is reachable: direct writes bypass auth, rate limits, activity attribution, content_history, and optimistic concurrency.
+You are inside an **AgentBoard workspace** — a shared git repo a team
+of humans and AI agents collaborates inside. The substrate is git;
+the wire format you write through is either ` + "`git`" + ` (preferred when your
+runtime can shell out) or the seven ` + "`agentboard_*`" + ` MCP tools (the
+git-less fallback).
 
-## Authentication — do this first
+## The contract in one paragraph
 
-Every request except ` + "`GET /api/health`" + ` requires a token. You get one by:
+The workspace tells you what to do. Clone it, read README.md at the
+root, follow the chain of references. Work happens on branches: you
+` + "`git clone`" + `, ` + "`git checkout -b feature/<slug>`" + `, edit files, ` + "`git commit`" + `, ` + "`git push`" + `.
+If your push is rejected (someone else pushed first), pull, resolve
+the standard ` + "`<<<<<<<` / `=======` / `>>>>>>>`" + ` markers, push again. Conflicts
+in MDX frontmatter resolve like conflicts in code — Claude is fluent
+in this; treat it as ordinary work.
 
-1. **First admin on a new board** — on first ` + "`agentboard serve`" + `, the server prints a
-   ` + "`/invite/<id>`" + ` URL. Open it in a browser, pick a username, and receive the
-   first admin token.
-2. **Additional users** — an admin creates an invitation at ` + "`/admin`" + `, shares the
-   ` + "`/invite/<id>`" + ` URL, and the invitee claims their account.
-3. **Rotation** — ` + "`agentboard --project <name> admin rotate <username> <label>`" + ` mints
-   a fresh token value for an existing token slot.
+## Authentication
 
-Pass it on every request:
+Every endpoint except ` + "`/api/health`" + ` needs a token. Format:
+` + "`ab_<43 chars>`" + ` (bearer) or ` + "`oat_<…>`" + ` (audience-scoped OAuth, MCP only).
+You get one by claiming an invitation URL — the operator gives you
+the URL once on first use; redeem it via the browser or the
+public ` + "`/api/invitations/<id>/redeem`" + ` endpoint.
 
-` + "```" + `
-Authorization: Bearer ab_<43 chars>
-` + "```" + `
+For git operations the token rides as HTTP Basic auth:
 
-No token / revoked token / deactivated user → ` + "`401 Unauthorized`" + `. Don't retry without a fresh token. Don't fall through to disk writes. If you can't authenticate, stop and report it — that's a configuration problem for the human to fix, not something to route around.
-
-## The write contract
-
-- **REST or MCP only.** Use the ` + "`agentboard_*`" + ` MCP tools or POST/PUT/PATCH/DELETE to ` + "`/api/*`" + `. Period.
-- **Optimistic concurrency** (when available): read first, get the ` + "`ETag`" + ` or ` + "`version`" + ` field, send it back as ` + "`If-Match`" + ` on the write. ` + "`412 Precondition Failed`" + ` means someone else wrote meanwhile — re-read, merge semantically, retry.
-- **Never edit files under ` + "`<project>/content/`" + ` directly.** The file watcher would accept the edit and the UI would update, but the write has no actor, no history row, no activity entry, and can clobber concurrent edits silently. This is a product violation.
-
-## MCP surface (10 tools, generic over paths)
-
-The MCP server exposes a single CRUD surface that dispatches by path — pages, data singletons, streams, and folders all live in the same ` + "`/api/<path>`" + ` namespace. Always-plural batch shape: every call takes an array, partial success per item, native JSON values.
-
-` + "```" + `
-agentboard_read(paths)              — paths: [string]; returns one envelope per path
-agentboard_list(path)               — folder children + frontmatter snippets
-agentboard_search(q, scope?)        — full-text + substring across the tree
-agentboard_write(items)             — items: [{path, frontmatter?, body?, version?}]
-agentboard_patch(items)             — items: [{path, frontmatter_patch?, body?, version?}]
-agentboard_append(path, items)      — items: [any]; one stream per call; race-free
-agentboard_delete(items)            — items: [{path, version?}]
-agentboard_request_file_upload(items) — items: [{name, size_bytes}]; returns presigned PUTs
-agentboard_grab(picks)              — cross-page materializer; assembles agent-ready text
-agentboard_fire_event(event, payload?) — emit on the webhook bus
+` + "```bash" + `
+git clone https://_:ab_<token>@<host>/git/<workspace>.git
 ` + "```" + `
 
-REST equivalents are available at ` + "`PUT/PATCH/GET/DELETE /api/<path>`" + ` if you can't speak MCP.
+The server advertises ` + "`Basic`" + ` on its 401 challenge so URL-embedded
+creds work without an ` + "`extraHeader`" + ` workaround.
 
-**Single-item operations wrap in a one-element array** — there is no singular form. ` + "`agentboard_write({items: [{path, frontmatter}]})`" + ` for one write; same call shape for twenty.
+For REST + MCP, the standard form:
 
-**Admin operations are NOT on MCP.** Webhook subscribe/revoke/list, page locks, team management, user invitations all live on ` + "`/api/admin/*`" + ` and the ` + "`agentboard admin`" + ` CLI. MCP is the agent realm.
+` + "```" + `
+Authorization: Bearer ab_<token>
+` + "```" + `
 
-## Folder collections (the most useful pattern)
+If you can't authenticate, **stop and report it**. Don't try to
+sidestep auth by writing files directly into the worktree on disk —
+that bypasses every guarantee the system makes (history, attribution,
+concurrency, the SPA's live update).
 
-A folder of ` + "`.md`" + ` docs IS a collection. ` + "`content/tasks/<id>.md`" + ` cards make up the ` + "`tasks/`" + ` board. The components ` + "`<Kanban>`, `<Sheet>`, `<List>`" + ` read the folder directly.
+## Two ways to work — pick the one that fits your runtime
 
-**Auto-attach**: ` + "`<Kanban groupBy=\"col\" />`" + ` with **no source prop** on a page resolves to that page's own folder. The page is then the folder's index. This is the cleanest shape.
+### Path A — you have a ` + "`git`" + ` CLI (preferred)
 
-**Card shape.** Each card is a ` + "`.md`" + ` file under the board's folder. Frontmatter holds the structured fields the kanban groups / sorts / displays by; the MDX body is the free-form description.
+` + "```bash" + `
+git clone https://_:$AGENTBOARD_TOKEN@<host>/git/<workspace>.git
+cd <workspace>
+git checkout -b feature/<slug>
+# edit files…
+git add -A
+git commit -m "<message>"
+git push origin HEAD:main          # push-to-main mode (default)
+# or, on always-PR workspaces:
+git push origin HEAD:feature/<slug>
+` + "```" + `
+
+That's it. The server's working-tree mirror updates after every push;
+the SPA's open browsers see your change within a second.
+
+### Path B — your runtime can't shell out to git
+
+Use the MCP tools. The full surface is **seven** tools; nothing else:
+
+` + "```" + `
+agentboard_workspaces            — list workspaces visible to this caller
+agentboard_pull(ws, ref?)        — return the working tree as a bundle
+                                   {files: [{path, frontmatter?, body, sha}]}
+agentboard_propose(ws, base?,
+                   branch?, files,
+                   message)      — server-side branch + commit + push.
+                                   files: [{path, body}]; body=null deletes.
+agentboard_resolve_conflict(
+   proposal, file, resolution)   — submit a resolved file body when a
+                                   propose returned conflicts
+agentboard_subscribe(events,
+                     workspace?) — push / merge / conflict / mention events
+agentboard_grab(picks)           — cross-leaf materializer; assembles
+                                   the given paths into a single text blob
+agentboard_fire_event(event,
+                      payload?)  — emit on the webhook bus
+` + "```" + `
+
+Read tools call for single-leaf reads aren't here — ` + "`pull`" + ` is the
+read primitive. If you need partial reads (just one file), filter
+the bundle client-side.
+
+## Folder collections — the most useful pattern
+
+A folder of ` + "`.md`" + ` docs is a collection. ` + "`tasks/`" + ` cards make up the
+` + "`tasks/`" + ` board. Components like ` + "`<Kanban>`, `<Sheet>`, `<List>`" + ` read
+the folder directly via ` + "`source=\"tasks/\"`" + `.
+
+**Auto-attach**: ` + "`<Kanban groupBy=\"col\" />`" + ` with no ` + "`source`" + ` prop on
+a page resolves to that page's own folder. The page is the index of
+its folder. Cleanest shape.
+
+**Card frontmatter:**
 
 ` + "```yaml" + `
 ---
 title: "Ship v2"
 col: doing            # which lane
-order: 1.5            # within-lane sort (floats avoid renumbering)
+order: 1.5            # within-lane sort
 assignees: [chris]
+labels: [urgent]
+priority: 1
 ---
 
-Free-form description goes here. The card's detail-pane editor reads
-and writes this body via ` + "`PATCH /api/<path>` `{body: \"...\"}`" + `.
-Frontmatter and body are independent — patches to one don't touch the
-other.
+Free-form prose body. The kanban surfaces labels, due date,
+priority, and sub-task counts (cards pointing here via parent_id)
+on the card face.
 ` + "```" + `
 
-To move a card across lanes, ` + "`PATCH`" + ` only the field that changed:
+To move a card across lanes, edit ` + "`col`" + ` and push (or
+` + "`agentboard_propose`" + ` if you can't push). One file changed; folder
+structure unchanged.
 
-` + "```bash" + `
-curl -X PATCH "$B/api/tasks/ship-v2" \
-  -H "Authorization: Bearer $T" -H "Content-Type: application/json" \
-  -d '{"frontmatter_patch": {"col": "done"}}'
-` + "```" + `
-
-The body and every other frontmatter field are preserved. ` + "`null`" + ` deletes a key (RFC-7396).
-
-**Lane configuration.** Default lanes are TODO / DOING / DONE. Override per-board by setting ` + "`columns`" + ` in the *page's* frontmatter (not the cards'):
+**Lane config** lives in the page's frontmatter:
 
 ` + "```yaml" + `
 ---
@@ -253,104 +296,198 @@ columns:
 <Kanban groupBy="col" />
 ` + "```" + `
 
-Renames are pure presentation: change the ` + "`label`" + ` and existing cards keep their ` + "`col`" + ` ids. Adding a lane = appending a ` + "`{id, label}`" + ` object via ` + "`PATCH /api/<board> {frontmatter_patch:{columns:[...]}}`" + `.
+## Conventions worth knowing
 
-If you've been asked to build a board, fetch ` + "`GET /api/skills/kanban`" + ` for a fully worked recipe.
+- **Inline first** (CORE_GUIDELINES §14). A scalar shown in one place
+  lives inline in the page that displays it
+  (` + "`<Metric value={14} label=\"Users\" />`" + `), not in a sibling file.
+  Only folder collections may cross-reference: ` + "`<Kanban source=\"tasks/\" />`" + `.
+- **No invented prefixes.** Don't write to ` + "`data/<key>`" + ` or invent
+  parallel namespaces — pick the path you want the leaf to *appear*
+  at and write there. The server picks the storage shape from path +
+  content.
+- **Read before you write.** ` + "`git pull --rebase origin main`" + ` (or
+  ` + "`agentboard_pull`" + `) before you start. Conflicts that look like a
+  rebase mid-air are easier to resolve than conflicts mid-push.
+- **Keep prose short.** Humans glance; they don't read essays.
+- **One container per content unit.** A page owns its content.
 
-## Hosting a skill
+## Conflicts
 
-A skill is a folder under ` + "`content/skills/<slug>/`" + `. The folder must contain ` + "`SKILL.md`" + ` with YAML frontmatter:
+Push rejected? Standard flow:
 
-` + "```yaml" + `
----
-name: my-skill
-description: One sentence explaining when to use this skill.
----
+` + "```bash" + `
+$ git push origin HEAD:main
+! [rejected]        HEAD -> main (non-fast-forward)
+
+$ git pull --rebase origin main
+# resolve conflicts in your editor / by re-emitting the merged file…
+$ git add -A
+$ git rebase --continue
+$ git push origin HEAD:main
 ` + "```" + `
 
-Supporting files (examples, scripts, references) go in the same folder. AgentBoard indexes skills by folder name; the frontmatter ` + "`name`" + ` is the human-readable title.
+The conflict markers (` + "`<<<<<<<` / `=======` / `>>>>>>>`" + `) are the repair
+manual. They tell you which two versions disagreed; pick the merge
+that preserves intent and push.
 
-Share a skill with a teammate by sending them the URL ` + "`<server>/api/skills/<slug>`" + ` — it returns a zip they can unpack.
-
-## Conventions
-
-- **Data changes often, pages rarely.** Push live values to data-store keys; let page MDX reference them via ` + "`source`" + ` props.
-- **Inline first.** A scalar that's only displayed in one place lives inline (` + "`<Metric value={14} label=\"Appointments\" />`" + `), not in its own page. Per spec §7, the only cross-doc ` + "`source`" + ` reference is a folder collection (e.g. ` + "`<Kanban source=\"tasks/\" />`" + `). Same-page frontmatter and data-store keys are also fine.
-- **Keep prose short.** Humans glance; they don't read essays.
-- **Use components for visualizations**, prose for context. The full catalog is documented in the AgentBoard repo's component reference.
-- **Errors surface on the dashboard** via the errors beacon — broken diagrams, missing images, bad data refs show up without anyone asking.
+Via MCP, ` + "`agentboard_propose`" + ` returns a conflicts list on rejection;
+call ` + "`agentboard_resolve_conflict(proposal, file, resolution)`" + ` for
+each conflicted file, then the proposal retries.
 
 ## Quick examples
 
-See ` + "`examples.md`" + ` in this skill for common patterns (building a dashboard, appending to a log, hosting an image).
+See ` + "`examples.md`" + ` in this skill for the common patterns (creating
+a card, moving it, hosting an image, appending to a log).
 `
 
+// SeededSkillExamples exposes the seeded examples.md content so admin
+// tooling can re-push it into an existing workspace whenever the seed
+// evolves.
+var SeededSkillExamples = seededSkillExamples
+
 // seededSkillExamples is the companion examples.md that ships inside the
-// seeded skill to demonstrate that skills can carry supporting files alongside
-// the manifest.
-const seededSkillExamples = `# AgentBoard examples
+// seeded skill. Concrete recipes for the common operations, in both git
+// and MCP form.
+const seededSkillExamples = `# AgentBoard recipes
 
-Every example uses the ` + "`agentboard_*`" + ` MCP tools. REST equivalents at ` + "`/api/<path>`" + ` work the same.
+Every recipe below has two flavors — **git** (when your runtime can
+shell out) and **MCP** (when it can't). Pick one. They do the same
+thing.
 
-## Track a counter
+## Create a card on the tasks board
 
-Create the page with the value inline (preferred for one-off scalars):
+### git
+` + "```bash" + `
+cd <clone>
+mkdir -p tasks
+cat > tasks/ship-v2.md <<EOF
+---
+title: "Ship v2"
+col: todo
+priority: 2
+assignees: [chris]
+---
 
+What "ship v2" means: the new auth surface, the docs refresh, and the demo.
+EOF
+git add tasks/ship-v2.md
+git commit -m "Add ship-v2 card"
+git push origin HEAD:main
 ` + "```" + `
-agentboard_write({
-  items: [
-    {
-      path: "coffee",
-      frontmatter: { title: "Coffee", today: 3 },
-      body: "# Coffee\n\n<Metric source=\"today\" label=\"Cups\" />"
-    }
-  ]
+
+### MCP
+` + "```" + `
+agentboard_propose({
+  workspace: "<ws>",
+  message: "Add ship-v2 card",
+  files: [{
+    path: "tasks/ship-v2.md",
+    body: "---\ntitle: \"Ship v2\"\ncol: todo\npriority: 2\nassignees: [chris]\n---\n\nWhat \"ship v2\" means…"
+  }]
 })
 ` + "```" + `
 
-The ` + "`<Metric source=\"today\" />`" + ` reads the page's own frontmatter — no cross-page lookup, no orphan singletons.
+## Move a card across lanes
 
-To bump it later:
+### git
+Edit ` + "`tasks/ship-v2.md`" + `'s frontmatter ` + "`col:`" + ` field, commit, push. That's it.
 
-` + "```" + `
-agentboard_patch({
-  items: [{ path: "coffee", frontmatter_patch: { today: 4 } }]
-})
-` + "```" + `
+### MCP
+Pull the card via ` + "`agentboard_pull`" + `, edit the body locally to set
+` + "`col: doing`" + `, propose with the new body. The whole-file write is
+the unit; there is no field-level patch RPC in the git world.
 
-## Append to a log
+## Track a metric you bump often
 
-Streams live in the same path namespace; ` + "`agentboard_append`" + ` writes one NDJSON line atomically.
-
-` + "```" + `
-agentboard_append({
-  path: "deploys",
-  items: [{ ts: "2026-04-21T10:00Z", msg: "Shipped v1.4" }]
-})
-` + "```" + `
-
-Render it:
+The whole point of CORE_GUIDELINES §14: scalars live inline on the
+page that displays them.
 
 ` + "```mdx" + `
-<Log source="deploys" />
+---
+title: "Today"
+coffee: 3
+---
+
+<Metric source="coffee" label="Cups" />
 ` + "```" + `
 
-## Host an image
+Bumping the count is a normal commit on this page's frontmatter.
+Don't invent a ` + "`data/coffee.md`" + ` somewhere else — the
+` + "`<Metric source=\"coffee\" />`" + ` reads the rendering page's own
+frontmatter.
 
-Files take a two-step upload — request a presigned PUT, then upload the bytes.
+## Append to an activity feed
 
+Streams are ` + "`.ndjson`" + ` files. Each push appends lines (atomic per
+line). Read via ` + "`<Log source=\"deploys\" />`" + `.
+
+### git
+` + "```bash" + `
+echo '{"ts":"2026-05-13T09:00Z","msg":"Shipped v1.4"}' >> deploys.ndjson
+git add deploys.ndjson
+git commit -m "deploy v1.4"
+git push
 ` + "```" + `
-const { items } = await agentboard_request_file_upload({
-  items: [{ name: "banner.png", size_bytes: 24576 }]
+
+### MCP
+` + "```" + `
+agentboard_propose({
+  workspace: "<ws>",
+  message: "deploy v1.4",
+  files: [{
+    path: "deploys.ndjson",
+    body: "<existing-content>\n{\"ts\":\"2026-05-13T09:00Z\",\"msg\":\"Shipped v1.4\"}\n"
+  }]
 })
-// items[0].url is a presigned PUT — upload the bytes via fetch().
 ` + "```" + `
 
-Reference it:
+(MCP doesn't have a true append primitive yet — pull, append in
+memory, propose the whole file. Git's append works concurrently;
+MCP's "append" via propose is sequential.)
+
+## Host an image / binary
+
+Drop the file into the workspace alongside the markdown that
+references it. ` + "`<Image src=\"/api/files/banner.png\" />`" + ` reads the
+worktree mirror.
+
+### git
+` + "```bash" + `
+cp banner.png images/banner.png
+git add images/banner.png
+git commit -m "Add team banner"
+git push
+` + "```" + `
+
+Reference it in any page:
 
 ` + "```mdx" + `
-<Image src="/api/files/banner.png" alt="Team banner" />
+<Image src="/api/files/images/banner.png" alt="Team banner" />
 ` + "```" + `
+
+## Reacting to a teammate's push
+
+Subscribe to events on the workspace:
+
+` + "```" + `
+agentboard_subscribe({ workspace: "<ws>" })
+` + "```" + `
+
+(In v1 this returns a snapshot; live streaming arrives in a later
+cut.) For now, run ` + "`git fetch`" + ` periodically and look for new commits
+on main.
+
+## Notify downstream subscribers
+
+` + "```" + `
+agentboard_fire_event({
+  event: "ship.v2.ready",
+  payload: { branch: "main", commit: "abc1234" }
+})
+` + "```" + `
+
+Webhook subscribers receive ` + "`{name: \"ship.v2.ready\", at, data: …}`" + `.
 `
 
 // InitProject creates a new project from the welcome template.
