@@ -163,3 +163,28 @@ The test: *delete every other file under content/ and only keep the page you're 
 Before any non-trivial change, ask which principles it touches and whether it strengthens or weakens them. If a change violates one, either reshape it until it doesn't, or surface the trade-off explicitly in the PR/conversation.
 
 Drift between code and these principles is the single biggest risk to the product. Catch it early.
+
+---
+
+## Pivot audit (2026-05-13)
+
+The git-substrate pivot was checked against every principle below. Result: each one either holds at par or strengthens; none weakens. The custom file-based store was hiding work git already does for free, and replacing it makes several of these principles load-bearing instead of aspirational.
+
+| # | Principle | Pivot impact |
+|---|---|---|
+| 1 | Single binary, zero runtime deps | **Par.** `go-git` is pure-Go and embeds; no external `git` binary required, no system services to install. |
+| 2 | Local-first, hosted-possible — same binary | **Par.** Same binary; the only state on disk is `<datadir>/repos/*.git` + `<datadir>/worktrees/*` + SQLite. Tar still backs the whole thing up. |
+| 3 | Plugin architecture for everything that grows | **Stronger.** Components are `.jsx` blobs in the repo. They now version with the rest of the workspace — branches, history, and merges apply to components for free. |
+| 4 | AI is the primary author | **Stronger.** Branches let multiple agents work in parallel without stepping on each other. The whole-file CAS that previously serialized agent edits is replaced by git's merge model, which agents already speak. |
+| 5 | Humans are the primary reader, and they're not technical | **Par.** The UI never exposes git unless we want it to. Default view is HEAD of main; readers see live `.md` files and rendered MDX, same as today. |
+| 6 | Rendering is one-way | **Par.** The SPA reads the working tree; nothing on the read path can mutate state. Writes go through git push (or MCP `propose`), never through a render component. |
+| 7 | Reliable rails for an agentic world | **Stronger.** Optimistic locking via `_meta.version` was a half-implementation of what git's fast-forward semantics give us in full. Agents trying to push concurrently get a real, well-defined retry loop instead of a CAS race. |
+| 8 | Schemas document, don't enforce | **Par.** Frontmatter shape stays freeform; the server still doesn't validate. `git diff` is a better authoring aid for the agent than any schema check would be. |
+| 9 | Generic primitives, steer usage through docs | **Stronger.** Five primitives (clone, pull, push, branch, merge) replace the entire `agentboard_*` write surface. The remaining MCP tools exist for git-less fallback and notifications, not for routine writes. |
+| 10 | Version compositions, not components | **Stronger.** Compositions are now *literally* versioned — every page edit is a commit; rollback is `git revert`. The principle stops being a slogan. |
+| 11 | Leverage agents; stay dependency-free | **Par.** One new go module (`go-git`). Pure Go, well-maintained, no cgo. Same operational shape. |
+| 12 | Responses are repair manuals (poka-yoke) | **Stronger.** Merge conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`) are the canonical repair manual; Claude resolves them already without us inventing a custom format. The server's job is to surface conflicts cleanly via MCP; the resolution is the standard one. |
+| 13 | Content is files; operational state stays in the database | **Stronger.** Content was *technically* in files in v0.13 but with three competing on-disk shapes (`content/`, `data/`, `.agentboard/content_history/`). Git collapses them to one tree. SQLite carve-out is unchanged. |
+| 14 | Content lives inside its file | **Stronger.** Git enforces this naturally — there's no parallel namespace an agent could write into without committing it to the tree. The "no cross-page singletons" rule from spec §7 has structural support now, not just doc support. |
+
+**Net:** every principle the pivot touches gets sturdier ground under it. The pivot is consonant with the document, not against it.

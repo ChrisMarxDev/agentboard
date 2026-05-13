@@ -1,335 +1,375 @@
-# AgentBoard — Design Spec
+# AgentBoard — Design Contract
 
-> **Status:** the locked contract for the project shape. Every load-bearing structural decision lives here. Implementation drift from this doc is a bug; if reality changes, update this doc in the same PR. **Pre-launch — no backward compatibility, no migrators.**
+> **Status:** load-bearing. Read this before changing anything non-trivial.
+> Companion to [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md). If reality drifts from
+> this doc, the doc wins (or update the doc in the same PR).
 >
-> **Companion docs (live):** [`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md) — the 13 product principles. [`AUTH.md`](./AUTH.md), [`HOSTING.md`](./HOSTING.md), [`spec-plugins.md`](./spec-plugins.md), [`seams_to_watch.md`](./seams_to_watch.md), [`SCALE.md`](./SCALE.md) — domain contracts. [`ROADMAP.md`](./ROADMAP.md) — what ships next. [`ISSUES.md`](./ISSUES.md) — known bugs (the spec wins ties).
->
-> **Historical context:** earlier rewrite snapshots and aspirational drafts live under [`docs/archive/`](./docs/archive/). They are not load-bearing; do not link from agent-facing skills.
+> **Pivot, 2026-05-13.** AgentBoard's storage substrate is now git. The
+> previous file-based custom store lives on at branch
+> `filebase-cms-custom-substrate-13.5.26` for reference; `main` is the
+> git-substrate rebuild. The thesis below restates the product from
+> first principles in the new shape.
 
-## 1. Thesis — content is files; operational state is SQLite
+---
 
-The project has two storage tiers, separated by who composes the data:
+## 1. Thesis
 
-**Content tier — files under one tree.** Everything humans and agents compose directly:
+AgentBoard is a **single self-hosted binary** that hosts the shared workspace
+multiple AI agents collaborate inside, and serves a live web UI that humans use
+to read what the agents are doing.
 
-| Concept | Path |
+The substrate is **a git server**. Agents clone the workspace, work on
+branches, push back. Conflicts surface as standard git merge markers; agents
+resolve them and retry. The server doesn't impose a CRDT, a custom envelope,
+or a bespoke concurrency model — git's `fast-forward` semantics already are
+the concurrency model, and Claude-class agents are fluent in resolving merge
+conflicts.
+
+The web UI is **a viewer on the working tree**. The server keeps a
+working-tree mirror of `HEAD` of the default branch on disk; the SPA reads
+`.md` files out of that tree and renders them as MDX pages with embedded
+components. When `HEAD` moves, the working tree updates and SSE notifies open
+browsers. The frontend never knows there's a git repo underneath — it just
+reads files.
+
+This collapses three things that used to be separate stores in the v0.13
+build (page tree, files-first store, activity log) into one tree of files
+backed by one git history.
+
+---
+
+## 2. The binary
+
+One Go process. Listens on a port. Three things share that port:
+
+1. **Smart-HTTPS git** at `/git/<workspace>.git` — `git clone`, `pull`,
+   `push`, branches, tags. Uses [`go-git`][go-git] for a pure-Go
+   implementation; no shell-out to a `git` binary.
+2. **Read API** at `/api/<path>` — the existing SPA-facing shape, unchanged.
+   Returns the rendered page envelope, folder listing, stream tail, or binary
+   file. Backed by the working-tree mirror, not by the bare repo or any
+   custom index.
+3. **MCP** at `/mcp` — convenience layer for agents whose runtime can't shell
+   out to `git`. The same git operations (clone-as-bundle, branch, propose,
+   resolve-conflict) exposed as JSON-RPC tools. See §6.
+
+Auth (bearer tokens, OAuth, browser sessions) sits in front of all three.
+Same shape as v0.13 — the auth design carries over verbatim from
+[`AUTH.md`](./AUTH.md).
+
+[go-git]: https://github.com/go-git/go-git
+
+---
+
+## 3. Workspaces
+
+A **workspace** is one bare git repo on disk. Multiple workspaces per binary
+are fine; a small SQLite table tracks `{name, owner, default_branch, …}` —
+that's operational state and per §13 lives in SQLite, not files.
+
+The bare repo lives at `<datadir>/repos/<name>.git`. Adjacent to it lives
+the **working-tree mirror** at `<datadir>/worktrees/<name>/`, which the
+server keeps checked out to the workspace's default branch (typically
+`main`). Receivers on the repo (post-receive hook) re-checkout the mirror
+and emit `page-updated` events to the SSE broadcaster.
+
+The bare repo is the source of truth. The working tree is a *materialized
+view*. If the working tree is ever wrong (process crash mid-checkout,
+manual file edit, anything), `git reset --hard <ref>` rebuilds it.
+
+---
+
+## 4. What lives in git, what lives in SQLite
+
+### In git (content)
+
+Everything the user composes:
+
+- `.md` pages — frontmatter (YAML) + optional MDX body. Same shape as v0.13.
+- Folders of `.md` — kanban boards, issue lists, anything collection-shaped.
+- `.ndjson` streams — append-only logs. Activity feeds, telemetry.
+- Binaries — images, PDFs, exports. Stored as ordinary blobs (LFS only if
+  someone has multi-gig assets; defer).
+- `.jsx` components — user-authored React bricks, dropped into
+  `components/`. The watcher picks them up from the working tree on
+  rebuild.
+- `SKILL.md` skill bundles — folder layout, no special treatment.
+
+All addressed at `/api/<path>` for reads, and via `git push` to update.
+
+### In SQLite (operational state)
+
+The carve-out from CORE_GUIDELINES §13 carries over without changes:
+
+- Users, tokens, sessions, OAuth clients.
+- Workspace registry (name, owner, default branch, public/private,
+  per-path ACL rules).
+- Webhook subscriptions.
+- Rate-limit buckets.
+- Inbox notifications (delivery state — the messages themselves are commits
+  in git).
+
+### Things that *go away*
+
+The page manager, the files-first store, the v2 envelope, `_meta.version`
+CAS, the collection / singleton / stream catalog, the FTS index over store
+leaves, the page-lock table, the page-approval table, the content_history
+shadow tree, the activity ndjson under `.agentboard/`. All of these are
+**replaced by git itself**:
+
+| v0.13 mechanism | Git equivalent |
 |---|---|
-| Pages (MDX docs) | `<path>.md` |
-| Singleton values | `<key>.md` (frontmatter only, no body required) |
-| Collection items (tasks, customers, runbooks, kanban cards…) | `<path>/<id>.md` |
-| User-composed streams | `<path>.ndjson` |
-| Binary files | `files/<name>` (sidecar `<name>.meta.json`) |
-| Components | `components/<name>.jsx` (gated by `--allow-component-upload`) |
-| Skills | `skills/<slug>/SKILL.md` (+ supporting files in folder) |
-
-**Operational tier — SQLite.** Machine-managed indexes the user/agent never composes as text:
-
-| Domain | Why SQLite |
-|---|---|
-| Users, tokens, sessions, invitations, OAuth clients | Auth — sensitive, rapidly-mutating, indexed lookups |
-| Teams, team members | Membership — admin-managed |
-| Page locks | Edit-state metadata — admin-managed |
-| Webhook subscriptions | Operational config with secrets |
-| Inbox messages, share tokens | Internal messaging metadata |
-| `content_history` index, `activity` log index | Content audit — system-written, queryable |
-| FTS5 search index | Derived from the file tree |
-| Rate-limit bucket | Ephemeral; in-memory |
-
-The line: *do agents and humans compose this directly?* If yes, file. If no, row.
-
-There is **no parallel namespace** in the content tier. No `data/` vs `content/` split. Pages, data, tasks, skills are all the same `.md` shape under one tree, distinguished by path convention.
-
-## 2. The leaf rules (content tier)
-
-| Shape | When | Atomicity |
-|---|---|---|
-| `.md` doc | Anything with structured fields and/or prose | Full-file CAS via `_meta.version`. Read-modify-write for partial updates. |
-| `.ndjson` stream | User-composed append-only logs (daily journals, custom event streams) | `O_APPEND` atomic for lines ≤ PIPE_BUF. No CAS surface. |
-| Binary | Uploads served at `/api/files/<name>` | SET-only via presigned URL. Sidecar `<name>.meta.json` for envelope. |
-
-No atomic field-level ops. No INCREMENT, no field-level CAS. Agents read the whole doc, modify, write the whole doc back. File-level `_meta.version` CAS handles concurrent writers. Stream append is the single exception (`POST /api/<path>:append`).
-
-## 3. Frontmatter contract
-
-Standard YAML frontmatter. Server-managed fields live under `_meta`:
-
-```mdx
----
-title: Build the kanban
-status: in-progress
-priority: 2
-_meta:
-  version: 2026-04-28T14:32:11.123456789Z
-  created_at: 2026-04-20T10:00:00Z
-  modified_by: alice
----
-
-# Build the kanban
-…
-```
-
-Rules:
-
-- `_meta` is server-owned. Agents echo `_meta.version` for CAS; the server strips agent-supplied `_meta` fields except `version`.
-- All other frontmatter keys are user-owned. Server treats them opaquely. **`order:` in particular is opaque** — agents write whatever sort hint they want, the server stores it verbatim and components are free to read it. Page-tree traversal order is server-derived from path-sort and surfaces under the separate `_meta.order` field; the two never collide.
-- A `.md` with no body is fine (singletons typically have only frontmatter). A `.md` with no frontmatter is fine. A doc that is just `42\n` is fine.
-- **No shape validation on writes.** Per `CORE_GUIDELINES §8`, the server stores whatever it parses. Wrong-shape errors come from components at render time, not from the write path. Section 8 of this spec gives suggested shapes for common types — those are *hints to the authoring agent*, never enforcement.
-- **Speak, don't reject.** When a write under a known suggested-shape path is missing common fields, the response includes a non-blocking `warnings` array per §6 (Shape warnings) and `CORE_GUIDELINES §12`. The write still succeeds. Agents are free to ignore the warning.
-
-## 4. Folder rules
-
-A folder is a collection. Members are direct `.md` children. Subfolders are nested collections.
-
-- `tasks/index.md` — optional. The page rendered when you visit `/tasks`.
-- Without `index.md` — the server renders a default list view of frontmatter snippets.
-- `tasks/task-42.md` — one card. Frontmatter is the structured fields the Kanban reads.
-- `tasks/_archive/` — subfolders are nested collections; not flattened into the parent.
-- `<Kanban>` with no `source` attribute auto-attaches to its own folder (the kanban page is the index of its own folder).
-
-## 5. REST surface (content tier)
-
-One namespace, one CRUD per leaf:
-
-```
-GET    /api/<path>              read doc / serve binary / list folder / tail stream
-PUT    /api/<path>              full write; CAS via _meta.version or If-Match
-PATCH  /api/<path>              merge frontmatter + optional body
-DELETE /api/<path>              remove (idempotent)
-POST   /api/<path>:append       stream append (only `:` verb)
-
-GET    /api/index               flat catalog of every leaf
-GET    /api/search?q=...        full-text across frontmatter + body + stream lines
-GET    /api/<path>/history      per-doc history (server reads from the SQLite content_history index)
-GET    /api/activity            global write log         (server reads from the SQLite activity index)
-
-POST   /api/files/request-upload          mint presigned URL
-PUT    /api/upload/<token>                accept raw bytes (no auth — token gates)
-```
-
-Conflict response (`412`) embeds the current envelope. Wrong-shape errors (`409`) name actual + expected. Rate limit (`429`) carries `Retry-After` + `retry_after_seconds`. All per `CORE_GUIDELINES §12`.
-
-**Initial-write semantics.** A PUT to a path with no existing leaf MUST succeed without `If-Match` — the absence of a prior version means there's nothing to be stale against. CAS only applies when an existing version is being overwritten. (This corrects an ergonomic friction noted in `ISSUES.md`.)
-
-**Auth surfaces are separate.** `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/invitations/<id>/redeem`, the OAuth `/oauth/*` flow, the admin endpoints `/api/admin/*` and `/api/users/*` — all read and write SQLite tables, not files. They are not part of the content surface.
-
-**Reserved prefixes.** `<path>` does NOT start with one of the operational namespaces (`admin`, `auth`, `users`, `me`, `setup`, `health`, `config`, `index`, `search`, `activity`, `invitations`, `upload`, `view`, `share`, `approval`, `webhooks`, `inbox`, `errors`, `grab`, `events`, `tree`, `files`, `components`, `skills`, `oauth`, `introduction`, `locks`, `teams`, `content`). Those mount as their own routes. The chi dispatcher resolves more-specific routes first, so a content path like `tasks/task-42` falls through to the unified handler. `/api/content` survives only as the page-list + move + bulk-delete operational endpoint; per-leaf CRUD lives at `/api/<path>`.
-
-**Dispatcher rules.** The unified handler routes by lookup: page tree first, then data catalog. New writes go to the page tree when `body` is non-empty or the path has a slash; otherwise to the data tier as a flat-key singleton. Data-shaped writes (JSON body with a top-level `value:` key) on a `<key>/<id>` path target the data tier's collection-item upsert.
-
-**Stream verb.** Stream append is `POST /api/<path>:append`. The `:` suffix is the only operator-style verb in the namespace; everything else is path-shaped.
-
-## 6. MCP surface — eight tools + named extensions, always-plural
-
-The MCP server exposes the **content tier** only. Auth and operational state are out of scope: agents don't manage users, tokens, or webhook subscriptions through MCP — those are admin operations behind dedicated REST + CLI surfaces.
-
-Every write/read/delete tool accepts a **batch by default** (Notion / Sanity / GitHub pattern). Single-item operations wrap in a one-element array. This collapses N-page builds into one round-trip and matches what every winning content-MCP server does.
-
-```
-Read tier:
-  agentboard_read(paths)              — paths: [string]
-                                         → returns [{path, frontmatter, body, version, warnings?}]
-  agentboard_list(path)               — folder children + frontmatter snippets (single path)
-  agentboard_search(q, scope?)        — FTS5 + substring across the tree
-
-Write tier (always batch):
-  agentboard_write(items)             — items: [{path, frontmatter?, body?, version?}]
-  agentboard_patch(items)             — items: [{path, frontmatter_patch?, body?, version?}]
-  agentboard_append(path, items)      — items: [any]; one stream per call; race-free
-  agentboard_delete(items)            — items: [{path, version?}]
-
-Files:
-  agentboard_request_file_upload(items) — items: [{name, size_bytes}]
-                                          → returns [{name, upload_url, token, expires_at}]
-
-Named extensions:
-  agentboard_grab(picks)              — cross-page materializer
-  agentboard_fire_event(event, body?) — emit on webhook bus
-```
-
-**Eight generic tools cover the content tier.** No `_page` vs `_data` split. No `read_skill` / `write_skill` — skills are pages at `skills/<slug>/SKILL.md`. No `create_team` — teams are an operational concern, managed via `/api/admin/*`, not MCP. **10 tools total** (8 generic + grab + fire_event), down from 38.
-
-### Batch response shape
-
-Write/patch/delete return a per-item result. **Best-effort semantics** — partial success is normal; the agent inspects per-item status and retries failures:
-
-```json
-{
-  "results": [
-    {
-      "path": "tasks/task-1.md",
-      "success": true,
-      "version": "2026-04-30T...",
-      "warnings": [{"code": "shape_hint", "message": "...", "see": "spec.md §8"}]
-    },
-    {
-      "path": "tasks/task-2.md",
-      "success": false,
-      "error": {"code": "version_conflict", "current_version": "...", "current_envelope": {...}}
-    }
-  ],
-  "all_succeeded": false
-}
-```
-
-All-or-nothing transactional batching is **not** in v1. The filesystem doesn't give us atomic multi-doc commits for free, and best-effort + retry covers the happy path (the only path 95% of the time). A future `agentboard_apply(operations)` with transactional semantics is reserved for v2 if pain materializes; it requires a staged-write/journal primitive in `internal/store/`.
-
-### Native JSON values
-
-`agentboard_write` and `agentboard_patch` accept payloads as **native JSON** — the MCP wrapper does not double-stringify. REST and MCP have identical type semantics for a given write. (Today's `agentboard_write` / `agentboard_merge` double-stringify; Cut 6 fixes this.)
-
-### Reads return the full envelope
-
-`agentboard_read` returns `[{path, frontmatter, body, version}]`. Frontmatter and body are always both included. The patch-and-verify loop never needs an out-of-band REST call.
-
-### Shape warnings — speak, don't reject
-
-Per `CORE_GUIDELINES §8` and §13, the server stores any well-formed payload — schemas are suggestions, not gates. But silence on a drifting shape is unhelpful: per `CORE_GUIDELINES §12` (responses are repair manuals), the response includes a non-blocking `warnings` array when a write looks like it's missing fields from the path's suggested shape (§8). The write succeeds. The warning names the shape and the missing fields.
-
-Example warning body:
-
-```json
-{
-  "code": "shape_hint",
-  "message": "Path looks like a task (under tasks/) but frontmatter has no `title` or `status`. The Kanban component will use the filename as the card label and won't group this card.",
-  "see": "spec.md §8 — Suggested shape: tasks",
-  "missing_suggested_fields": ["title", "status"]
-}
-```
-
-Agents are free to ignore. The warning is for the agent that *would have wanted to know*. The server never refuses a well-formed write because of shape drift.
-
-## 7. Component `source=` semantics
-
-Components stop indirecting through dotted KV keys. Three forms only:
-
-- `value={...}` or children (`<Counter>42</Counter>`) — literal.
-- `source="field.path"` — frontmatter field on the doc the component is rendering in. JSON-pointer-style nesting via dots.
-- `source="folder/"` — collection: read every child's frontmatter.
-- `source="path/to.ndjson"` — stream tail.
-
-No cross-page `source="other-page:field"` syntax. If two pages need the same value, denormalize. Folder collections are the only cross-doc reference allowed.
-
-Components are **liberal in what they accept** (Postel's Law inverted, per `CORE_GUIDELINES §8`). A `<Kanban>` over `tasks/` works whether each card has `status` or `col` or no grouping field at all. A `<Chart>` accepts array-of-objects, `{labels, values}`, or `{name, value}` pairs. Missing fields render as graceful blanks; never as 500s.
-
-## 8. Loose shapes — frontmatter as suggestion
-
-Per `CORE_GUIDELINES §8` and §13, the server validates **safety invariants** (path, size, auth) and stores anything else opaquely. Components handle missing/extra fields gracefully. **Authoring agents are free to invent shapes.**
-
-To reduce drift across instances, the spec ships **suggested frontmatter shapes** for common collection types. These are documentation, not enforcement — the server accepts a task with no fields, with extra fields, or with renamed fields. Components fall back. The suggestion exists so that agents tend to converge on the same shape across projects, and so that the bundled components have something predictable to render against by default.
-
-### Suggested shape: tasks (`tasks/<id>.md`)
-
-```yaml
----
-# All fields below are SUGGESTIONS — agents may omit, add, or rename
-# any of them. The server accepts whatever is written; components
-# render around what's present and ignore what isn't.
-title: Build the kanban             # short summary; falls back to filename if absent
-status: in-progress                  # arbitrary string; Kanban groupBy="status" by default
-priority: medium                     # arbitrary string or number
-assignees: ["@alice", "@team:eng"]   # @username or @team mentions
-due: 2026-05-15                      # ISO date or null
-tags: ["backend", "urgent"]
-description: Optional one-liner; the page body holds the full description
----
-
-The full task body lives here as MDX. Drop screenshots, links, or
-conversation excerpts. The Kanban card shows `title` + `status` +
-`assignees`; clicking opens this page.
-```
-
-### Suggested shape: data singletons (`metrics/<key>.md`)
-
-```yaml
----
-value: 42                            # literal scalar OR object OR array
-label: Daily active users            # human-readable name
-unit: users                          # optional
-updated_at: 2026-04-30T08:15:00Z     # agent-set or server-derived
----
-```
-
-### Suggested shape: skills (`skills/<slug>/SKILL.md`)
-
-```yaml
----
-name: agentboard                     # required by the Anthropic skill format
-description: Authoring AgentBoard pages, data, and collections via MCP.
----
-
-# Skill body in standard Anthropic skill format.
-```
-
-### Adding more suggested shapes
-
-When a new content type emerges (incidents, customers, deploy events…), add a "Suggested shape" subsection here. The bar: at least two collections in the wild that converged on roughly the same shape. Keep each suggestion ≤ 10 fields; remember it's a hint, not a schema.
-
-### Path → shape mapping
-
-The server maps paths to suggested shapes for the warning system in §6. Currently:
-
-| Path glob | Suggested shape |
-|---|---|
-| `tasks/**/*.md`, `*/tasks/*.md` | tasks (above) |
-| `metrics/**/*.md`, `*/metrics/*.md` | data singletons (above) |
-| `skills/*/SKILL.md` | skills (above) |
-
-A write under a matching glob with all suggested fields present yields no warnings. A write missing some fields yields one `shape_hint` warning naming the missing fields. A write that doesn't match any glob yields no shape warnings (the server has no opinion). Adding a glob is a one-liner in `internal/store/shapes.go` plus a new subsection in this section of the spec.
-
-## 9. What gets deleted in the next rewrite
-
-Cuts 5–6 (§11) collapse the content tier onto the spec. Operational SQLite stays — see §10.
-
-| Surface | Replacement |
-|---|---|
-| `internal/mdx/` separate read path | folded into `internal/store/` (`/tasks/migrate-pages-store`) |
-| Per-domain MCP tools (`agentboard_lock_page`, `agentboard_create_team`, `agentboard_search_pages`, `agentboard_read_page`, `agentboard_write_page`, `agentboard_list_skills`, `agentboard_get_skill`, `agentboard_*_webhook`, `agentboard_*_team`, `agentboard_clear_errors`, etc.) | gone — replaced by the 8-tool generic CRUD + 2 named extensions in §6. Admin operations (lock/team/webhook) move to REST + CLI, not MCP |
-| MCP `agentboard_write` / `agentboard_merge` value double-stringification | normalized to native JSON; same shape as REST |
-| Two `search` tools (`agentboard_search` + `agentboard_search_pages`) | one `agentboard_search` with optional `scope` |
-| Singular write/read/delete | always-plural batch shape (Notion pattern); see §6 |
-
-## 10. What survives
-
-- Files-first storage envelope, `_meta.version`, server-monotonic timestamps, atomic rename writes (content tier).
-- The full SQLite operational tier — auth (`internal/auth/`), teams, locks, webhooks, inbox, share, invitations, OAuth clients. None of this moves.
-- The `content_history` and `activity` SQLite tables (planned in `ROADMAP.md` Milestone B) — write-paths still stream to the file tree, but the queryable index is SQL.
-- Presigned URL upload flow.
-- Token-bucket rate limiter (in-memory; derived).
-- `agentboard backup / restore` CLI — content via `tar`, operational via `sqlite3 .backup`.
-- The 13 principles in `CORE_GUIDELINES.md`.
-- The OAuth 2.1 + DCR + PKCE flow on `/oauth/*`.
-- The current 32 built-in components.
-- The `<DataContext>` bundle / `useData` hook on the SPA.
-- The skill system: `skills/<slug>/SKILL.md` + supporting files in the folder.
-
-## 11. Cut order — the next rewrite
-
-Two cuts. Both are content-tier surgery; auth/operational SQLite is untouched.
-
-1. **Cut 5 — pages + store file-layer merge.** Fold `internal/mdx` into `internal/store`. One read path, one write path, one watcher, one CAS for the entire content tree. Tracks at `/tasks/migrate-pages-store`.
-2. **Cut 6 — MCP collapse to 10 tools.** Replace the 38 domain-specific tools with the 8 generic + 2 named extensions (§6). The skill manifest gains a path-layout teaching section + the suggested-shape catalog from §8. Existing per-domain tools removed in one PR; agents re-onboard via the new manifest. Includes the `value` JSON-serialization fix on `write`/`patch`.
-
-Each cut is one PR. Cut 5 is a prerequisite for Cut 6 — without one read path, the generic tools can't dispatch correctly. After Cut 6, every issue tagged `[obsolete]` in `ISSUES.md` can be removed; `[cut 6]` issues need verification on the new tools.
-
-## 12. What's NOT in the content tier
-
-The principle is about *content state*, not *every byte of state*.
-
-- **Operational SQLite tables** (auth, teams, locks, webhooks, inbox, share, invitations, oauth_clients) — explicit, by design. See §10.
-- **Open SSE connections** — process state, evicted on restart.
-- **Rate-limit bucket** — in-memory; derived.
-- **FTS5 search index** — derived from the file tree; rebuilt on `agentboard reindex` or first cold start.
-- **Page watcher RefStore** — derived; rebuilt by walking the tree on startup.
-- **Server config (`agentboard.yaml`)** — file, but *not* in the project tree; it's the project's bootstrap. Editable by the operator, not by agents.
-
-The test: *can I tar the project root, drop the SQLite operational database, restore both, and have the dashboard come back identical?* Both sides need to round-trip.
-
-## 13. Open questions
-
-None. Every load-bearing decision is locked. Concrete coding decisions (route paths, error code strings, exact JSON shapes) follow the §5/§6 surfaces.
-
-If you find a decision that *feels* open while implementing, the spec is wrong — fix this doc in the same PR as the code.
+| `_meta.version` CAS | non-fast-forward push rejection |
+| `content_history/<path>.ndjson` | `git log -- <path>` |
+| `.agentboard/activity.ndjson` | `git reflog` + `git log --all` |
+| page locks | branches (`agent-claude-1/feature/X`) |
+| page approvals | tags or merged PRs |
+| collection rescan | `git ls-tree` |
 
 ---
 
-**End of spec.**
+## 5. Concurrency model
+
+Two policies a workspace can pick from. Default is **push-to-main**; opt-in
+to **always-PR** per-workspace via the registry row.
+
+### Push-to-main (default)
+
+1. Agent clones, branches, commits, attempts `git push origin HEAD:main`.
+2. If the push is a fast-forward → accepted, working tree mirror updates,
+   SSE fires, humans see the change.
+3. If the push is not a fast-forward (someone else pushed first) →
+   rejected with the standard `fetch first` error AND an MCP event
+   `conflict.push_rejected{ref, ours, theirs, files?}` lands in the
+   agent's inbox.
+4. Agent pulls, merges (resolving any text conflicts in the standard
+   `<<<<<<<` / `>>>>>>>` form), pushes again.
+
+No special pre-merge round-trip. The agent uses native git; the server is
+"just a git remote that emits notifications."
+
+### Always-PR
+
+1. Same as above, but pushes to `main` are forbidden outright.
+2. Agents push to feature branches; the server records a *proposal* (a
+   simple SQLite row pointing at the branch).
+3. A proposal is merged by an explicit MCP call (`proposal_merge`) or a
+   human clicking *Merge* in the UI.
+4. Merging is fast-forward where possible; on conflict, the merge is
+   rejected the same way push-to-main is rejected. The agent updates the
+   branch and tries again.
+
+Always-PR is the right default for shared production workspaces; the
+push-to-main mode is right for "my personal scratch space" and tight loops
+where review ceremony is overhead.
+
+---
+
+## 6. MCP surface
+
+Smaller than v0.13. Most operations are now git itself, not our API; MCP
+exists for agents whose runtime cannot shell out to `git` (see §7) and for
+*notifications* that are inherently server-side.
+
+```
+agentboard_workspaces       → list workspaces visible to this token
+
+agentboard_pull(ws, ref?)   → fetch + return the working tree as a bundle
+                              (files keyed by path, with frontmatter and
+                              body for .md leaves). For agents that read
+                              but don't clone.
+
+agentboard_propose(ws,
+                   base,
+                   branch,
+                   files,
+                   message)  → server-side branch+commit+push from the
+                              given files. For agents that can't write
+                              git locally. Returns the proposal id and
+                              any conflicts.
+
+agentboard_resolve_conflict(
+  proposal,
+  file,
+  resolution)              → submit a resolved file body. Server replays
+                              the merge with the resolution applied. For
+                              git-less agents.
+
+agentboard_subscribe(events)→ open an SSE-shaped MCP stream of
+                              push, merge, conflict, mention events
+                              for workspaces this token can read.
+
+agentboard_grab(picks)      → unchanged from v0.13. Materializer that
+                              assembles a list of leaves into agent-ready
+                              text. Pure read, works against the working
+                              tree.
+
+agentboard_fire_event(...)  → unchanged from v0.13. Emit on webhook bus.
+```
+
+That's seven tools. Agents who use the git CLI directly need only
+`agentboard_workspaces`, `agentboard_subscribe`, `agentboard_grab`,
+`agentboard_fire_event` — the other three are the git-less fallback path.
+
+---
+
+## 7. Auth — bearer tokens carry through git
+
+The git smart-HTTPS protocol uses HTTP Basic auth. Same `ab_*` / `oat_*`
+tokens we already mint:
+
+```
+git clone https://_:ab_xxxxxxxx@board.example.com/git/<workspace>.git
+```
+
+Or via `git credential` helper (we ship a small `agentboard credential`
+binary that responds to the helper protocol if the operator wants the
+token out of the URL).
+
+The MCP layer keeps its existing auth shape: bearer in `Authorization`
+header. Same code path on the server — token resolves to a user, ACLs
+apply.
+
+Per-path ACLs survive: `workspaces.<id>.rules` in SQLite is a list of
+`{action, pattern, methods}` rows checked on every fetch / push. Push
+rejection for ACL reasons returns the standard `pre-receive hook
+declined` git error.
+
+---
+
+## 8. Conflict resolution
+
+When push is rejected (push-to-main or always-PR), the standard pattern is:
+
+```
+$ git push origin HEAD:main
+! [rejected]        HEAD -> main (non-fast-forward)
+hint: Updates were rejected because a pushed branch tip is behind its remote.
+
+$ git pull --rebase origin main
+CONFLICT (content): Merge conflict in tasks/ship-v2.md
+Automatic merge failed; fix conflicts and then commit the result.
+```
+
+Agents fluent in this loop need no help from us. Agents that read MCP
+events get a structured `conflict.push_rejected` with the offending files
+attached; same outcome, different transport.
+
+The standard `<<<<<<< / ======= / >>>>>>>` markers are the repair manual.
+Claude resolves these well today on code; the same skill applies to MDX
+frontmatter and body equally.
+
+For the always-PR path, conflicts are surfaced at merge time. A failed
+merge stores the conflict files in the proposal row; the agent fetches
+them via `agentboard_resolve_conflict`, returns resolved versions, the
+server commits and retries the merge.
+
+---
+
+## 9. The web UI
+
+The SPA we shipped in v0.13 carries over with essentially no shape
+changes. It still:
+
+- Renders MDX pages with embedded components.
+- Listens to SSE for live updates.
+- Auto-attaches `<Kanban>` to the rendering page's folder (cards-as-pages).
+- Reads `frontmatter` for the metadata panel (§14 enabled this — it stays).
+- Honors the `wide: true` per-page width opt-in.
+
+What changes:
+
+- "Current state" is HEAD of the default branch by default. A branch
+  picker can be added later for viewing other branches; the dogfood
+  instance probably never needs it.
+- "Activity feed" component reads `git log` instead of an NDJSON. Same
+  shape on the wire.
+- Per-page edit history (the meta bar's "edited 3h ago by alice") comes
+  from `git log -- <path>` instead of `_meta`. Same UI.
+- `_meta` is gone from frontmatter. The server-stamped fields move into
+  git (commit metadata) and stop polluting the YAML.
+
+Components built against the old `<Metric source="value" />` shape work
+unchanged — `source=` still binds to the rendering page's frontmatter,
+and folder collections still work via `source="path/"`. Per CORE_GUIDELINES
+§14, content lives inside its file. Git makes that load-bearing instead
+of just a slogan.
+
+---
+
+## 10. What ships first
+
+Implementation order (Cuts), each landable independently:
+
+**Cut 1 — Git endpoint.** `go-git` smart-HTTPS at `/git/<ws>.git`,
+behind existing auth, single hard-coded test workspace. Goal: `git clone`
+from cowork against `agentboard.hextorical.com` succeeds end-to-end.
+
+**Cut 2 — Working-tree mirror.** Post-receive hook checks out the
+default branch into `<datadir>/worktrees/<ws>/`. The watcher we already
+have re-indexes the page tree from there. Goal: pushing an `.md` file
+shows up in the SPA's left nav.
+
+**Cut 3 — Read API on the working tree.** Repoint
+`handlers_unified.go::handleUnifiedRead` to the working tree. Drop the
+page manager's in-memory index; the watcher continues to feed the SSE
+broadcaster. Goal: `/api/<path>` returns the right shape with zero
+behavior change for readers.
+
+**Cut 4 — Retire the v2 file store.** Delete
+`internal/store/{singleton,collection,stream,catalog}.go` and the data
+tier dispatch. Keep the page subset (which is now the only subset).
+Goal: smaller binary, simpler audit surface.
+
+**Cut 5 — MCP rewrite.** Replace the 10-tool batch CRUD with the seven
+tools in §6. The git-less fallback path is the focus; agents with
+`git` use the CLI.
+
+**Cut 6 — Concurrency policy + always-PR mode.** Per-workspace toggle,
+proposal table, the `proposal_merge` MCP call, the conflict-surfacing
+plumbing.
+
+**Cut 7 — Repointed dogfood.** The hextorical instance moves to the
+new substrate. The preservation branch stays running on a different
+port for a week to allow comparison.
+
+**Cut 8 — Cleanup.** Drop the deprecated routes, drop the legacy
+fields from `_meta`, scrub the docs.
+
+---
+
+## 11. Non-goals
+
+To avoid scope drift:
+
+- **We are not building GitHub.** No issue tracker, no PR review UI, no
+  org permissions, no project boards as a separate concept. Issues are
+  files in `issues/`; the kanban renders them; review happens by
+  reading the diff or merging via MCP.
+- **We are not building a CRDT.** Git's branch+merge model handles
+  concurrency. Operational transformation belongs to live-co-editing
+  products like Google Docs; agents don't need it.
+- **We are not building a desktop app.** The web UI is the only UI.
+  Agents use git or MCP; humans use the browser.
+- **We are not building a real-time collab editor for prose.** If a
+  human and an agent need to edit the same file at once, the second
+  writer rebases; that's good enough for the agent-collaboration
+  fantasy.
+
+---
+
+## 12. Compatibility with the v0.13 (filebase) branch
+
+The preservation branch `filebase-cms-custom-substrate-13.5.26` keeps
+the v0.13 implementation alive for reference. Nothing on `main` is
+required to maintain backwards-compatibility with v0.13's API shape
+(`/api/data/*` is already retired; `_meta` is about to go).
+
+Operators who want to migrate a v0.13 instance to the new substrate:
+`git init --bare`, `git add .`, `git commit`, push the bare repo into
+the new binary's `<datadir>/repos/<name>.git`. The `.md` files come
+across unchanged. The v0.13 `.agentboard/activity.ndjson` becomes the
+first commit message; no point in replaying history we don't have to.
+
+A `agentboard migrate-from-filebase <old-project>` CLI command lands
+in Cut 7 to mechanize that flow.

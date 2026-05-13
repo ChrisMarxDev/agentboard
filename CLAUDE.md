@@ -1,17 +1,18 @@
 # AgentBoard
 
-Single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST/MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
+**Single-binary git server** that hosts the shared workspace AI agents collaborate inside, plus a live web UI that humans use to read what the agents are doing. Agents clone, branch, commit, push — git's standard concurrency model handles parallel work, and conflicts surface as standard merge markers that Claude-class agents already know how to resolve.
 
-> **Source of truth — read both before any non-trivial change:**
+> **🚧 Mid-pivot — 2026-05-13.** Storage substrate is moving from the v0.13 file-based custom store to git. The current code on `main` still runs the v0.13 substrate; the preservation branch `filebase-cms-custom-substrate-13.5.26` keeps that build alive for reference. The pivot lands across Cuts 1–8 (see [`ROADMAP.md`](./ROADMAP.md)). Do not build new features against the v0.13 file store — it's slated for deletion. Do build against the new substrate as the relevant cuts land.
+
+> **Source of truth — read all three before any non-trivial change:**
 >
-> - **[`spec.md`](./spec.md)** — the locked design contract. File layout, leaf rules, frontmatter contract, REST + MCP surface, auth-as-files, and the cut order for the next rewrite. If reality drifts from this doc, the doc wins (or update the doc in the same PR).
-> - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the 13 product principles. When a proposal conflicts with a principle, the principle wins or the trade-off gets surfaced explicitly.
+> - **[`spec.md`](./spec.md)** — the design contract for the new git-substrate AgentBoard. Workspace model, concurrency policy, MCP surface, cut order. If reality drifts from this doc, the doc wins (or update the doc in the same PR).
+> - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the 14 product principles. The "Pivot audit" section at the bottom confirms every principle either holds at par or strengthens under the new substrate.
+> - **[`ROADMAP.md`](./ROADMAP.md)** — the cuts that turn the v0.13 code into the spec-defined system.
 >
-> **Domain contracts:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`spec-plugins.md`](./spec-plugins.md) (component contract — companion to principle §10), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).
+> **Domain contracts that survive the pivot:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`spec-plugins.md`](./spec-plugins.md) (component contract — companion to principle §10), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).
 >
-> **Plan + bug list:** [`ROADMAP.md`](./ROADMAP.md) is what ships next. [`ISSUES.md`](./ISSUES.md) is the single canonical bug list — but **the spec wins ties**: a bug in a feature the spec deletes is obsolete, not a fix-target. Don't restore deleted features to satisfy old bug reports.
->
-> **Historical context:** earlier rewrite snapshots and aspirational drafts live under [`docs/archive/`](./docs/archive/). They are not load-bearing; do not link from agent-facing code or skills.
+> **Historical context:** [`ISSUES.md`](./ISSUES.md) was reset post-pivot — most v0.13 bugs are obsoleted by the substrate change. Earlier rewrite snapshots and aspirational drafts live under [`docs/archive/`](./docs/archive/). They are not load-bearing; do not link from agent-facing code or skills.
 
 ## UI conventions
 
@@ -128,14 +129,16 @@ For full QA with automatic bug fixing, use `/qa http://localhost:3000`.
 
 ## Architecture
 
-- **Go backend**: chi router, SQLite (modernc.org/sqlite, pure Go) for auth/teams/locks/invitations/inbox metadata, cobra CLI.
-- **Frontend**: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation), embedded into the Go binary at build time.
-- **Data model**: Files-first. `.md` docs (frontmatter holds structured fields, body holds MDX) + `.ndjson` streams + binaries. Folders are collections. Singletons live at `<key>.md`; collection items at `<key>/<id>.md`. Full-file CAS via `_meta.version`.
-- **Realtime**: SSE broadcaster pushes `data` and `page-updated` events to all connected browsers.
-- **MCP**: Streamable HTTP at `/mcp` with the 10 tools in spec §6 (8 generic batch CRUD + grab + fire_event). Always-plural batch shape; native JSON values; full envelope on read; non-blocking shape warnings on write. Admin operations (webhook subscribe / revoke / list, page locks, team CRUD) live on `/api/admin/*` + the `agentboard admin` CLI per the AUTH.md MCP invariant.
-- **Pages**: MDX files compiled client-side, served from project folder. Watcher rebuilds the catalog on disk changes.
-- **Components**: 32 built-ins, plus user `.jsx` files in `components/` (off by default, gated behind `--allow-component-upload`).
-- **Auth**: Two credential paths — bearer tokens (`ab_*`, `oat_*`) for non-human callers, browser sessions (cookie + CSRF) for humans. See [`AUTH.md`](./AUTH.md).
+> **What's described here is the v0.13 architecture currently running on `main`.** The git-substrate pivot is in progress — see `spec.md` for the target shape. The pieces marked **(stays)** below are unchanged by the pivot; **(replaced)** items are slated for deletion across Cuts 1–8.
+
+- **Go backend** *(stays)*: chi router, SQLite (modernc.org/sqlite, pure Go) for auth/teams/locks/invitations/inbox metadata, cobra CLI.
+- **Frontend** *(stays)*: React 18 + Vite + Tailwind CSS + recharts + @mdx-js/mdx (client-side compilation), embedded into the Go binary at build time.
+- **Data model** *(replaced)*: Files-first custom store. `.md` docs + `.ndjson` streams + binaries with full-file CAS via `_meta.version`. After the pivot, the store IS a git working tree mirror; CAS is git's non-fast-forward check.
+- **Realtime** *(stays)*: SSE broadcaster pushes `data` and `page-updated` events to all connected browsers. Post-pivot, the same events fire from the git post-receive hook.
+- **MCP** *(replaced)*: Currently 10 batch CRUD tools. Post-pivot, a smaller 7-tool surface oriented around git operations + notifications + grab — see spec §6.
+- **Pages** *(stays)*: MDX files compiled client-side. After the pivot, the watcher feeds from the working-tree mirror instead of a custom index.
+- **Components** *(stays, gets simpler)*: 32 built-ins plus user `.jsx` files in `components/`. After the pivot, agent uploads land via `git push`; the `--allow-component-upload` REST gate becomes redundant.
+- **Auth** *(stays)*: Two credential paths — bearer tokens (`ab_*`, `oat_*`) for non-human callers, browser sessions (cookie + CSRF) for humans. Git smart-HTTPS uses the same bearer via Basic auth. See [`AUTH.md`](./AUTH.md).
 
 ## Key directories
 

@@ -1,29 +1,27 @@
 # Known issues
 
-Single canonical bug list. The spec wins ties: if an issue is filed against a feature that [`spec.md`](./spec.md) deletes or restructures, the issue is **obsolete on contact** — toss the feature, build the spec-aligned version, don't try to fix the legacy one.
+> **Reset 2026-05-13** after the git-substrate pivot. Every v0.13 issue
+> was either fixed in a prior cut or rendered obsolete by the substrate
+> change; the previous content lives on the preservation branch
+> `filebase-cms-custom-substrate-13.5.26` for reference.
+
+Single canonical bug list. The spec wins ties: if an issue is filed
+against a feature that [`spec.md`](./spec.md) deletes or restructures,
+the issue is **obsolete on contact** — toss the feature, build the
+spec-aligned version, don't try to fix the legacy one.
 
 Each entry is tagged:
 
 - **`[live]`** — bug exists today and the spec keeps the surface. Real fix-target.
-- **`[cut N]`** — bug exists today, the spec deletes or restructures the surface in the named cut. Don't fix the legacy code path; verify the replacement doesn't repeat the bug.
-- **`[obsolete]`** — bug exists today, the surface is gone in the new spec. No fix work; remove the surface in its cut.
-- **`[needs-decision]`** — behavior may be a bug or by-design. Spec is silent. Decide before fixing.
-
-After every cut lands, walk this list and prune entries the cut resolved.
+- **`[cut N]`** — bug exists today, the spec deletes or restructures the surface in the named cut.
+- **`[obsolete]`** — bug exists today, the surface is gone in the new spec.
+- **`[needs-decision]`** — behavior may be a bug or by-design. Spec is silent.
 
 ---
 
 ## Open
 
-_(empty after Cuts 5–9)_
-
-Cut 5 closed: initial PUT no-If-Match (regression test), PATCH error message contradicts shape (regression test).
-
-Cut 6 closed: MCP value double-stringification (`agentboard_write` regression test), MCP merge object-shape clobber (`agentboard_patch` regression test), `agentboard_search_pages` malformed response (tool removed), `agentboard_read_page` body-only (tool removed), MCP writes attribute to "agent" instead of bearer's user (`Server.resolveActor` reads from auth context), frontmatter `order:` semantics (spec §3 clarified — user `order` is opaque, server-derived order travels under `_meta.order`).
-
-Cut 7 + Cut 8 closed: REST namespace unification (spec §5) — `/api/<path>` ships, legacy `/api/content/*` and `/api/data/<key>[/<id>]` retired, `/api/<path>:append` for streams, `/api/<path>/history` for per-doc audit.
-
-Cut 9 closed: `value:` field collision in data singletons. `MarshalDoc` now nests user objects under `value:` when the object itself contains a `value` key; the splat path remains the default for objects without a collision. Round-trip is symmetric for every shape.
+_(none — clean slate post-pivot)_
 
 ---
 

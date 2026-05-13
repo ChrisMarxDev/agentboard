@@ -1,5 +1,13 @@
 package server
 
+// ⚠️  LEGACY (v0.13 file-substrate). Slated for replacement by the
+// git-substrate writer path (spec §§2, 5, 10). Do not extend with new
+// features. The read side moves to the working-tree mirror in Cut 3;
+// the write side disappears entirely — writes will go through `git
+// push` against `/git/<workspace>.git`, with the MCP `propose` /
+// `resolve_conflict` tools as the git-less fallback. See `spec.md` and
+// `ROADMAP.md` for the cut sequence.
+//
 // Cut 7: REST namespace unification. Spec §5 says one namespace —
 // `/api/<path>` GET/PUT/PATCH/DELETE/POST :append — covers the entire
 // content tier.

@@ -1,3 +1,19 @@
+// Package store is the v0.13 file-substrate implementation: page
+// manager, files-first store, envelope, CAS, history, activity log.
+//
+// ⚠️  LEGACY. The git-substrate pivot replaces this package with two
+// thinner pieces (per spec §§2–4):
+//
+//   - a bare-repo + working-tree mirror layer that owns content on disk
+//     (Cuts 2, 3, 4),
+//   - a frontmatter / FTS / refs helper layer that runs on the working
+//     tree without owning it.
+//
+// The singleton / collection / stream / catalog / envelope code goes
+// away in Cut 4. The page-manager subset survives only until the
+// working-tree reader replaces it in Cut 3. Do not build new features
+// against this package; build them against the git-substrate handlers
+// once the relevant cut lands.
 package store
 
 import (
