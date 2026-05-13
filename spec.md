@@ -38,6 +38,72 @@ backed by one git history.
 
 ---
 
+## 1.5. Bootstrap — one sentence, everything else discovered
+
+The first (and ideally only) thing a human ever pastes into an agent to
+start using a workspace is:
+
+> AgentBoard is at `https://<host>/git/<workspace>.git`. Clone it
+> (`git clone https://_:$TOKEN@<host>/git/<workspace>.git`), read
+> `README.md` at the root, and follow what it says. AgentBoard tells
+> you the rest.
+
+That's the contract. The human writes that sentence once, never edits
+it again. The agent connects, finds the README, follows the chain of
+references. AgentBoard owns the long-form instructions; the human's
+prompt template is one stable line.
+
+This is **principle §15** (workspace teaches the agent) in concrete
+form. It's why the git substrate is load-bearing: the agent already
+knows how to clone and read files, so the bootstrap protocol is one
+the agent doesn't have to be taught first.
+
+**The README chain.** A workspace's `README.md` is the canonical
+entry point. By convention it links to:
+
+- `SKILL.md` (or `skills/agentboard/SKILL.md`) — the always-bundled
+  AgentBoard skill that teaches the protocol: how to find the task
+  queue, how to surface conflicts, how to subscribe to events, what
+  the available components do.
+- `CONVENTIONS.md` (or a section inside README) — this team's
+  workspace-specific rules: naming, who reviews what, the kanban's
+  column meanings, anything the next agent needs to know that isn't
+  generic to AgentBoard.
+- The task queue itself — typically `tasks/` (folder of `.md`
+  cards), but the README names it so agents don't have to guess.
+- Pointers to who else is around — `agentboard_workspaces` lists
+  active workspaces; recent commits show who's been working in
+  this one.
+
+**Seeded by default.** `agentboard init` writes a starter `README.md`
+and a starter `SKILL.md` so the chain works on day one for a fresh
+workspace. The starter README is short — five or six links — and is
+the place teams replace with their own when their workspace settles
+into a shape.
+
+**Git-less fallback.** Agents whose runtime can't shell out to
+`git` get the same content via `agentboard_pull(workspace)` (see §6).
+The bundle's first element is always the README. Same protocol,
+different transport — the contract is "the workspace tells you what
+to read first," not "the workspace requires a particular wire
+format."
+
+**Tests this design has to pass:**
+
+- A fresh Claude session, given only the bootstrap sentence and a
+  valid token, can identify the open task list and pick something to
+  work on within five turns.
+- Adding a new convention (e.g. "all PRs need a `:tested:` tag")
+  requires editing a file in the workspace, not the bootstrap
+  prompt.
+- Deleting `CLAUDE.md` from the repo doesn't break onboarding for
+  fresh agents.
+
+If any of those fail, the fix is in the workspace's README or
+SKILL, never in the bootstrap sentence.
+
+---
+
 ## 2. The binary
 
 One Go process. Listens on a port. Three things share that port:
@@ -373,3 +439,18 @@ first commit message; no point in replaying history we don't have to.
 
 A `agentboard migrate-from-filebase <old-project>` CLI command lands
 in Cut 7 to mechanize that flow.
+
+---
+
+## 13. Open product questions
+
+Recording, not resolving. Future contributors: the answers go here.
+
+**The name.** "AgentBoard" reads as a dashboard product, and the more
+the project leans into "agents collaborate against a git substrate
+they bootstrap themselves into," the less the word *board* describes
+what it is. A name that emphasizes *shared workspace for AI agents*
+would carry the principle §15 thesis better. Defer to a future
+turn; flag any code change that makes the rename harder (deep
+binary names, hardcoded paths, public URLs that would break) so the
+cost of an eventual rename doesn't quietly compound.

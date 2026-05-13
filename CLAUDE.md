@@ -7,7 +7,7 @@
 > **Source of truth — read all three before any non-trivial change:**
 >
 > - **[`spec.md`](./spec.md)** — the design contract for the new git-substrate AgentBoard. Workspace model, concurrency policy, MCP surface, cut order. If reality drifts from this doc, the doc wins (or update the doc in the same PR).
-> - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the 14 product principles. The "Pivot audit" section at the bottom confirms every principle either holds at par or strengthens under the new substrate.
+> - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the 15 product principles. The "Pivot audit" section at the bottom confirms every principle either holds at par or strengthens under the new substrate. §15 (workspace teaches the agent) is the principle the entire pivot exists to serve.
 > - **[`ROADMAP.md`](./ROADMAP.md)** — the cuts that turn the v0.13 code into the spec-defined system.
 >
 > **Domain contracts that survive the pivot:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`spec-plugins.md`](./spec-plugins.md) (component contract — companion to principle §10), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).

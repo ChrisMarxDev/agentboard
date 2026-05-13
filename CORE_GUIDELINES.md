@@ -158,6 +158,26 @@ The test: *delete every other file under content/ and only keep the page you're 
 
 ---
 
+## 15. The workspace teaches the agent. The human writes one sentence.
+
+A user should never have to maintain a long-running prompt that explains what AgentBoard is or how to interact with it. The bootstrap is *one sentence*, pasted once: "AgentBoard is at `<url>` — clone it, read `README.md`, follow what it says. AgentBoard tells you the rest." From the second the agent reads that, it is in conversation with the workspace, not with the human.
+
+This is what makes the multi-agent collaboration fantasy actually liveable. The alternative — every new agent session, every new agent on the team, every project-drift event requires the human to remember and re-paste the right prompt — is the same antipattern that makes "AI coworker" tools brittle in practice. The knowledge of how to be useful in *this* workspace has to live in *this* workspace, not in the human's head, not in a CLAUDE.md they edit per project, not in a prompt template anyone has to version.
+
+The substrate enables this for free. The workspace is a git repo. A `README.md` at the root is a file the agent already knows how to find and read. The README links to a `SKILL.md` that teaches the protocol; to a `CONVENTIONS.md` that teaches this team's rules; to `tasks/` (or wherever the queue is). The reference chain is durable — it survives the human, the agent, the conversation, the model upgrade. The bootstrap sentence is the one stable thing the human ever has to paste; everything else is a link they can follow.
+
+This is why the substrate change to git is load-bearing for the project, not just an implementation detail. The "agent walks in cold, reads its way to usefulness" loop only works against a substrate the agent already speaks. Git is that. Custom REST surfaces are not.
+
+**The tests:**
+
+- *Could a fresh Claude session, given the single bootstrap sentence and nothing else, do useful work in this workspace within five turns?* If no, the workspace's README is incomplete, the SKILL is outdated, or the protocol is too opaque — fix the file the agent reads, not the prompt the human types.
+- *Could the human delete their CLAUDE.md, paste the bootstrap sentence, and continue?* Same answer. CLAUDE.md is a fallback for repo maintainers, not a load-bearing input.
+- *Does adding a new convention or skill require the human to update the bootstrap sentence?* If yes, the change went into the wrong place — push it into the workspace, not the prompt.
+
+When this principle conflicts with anything else, the rule is: **push knowledge into the workspace, not the prompt.**
+
+---
+
 ## How to use this file
 
 Before any non-trivial change, ask which principles it touches and whether it strengthens or weakens them. If a change violates one, either reshape it until it doesn't, or surface the trade-off explicitly in the PR/conversation.
@@ -186,5 +206,6 @@ The git-substrate pivot was checked against every principle below. Result: each 
 | 12 | Responses are repair manuals (poka-yoke) | **Stronger.** Merge conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`) are the canonical repair manual; Claude resolves them already without us inventing a custom format. The server's job is to surface conflicts cleanly via MCP; the resolution is the standard one. |
 | 13 | Content is files; operational state stays in the database | **Stronger.** Content was *technically* in files in v0.13 but with three competing on-disk shapes (`content/`, `data/`, `.agentboard/content_history/`). Git collapses them to one tree. SQLite carve-out is unchanged. |
 | 14 | Content lives inside its file | **Stronger.** Git enforces this naturally — there's no parallel namespace an agent could write into without committing it to the tree. The "no cross-page singletons" rule from spec §7 has structural support now, not just doc support. |
+| 15 | Workspace teaches the agent | **Made possible.** This principle requires a substrate the agent already speaks. Git is that. The bootstrap loop — read the URL, clone, read README, follow links — only works because the agent doesn't need to learn a custom protocol first. On the v0.13 file substrate the agent had to be taught the API shape before it could even start; that's the antipattern this principle exists to forbid. |
 
 **Net:** every principle the pivot touches gets sturdier ground under it. The pivot is consonant with the document, not against it.
