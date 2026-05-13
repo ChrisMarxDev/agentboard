@@ -1,79 +1,87 @@
 # AgentBoard Skill
 
-AgentBoard is a live dashboard that updates in real time as you write data to it.
-You have tools to read and write data, create and edit pages, and discover available components.
+AgentBoard is a self-hosted knowledge surface for agent teams. Each
+board hosts one or more **workspaces** — real git repos you clone,
+edit, and push to. The dashboard renders the same tree.
 
 ## Workflow
 
-When the user asks you to track something or build a dashboard:
+When the user asks you to track something or contribute to a board:
 
-1. Call `agentboard_list_components` to see what visualization components are available.
-2. Call `agentboard_get_data_schema` to see what data already exists.
-3. Decide what data to track and what components to use.
-4. Use `agentboard_set` to populate initial data.
-5. Use `agentboard_write_page` to create or update the MDX page.
+1. Discover the available workspaces with `agentboard_workspaces`. Each
+   one carries `{id, default_branch, policy, clone_url}`.
+2. If your runtime has `git`: clone the workspace, read its
+   `README.md`, follow the chain (typically into
+   `skills/agentboard/SKILL.md`).
+3. If your runtime can't shell out to git: call `agentboard_pull` to
+   fetch the working tree as a bundle and treat `README.md` the same way.
+4. Edit files, commit + push (git) or `agentboard_propose` (MCP).
+5. On conflict, resolve the standard `<<<<<<< / ======= / >>>>>>>`
+   markers (git) or call `agentboard_resolve_conflict` once per
+   conflicted file (MCP).
 
-## Data Model
+## MCP surface — six tools
 
-Data is a key-value store. Keys are dotted paths like `sentry.issues` or `analytics.dau`.
-Values are any valid JSON — numbers, strings, objects, arrays.
-
-Collections are arrays of objects with an `id` field. You can upsert, merge, and delete individual items.
-
-## MDX Syntax
-
-Pages are written in MDX — markdown with embedded components.
-
-Use JSX interpolation for inline text:
 ```
-Current users: {data.analytics.dau}
+agentboard_workspaces             list workspaces visible to this caller
+agentboard_pull(ws, ref?)         working tree as {files: [{path, body, ...}]}
+agentboard_propose(ws, files,
+                   message, ...)  server-side branch + commit + push
+agentboard_resolve_conflict(
+  proposal, file, resolution)     resolve one file in a contested proposal
+agentboard_subscribe(events,
+                     workspace?,
+                     cursor?)     long-poll push/conflict events
+agentboard_fire_event(event,
+                      payload?)   emit on the webhook bus
 ```
 
-Use components with `source` prop for visualizations:
-```
-<Metric source="analytics.dau" label="Daily Active Users" />
-```
+There is no key-value store, no MDX components, no /_api/data/
+namespace, no auto-attaching dashboard widgets. The substrate is git.
 
-## Available Components
+## Authentication
 
-- `<Metric>` — A single large number with optional trend
-- `<Status>` — State indicator (running/passing/failing/waiting/stale)
-- `<Progress>` — Progress bar from {value, max}
-- `<Table>` — Auto-column table from array of objects
-- `<Chart>` — Bar, pie, donut, or horizontal bar chart
-- `<TimeSeries>` — Line or bar chart over time
-- `<Log>` — Append-only text log
-- `<List>` — Ordered/unordered list with optional status badges
-- `<Kanban>` — Non-interactive kanban board grouped by a field
+Pass an `ab_<43>` token as:
+
+- `Authorization: Bearer ab_…` (header) for REST + MCP
+- HTTP Basic password (username is ignored) for the git endpoint
+- Inside the URL: `http://user:ab_…@host/git/<workspace>.git`
+
+If `agentboard_workspaces` returns 401, ask the user for an
+invitation URL (`/invite/<id>`) and redeem it via
+`POST /_api/invitations/<id>/redeem`.
 
 ## Example
 
-User says: "Track my daily coffee intake."
+User says: "Log today's smoke-test results to our team workspace."
 
-1. Set initial data:
-```
-agentboard_set("coffee.today", 0)
-agentboard_set("coffee.history", [])
-```
-
-2. Write a page:
-```
-agentboard_write_page("index.md", `
-# Coffee Tracker
-
-Today: <Metric source="coffee.today" label="Cups" />
-
-<TimeSeries source="coffee.history" x="date" y="cups" />
-`)
+```text
+1. agentboard_workspaces → identify the right workspace id.
+2. agentboard_pull(ws) → confirm where notes live (typically notes/).
+3. agentboard_propose({
+     workspace: ws,
+     message: "Add smoke-test note",
+     files: [{
+       path: "notes/2026-05-13.md",
+       body: "---\ntitle: Smoke test results\n---\n\n# Smoke test results\n\n…"
+     }]
+   })
+4. Tell the user the dashboard reflects the new file.
 ```
 
-3. Tell the user the dashboard is at http://localhost:3000
+If the propose returns `{conflicts: [...]}`, call
+`agentboard_resolve_conflict` for each entry.
 
-## Updating Data
+## How files render
 
-When the user says something changed:
-- Use `agentboard_set` to replace a value
-- Use `agentboard_merge` to update specific fields of an object
-- Use `agentboard_append` to add items to an array/log
+The dashboard reads files out of the working tree by extension:
 
-The dashboard updates live — no refresh needed.
+- `.md` → rendered as HTML with goldmark, inside the dashboard shell
+- `.html` → served as-is inside a sandboxed iframe
+- `.json` → pretty-printed JSON
+- `.txt` / `.ndjson` → preformatted text
+- directories → file listings
+- everything else → plain-text download
+
+No transcoded schema. The bytes you commit are the bytes the dashboard
+reads.

@@ -7,9 +7,7 @@ import (
 	"net/http"
 
 	"github.com/christophermarx/agentboard/internal/auth"
-	"github.com/christophermarx/agentboard/internal/files"
 	"github.com/christophermarx/agentboard/internal/gitserver"
-	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/webhooks"
 )
 
@@ -46,28 +44,11 @@ type Server struct {
 	// host.
 	PublicBaseURL string
 
-	// Files backs agentboard_request_file_upload (deferred — file
-	// uploads happen via git LFS or just as ordinary blobs now).
-	// Kept on the struct for compatibility with serve.go wiring; not
-	// dispatched in the Cut-5 surface.
-	Files *files.Manager
-
-	// Grab is the cross-page materializer behind agentboard_grab.
-	Grab *grab.Materializer
-
 	// WebhookDispatcher backs agentboard_fire_event.
 	WebhookDispatcher *webhooks.Dispatcher
 
 	// Auth: tool-side bearer-to-user resolution for commit attribution.
 	Auth *auth.Store
-
-	// MintUploadToken — kept on the struct for serve.go wiring; not
-	// dispatched in the Cut-5 surface.
-	MintUploadToken func(name, actor string, sizeBytes int64) (uploadURL, expiresAt string, maxBytes int64, ok bool)
-
-	// AfterPageWrite — kept on the struct for serve.go wiring; the new
-	// surface routes writes through ProposeFn instead.
-	AfterPageWrite func(path, source, actor string)
 }
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.

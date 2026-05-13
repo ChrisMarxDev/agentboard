@@ -51,35 +51,10 @@ type meResponse struct {
 	AvatarColor string    `json:"avatar_color,omitempty"`
 }
 
-func (s *Server) registerAdminRoutes(r chi.Router) {
-	r.Route("/admin", func(r chi.Router) {
-		r.Use(auth.AdminRequired())
-
-		r.Get("/me", s.handleAdminMe)
-
-		r.Get("/users", s.handleListUsers)
-		r.Post("/users", s.handleCreateUser)
-		r.Route("/users/{username}", func(r chi.Router) {
-			r.Patch("/", s.handleUpdateUser)
-			r.Post("/deactivate", s.handleDeactivateUser)
-		})
-
-		// Shares — admin view over every unrevoked share token on the
-		// instance. Revoke cascades to view_sessions (handled by the
-		// existing /api/share/{id} DELETE handler).
-		r.Get("/shares", s.handleAdminListShares)
-
-		// Webhooks — every subscription instance-wide, revoked or not.
-		r.Get("/webhooks", s.handleAdminListWebhooks)
-
-		// Teams — create/update/delete + member ops.
-		s.registerAdminTeamRoutes(r)
-
-		// Invitations — create/list/revoke. Redeeming happens at
-		// /api/invitations/{id}/redeem (public, outside /api/admin).
-		s.registerAdminInvitationRoutes(r)
-	})
-}
+// registerAdminRoutes was the v0.13 inline registration. server.go now
+// registers admin routes directly so it can drop the dead surfaces
+// (shares, teams) cleanly. Kept as a no-op for any straggler caller.
+func (s *Server) registerAdminRoutes(r chi.Router) { _ = r }
 
 // -------------------- me --------------------
 

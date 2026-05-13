@@ -74,7 +74,7 @@ SERVER_PID=$!
 
 # Wait for the server to answer health checks.
 for i in $(seq 1 30); do
-  if curl -sS --max-time 1 -o /dev/null "$BASE_URL/api/health" 2>/dev/null; then
+  if curl -sS --max-time 1 -o /dev/null "$BASE_URL/_api/health" 2>/dev/null; then
     break
   fi
   sleep 0.5
@@ -98,7 +98,7 @@ if [[ -z "$INVITE_ID" ]]; then
 fi
 echo "▸ Redeeming invite $INVITE_ID" >&2
 REDEEM_RESPONSE=$(curl -sS -X POST -H 'Content-Type: application/json' \
-  "$BASE_URL/api/invitations/$INVITE_ID/redeem" \
+  "$BASE_URL/_api/invitations/$INVITE_ID/redeem" \
   -d '{"username":"dogfood-tester","password":"dogfood-test-pw-12345"}')
 TOKEN=$(echo "$REDEEM_RESPONSE" | jq -r '.token // empty')
 if [[ -z "$TOKEN" ]]; then

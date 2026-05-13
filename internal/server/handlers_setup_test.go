@@ -11,7 +11,7 @@ import (
 // endpoints without a pre-seeded bearer.
 func bareClient() *http.Client { return &http.Client{} }
 
-// /api/setup/status is the only survivor of the v0 setup flow. Auth v1
+// /_api/setup/status is the only survivor of the v0 setup flow. Auth v1
 // replaced POST /api/setup with the invitation-redeem path. These tests
 // exercise the status endpoint's new shape — initialized + invite_url.
 
@@ -20,7 +20,7 @@ func TestSetupStatus_Uninitialized_NoBootstrapInvite(t *testing.T) {
 	// doesn't run the serve-path bootstrap).
 	ts := newAuthedTestServer(t, "")
 
-	r, err := bareClient().Get(ts.URL + "/api/setup/status")
+	r, err := bareClient().Get(ts.URL + "/_api/setup/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestSetupStatus_Uninitialized_WithBootstrapInvite(t *testing.T) {
 		t.Fatalf("mint bootstrap: inv=%v err=%v", inv, err)
 	}
 
-	r, err := bareClient().Get(ts.URL + "/api/setup/status")
+	r, err := bareClient().Get(ts.URL + "/_api/setup/status")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestSetupStatus_Initialized(t *testing.T) {
 	// Seed a user via the token param — that flips the board into the
 	// initialized state.
 	ts := newAuthedTestServer(t, "s3cret")
-	r, err := bareClient().Get(ts.URL + "/api/setup/status")
+	r, err := bareClient().Get(ts.URL + "/_api/setup/status")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -172,7 +172,7 @@ func TestOAuth_FullFlow_PKCE_AuthorizationCode(t *testing.T) {
 	}
 
 	// 7. Same token MUST be rejected outside the MCP audience.
-	req2, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	req2, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	req2.Header.Set("Authorization", "Bearer "+access)
 	r3, err := http.DefaultTransport.RoundTrip(req2)
 	if err != nil {
@@ -180,7 +180,7 @@ func TestOAuth_FullFlow_PKCE_AuthorizationCode(t *testing.T) {
 	}
 	r3.Body.Close()
 	if r3.StatusCode != http.StatusUnauthorized {
-		t.Errorf("audience scoping: /api/me with oat_ should be 401, got %d", r3.StatusCode)
+		t.Errorf("audience scoping: /_api/me with oat_ should be 401, got %d", r3.StatusCode)
 	}
 
 	// 8. Refresh rotation.
@@ -449,7 +449,7 @@ func TestOAuth_Consent_ViaSession(t *testing.T) {
 	}
 	clientID := dcrRegister(t, ts, "Session Consent Test")
 
-	// Build a cookie jar, log in via /api/auth/login.
+	// Build a cookie jar, log in via /_api/auth/login.
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
@@ -458,7 +458,7 @@ func TestOAuth_Consent_ViaSession(t *testing.T) {
 		"username": "test-agent",
 		"password": "session-password-1234",
 	})
-	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/login", strings.NewReader(string(body)))
+	req, _ := http.NewRequest("POST", ts.URL+"/_api/auth/login", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
 	loginResp, err := c.Do(req)
 	if err != nil {

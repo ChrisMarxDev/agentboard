@@ -74,20 +74,20 @@ func TestAdmin_RequiresAdminToken(t *testing.T) {
 	// need a fresh client that bypasses that injection.
 	bareClient := &http.Client{}
 
-	noTok, _ := http.NewRequest("GET", ts.URL+"/api/admin/me", nil)
+	noTok, _ := http.NewRequest("GET", ts.URL+"/_api/admin/me", nil)
 	r1, _ := bareClient.Do(noTok)
 	if r1.StatusCode != 401 {
 		t.Errorf("no token = %d, want 401", r1.StatusCode)
 	}
 	r1.Body.Close()
 
-	r2, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", agentToken))
+	r2, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/_api/admin/me", "", agentToken))
 	if r2.StatusCode != 403 {
 		t.Errorf("agent on admin = %d, want 403", r2.StatusCode)
 	}
 	r2.Body.Close()
 
-	r3, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", adminToken))
+	r3, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/_api/admin/me", "", adminToken))
 	if r3.StatusCode != 200 {
 		t.Errorf("admin on admin = %d, want 200", r3.StatusCode)
 	}
@@ -100,8 +100,8 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 
 	// Restrict to GETs under /api/data/** — the data surface during
 	// the rewrite. Cut 3 collapses this back to /api/data/**.
-	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/api/**","methods":["GET"]}]}`
-	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users", body, adminToken))
+	body := `{"username":"viewer","kind":"member","access_mode":"restrict_to_list","rules":[{"action":"allow","pattern":"/_api/**","methods":["GET"]}]}`
+	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users", body, adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	// Viewer GET passes auth (rule allows /api/data/** GETs); the
 	// key may not exist yet, so 200 OR 404 both mean "auth let me
 	// through." 401/403 would mean the rule didn't apply.
-	gr, _ := http.NewRequest("GET", ts.URL+"/api/foo", nil)
+	gr, _ := http.NewRequest("GET", ts.URL+"/_api/foo", nil)
 	gr.Header.Set("Authorization", "Bearer "+tok.Token)
 	gresp, _ := http.DefaultClient.Do(gr)
 	if gresp.StatusCode != 200 && gresp.StatusCode != 404 {
@@ -131,7 +131,7 @@ func TestAdmin_CreateUser_ReturnsTokenOnce(t *testing.T) {
 	}
 	gresp.Body.Close()
 
-	pr, _ := http.NewRequest("PUT", ts.URL+"/api/foo", strings.NewReader(`{"value":"x"}`))
+	pr, _ := http.NewRequest("PUT", ts.URL+"/_api/foo", strings.NewReader(`{"value":"x"}`))
 	pr.Header.Set("Content-Type", "application/json")
 	pr.Header.Set("Authorization", "Bearer "+tok.Token)
 	presp, _ := http.DefaultClient.Do(pr)
@@ -146,14 +146,14 @@ func TestAdmin_UsernameTaken_AndReservedAfterDeactivate(t *testing.T) {
 	adminToken := seedAdmin(t, srv)
 
 	// Create and deactivate a user.
-	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users",
 		`{"username":"alice","kind":"member"}`, adminToken))
 	resp.Body.Close()
-	deact, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users/alice/deactivate", "", adminToken))
+	deact, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users/alice/deactivate", "", adminToken))
 	deact.Body.Close()
 
 	// Re-creating "alice" must 409 even though she's deactivated.
-	again, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+	again, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users",
 		`{"username":"alice","kind":"member"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestAdmin_InvalidUsername(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+	resp, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users",
 		`{"username":"0bad","kind":"member"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestAdmin_UpdateUser_CannotChangeUsername(t *testing.T) {
 	// struct. Sending one should be ignored; the user keeps their original
 	// username. Verify by sending a username field and checking the response
 	// still says alice.
-	resp, err := http.DefaultClient.Do(authReq(t, "PATCH", ts.URL+"/api/admin/users/alice",
+	resp, err := http.DefaultClient.Do(authReq(t, "PATCH", ts.URL+"/_api/admin/users/alice",
 		`{"username":"notAlice","display_name":"Alice Chen"}`, adminToken))
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestAdmin_RotateToken(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+	resp, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users",
 		`{"username":"rotator","kind":"member"}`, adminToken))
 	var created tokenResponse
 	json.NewDecoder(resp.Body).Decode(&created)
@@ -219,7 +219,7 @@ func TestAdmin_RotateToken(t *testing.T) {
 	oldToken := created.Token
 
 	resp2, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/"+created.Username+"/tokens/"+created.TokenID+"/rotate",
+		ts.URL+"/_api/users/"+created.Username+"/tokens/"+created.TokenID+"/rotate",
 		"", adminToken))
 	var rotated tokenResponse
 	json.NewDecoder(resp2.Body).Decode(&rotated)
@@ -228,14 +228,14 @@ func TestAdmin_RotateToken(t *testing.T) {
 		t.Error("rotated token should differ")
 	}
 
-	gr, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	gr, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	gr.Header.Set("Authorization", "Bearer "+oldToken)
 	r, _ := http.DefaultClient.Do(gr)
 	r.Body.Close()
 	if r.StatusCode != 401 {
 		t.Errorf("old token = %d, want 401", r.StatusCode)
 	}
-	gr2, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	gr2, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	gr2.Header.Set("Authorization", "Bearer "+rotated.Token)
 	r2, _ := http.DefaultClient.Do(gr2)
 	r2.Body.Close()
@@ -248,13 +248,13 @@ func TestAdmin_CannotDeactivateSelf(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	r, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/admin/me", "", adminToken))
+	r, _ := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/_api/admin/me", "", adminToken))
 	var me meResponse
 	json.NewDecoder(r.Body).Decode(&me)
 	r.Body.Close()
 
 	r2, err := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/users/"+me.Username+"/deactivate", "", adminToken))
+		ts.URL+"/_api/admin/users/"+me.Username+"/deactivate", "", adminToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,14 +268,14 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 
-	r, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/admin/users",
+	r, _ := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/admin/users",
 		`{"username":"multi","kind":"member"}`, adminToken))
 	var first tokenResponse
 	json.NewDecoder(r.Body).Decode(&first)
 	r.Body.Close()
 
 	r2, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/"+first.Username+"/tokens",
+		ts.URL+"/_api/users/"+first.Username+"/tokens",
 		`{"label":"ci"}`, adminToken))
 	var second tokenResponse
 	json.NewDecoder(r2.Body).Decode(&second)
@@ -285,7 +285,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	}
 
 	for _, tok := range []string{first.Token, second.Token} {
-		gr, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+		gr, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 		gr.Header.Set("Authorization", "Bearer "+tok)
 		g, _ := http.DefaultClient.Do(gr)
 		g.Body.Close()
@@ -295,11 +295,11 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 	}
 
 	rv, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/"+first.Username+"/tokens/"+first.TokenID+"/revoke",
+		ts.URL+"/_api/users/"+first.Username+"/tokens/"+first.TokenID+"/revoke",
 		"", adminToken))
 	rv.Body.Close()
 
-	gr1, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	gr1, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	gr1.Header.Set("Authorization", "Bearer "+first.Token)
 	g1, _ := http.DefaultClient.Do(gr1)
 	g1.Body.Close()
@@ -307,7 +307,7 @@ func TestAdmin_MultipleTokens(t *testing.T) {
 		t.Errorf("revoked = %d, want 401", g1.StatusCode)
 	}
 
-	gr2, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	gr2, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	gr2.Header.Set("Authorization", "Bearer "+second.Token)
 	g2, _ := http.DefaultClient.Do(gr2)
 	g2.Body.Close()
@@ -322,7 +322,7 @@ func TestUsersDirectory_AgentReadable(t *testing.T) {
 	agentToken := seedAgent(t, srv, "agent1")
 	_ = seedAgent(t, srv, "agent2")
 
-	r, err := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/api/users", "", agentToken))
+	r, err := http.DefaultClient.Do(authReq(t, "GET", ts.URL+"/_api/users", "", agentToken))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestUsersResolve(t *testing.T) {
 	agentToken := seedAgent(t, srv, "alice")
 	_ = seedAgent(t, srv, "bob")
 
-	r, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/api/users/resolve",
+	r, err := http.DefaultClient.Do(authReq(t, "POST", ts.URL+"/_api/users/resolve",
 		`{"usernames":["alice","nobody","BOB"]}`, agentToken))
 	if err != nil {
 		t.Fatal(err)

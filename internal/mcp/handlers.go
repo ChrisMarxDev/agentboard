@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/christophermarx/agentboard/internal/grab"
 	"github.com/christophermarx/agentboard/internal/webhooks"
 	"gopkg.in/yaml.v3"
 )
@@ -337,37 +336,10 @@ type SubscribeResult struct {
 // gitserver.Store.ListEvents.
 type SubscribeFunc func(ctx context.Context, workspace string, since int64, types []string, limit int) (*SubscribeResult, error)
 
-// ---------- agentboard_grab ----------
-
-func (s *Server) toolGrab(r *http.Request, args map[string]json.RawMessage) (any, *RPCError) {
-	_ = r
-	if s.Grab == nil {
-		return nil, &RPCError{Code: -32000, Message: "grab not configured"}
-	}
-	rawPicks, ok := args["picks"]
-	if !ok {
-		return nil, &RPCError{Code: -32602, Message: "picks required"}
-	}
-	// Accept either a list of strings (`picks: ["/handbook"]`) — each
-	// treated as a whole-page pick — or the richer Pick shape
-	// (`{kind, page, card_id, heading_slug, …}`) for partial slices.
-	var picks []grab.Pick
-	if err := json.Unmarshal(rawPicks, &picks); err != nil {
-		var asStrings []string
-		if err2 := json.Unmarshal(rawPicks, &asStrings); err2 != nil {
-			return nil, &RPCError{Code: -32602, Message: "picks: " + err.Error()}
-		}
-		picks = make([]grab.Pick, len(asStrings))
-		for i, p := range asStrings {
-			picks[i] = grab.Pick{Kind: grab.KindPage, Page: p}
-		}
-	}
-	if len(picks) == 0 {
-		return nil, &RPCError{Code: -32602, Message: "picks must be non-empty"}
-	}
-	sections := s.Grab.Materialize(picks)
-	return mcpJSON(map[string]any{"sections": sections}), nil
-}
+// (agentboard_grab is gone in the substrate pivot. The materializer
+// it backed walked a page-manager index that doesn't exist anymore.
+// Agents pull whatever paths they need via agentboard_pull(workspace)
+// — that's the bundle equivalent.)
 
 // ---------- agentboard_fire_event ----------
 

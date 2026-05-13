@@ -18,13 +18,13 @@ import (
 //
 //   - login success / wrong-password / wrong-username (constant-time
 //     in *response shape*; we don't measure timing)
-//   - cookie-based /api/auth/me + /api/auth/logout
+//   - cookie-based /_api/auth/me + /_api/auth/logout
 //   - session expiry kills the cookie
 //   - CSRF enforcement on cookie-authenticated state-changing requests
 //   - bearer-authenticated state-changing requests still skip CSRF
 
 // loginClient is a cookie-jar-backed http.Client. The session +
-// CSRF cookies set by /api/auth/login flow back through it on
+// CSRF cookies set by /_api/auth/login flow back through it on
 // subsequent requests, mirroring real browser behaviour.
 func loginClient(t *testing.T) *http.Client {
 	t.Helper()
@@ -56,7 +56,7 @@ func loginAs(t *testing.T, ts string, c *http.Client, username, password string)
 		"username": username,
 		"password": password,
 	})
-	req, err := http.NewRequest("POST", ts+"/api/auth/login", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", ts+"/_api/auth/login", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,13 +142,13 @@ func TestAuth_MeWithCookie(t *testing.T) {
 	r := loginAs(t, ts.URL, c, "alice", "correct-password-1234")
 	r.Body.Close()
 
-	r2, err := c.Get(ts.URL + "/api/auth/me")
+	r2, err := c.Get(ts.URL + "/_api/auth/me")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r2.Body.Close()
 	if r2.StatusCode != 200 {
-		t.Fatalf("/api/auth/me = %d", r2.StatusCode)
+		t.Fatalf("/_api/auth/me = %d", r2.StatusCode)
 	}
 	var resp authResponse
 	json.NewDecoder(r2.Body).Decode(&resp)
@@ -160,13 +160,13 @@ func TestAuth_MeWithCookie(t *testing.T) {
 func TestAuth_MeWithoutCookie401(t *testing.T) {
 	_, ts := newTestServer(t)
 	c := &http.Client{}
-	r, err := c.Get(ts.URL + "/api/auth/me")
+	r, err := c.Get(ts.URL + "/_api/auth/me")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 401 {
-		t.Errorf("/api/auth/me unauthenticated = %d, want 401", r.StatusCode)
+		t.Errorf("/_api/auth/me unauthenticated = %d, want 401", r.StatusCode)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestAuth_LogoutRevokesAndClearsCookies(t *testing.T) {
 	loginAs(t, ts.URL, c, "alice", "correct-password-1234").Body.Close()
 
 	// Log out.
-	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/logout", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/_api/auth/logout", nil)
 	r, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -187,11 +187,11 @@ func TestAuth_LogoutRevokesAndClearsCookies(t *testing.T) {
 		t.Errorf("logout = %d", r.StatusCode)
 	}
 
-	// /api/auth/me without an active session → 401.
-	r2, _ := c.Get(ts.URL + "/api/auth/me")
+	// /_api/auth/me without an active session → 401.
+	r2, _ := c.Get(ts.URL + "/_api/auth/me")
 	r2.Body.Close()
 	if r2.StatusCode != 401 {
-		t.Errorf("post-logout /api/auth/me = %d, want 401", r2.StatusCode)
+		t.Errorf("post-logout /_api/auth/me = %d, want 401", r2.StatusCode)
 	}
 
 	// The DB-side row should be revoked too.
@@ -218,10 +218,10 @@ func TestAuth_SessionExpiry(t *testing.T) {
 		time.Now().UTC().Add(-time.Hour).Unix(), rows[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := c.Get(ts.URL + "/api/auth/me")
+	r, _ := c.Get(ts.URL + "/_api/auth/me")
 	r.Body.Close()
 	if r.StatusCode != 401 {
-		t.Errorf("expired session /api/auth/me = %d, want 401", r.StatusCode)
+		t.Errorf("expired session /_api/auth/me = %d, want 401", r.StatusCode)
 	}
 }
 
@@ -235,7 +235,7 @@ func TestAuth_SetPasswordSelf_RequiresCurrent(t *testing.T) {
 	// Self without current_password → 400.
 	body := `{"new_password":"new-password-5678"}`
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/alice/password", body, tok))
+		ts.URL+"/_api/users/alice/password", body, tok))
 	r.Body.Close()
 	if r.StatusCode != 400 {
 		t.Errorf("self-without-current = %d, want 400", r.StatusCode)
@@ -244,7 +244,7 @@ func TestAuth_SetPasswordSelf_RequiresCurrent(t *testing.T) {
 	// Self with wrong current_password → 401.
 	body = `{"current_password":"wrong-current-1234","new_password":"new-password-5678"}`
 	r, _ = http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/alice/password", body, tok))
+		ts.URL+"/_api/users/alice/password", body, tok))
 	r.Body.Close()
 	if r.StatusCode != 401 {
 		t.Errorf("self-wrong-current = %d, want 401", r.StatusCode)
@@ -253,7 +253,7 @@ func TestAuth_SetPasswordSelf_RequiresCurrent(t *testing.T) {
 	// Self with correct current_password → 200.
 	body = `{"current_password":"correct-password-1234","new_password":"new-password-5678"}`
 	r, _ = http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/alice/password", body, tok))
+		ts.URL+"/_api/users/alice/password", body, tok))
 	r.Body.Close()
 	if r.StatusCode != 200 {
 		t.Errorf("self-correct = %d, want 200", r.StatusCode)
@@ -272,7 +272,7 @@ func TestAuth_SetPasswordAdminForce(t *testing.T) {
 
 	body := `{"new_password":"force-set-1234"}`
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/bob/password", body, adminTok))
+		ts.URL+"/_api/users/bob/password", body, adminTok))
 	r.Body.Close()
 	if r.StatusCode != 200 {
 		t.Errorf("admin force-set = %d, want 200", r.StatusCode)
@@ -289,7 +289,7 @@ func TestAuth_SetPasswordWeakRejected(t *testing.T) {
 
 	body := `{"new_password":"short"}`
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/bob/password", body, adminTok))
+		ts.URL+"/_api/users/bob/password", body, adminTok))
 	r.Body.Close()
 	if r.StatusCode != 400 {
 		t.Errorf("weak password = %d, want 400", r.StatusCode)
@@ -303,7 +303,7 @@ func TestAuth_PATBypassesCSRF(t *testing.T) {
 	// State-changing request authenticated by Bearer skips CSRF.
 	body := `{"label":"laptop"}`
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/users/alice/tokens", body, tok))
+		ts.URL+"/_api/users/alice/tokens", body, tok))
 	r.Body.Close()
 	if r.StatusCode != 201 {
 		t.Errorf("bearer-authed POST = %d, want 201 (CSRF should be skipped)", r.StatusCode)
@@ -317,7 +317,7 @@ func TestAuth_PATBypassesCSRF(t *testing.T) {
 	c := loginClient(t)
 	loginAs(t, ts.URL, c, "alice", "session-password-1234").Body.Close()
 	req, _ := http.NewRequest("POST",
-		ts.URL+"/api/users/alice/tokens",
+		ts.URL+"/_api/users/alice/tokens",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	r2, _ := c.Do(req)
@@ -337,7 +337,7 @@ func TestAuth_PATBypassesCSRF(t *testing.T) {
 		t.Fatal("csrf cookie missing from jar")
 	}
 	req2, _ := http.NewRequest("POST",
-		ts.URL+"/api/users/alice/tokens",
+		ts.URL+"/_api/users/alice/tokens",
 		strings.NewReader(`{"label":"second"}`))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set(auth.CSRFHeaderName, csrf)
@@ -365,7 +365,7 @@ func TestAuth_LogoutWithStaleCookieClears(t *testing.T) {
 	}
 
 	// Logout still returns 200 + clears cookies.
-	req, _ := http.NewRequest("POST", ts.URL+"/api/auth/logout", nil)
+	req, _ := http.NewRequest("POST", ts.URL+"/_api/auth/logout", nil)
 	r, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -392,14 +392,14 @@ func TestAuth_RevokeSession(t *testing.T) {
 
 	// Revoke via the per-user surface (token auth, sidesteps CSRF).
 	r, _ := http.DefaultClient.Do(authReq(t, "DELETE",
-		ts.URL+"/api/users/alice/sessions/"+id, "", tok))
+		ts.URL+"/_api/users/alice/sessions/"+id, "", tok))
 	r.Body.Close()
 	if r.StatusCode != 200 {
 		t.Errorf("revoke-session = %d, want 200", r.StatusCode)
 	}
 
 	// Cookie no longer authenticates.
-	r2, _ := c.Get(ts.URL + "/api/auth/me")
+	r2, _ := c.Get(ts.URL + "/_api/auth/me")
 	r2.Body.Close()
 	if r2.StatusCode != 401 {
 		t.Errorf("post-revoke /me = %d, want 401", r2.StatusCode)

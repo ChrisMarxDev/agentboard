@@ -1,31 +1,24 @@
 package mcp
 
-// Cut 5 — MCP surface for the git substrate. Spec §6.
+// MCP surface for the AgentBoard substrate. Six tools. The whole
+// surface is git operations + notifications; no virtual types, no
+// custom CRUD verbs.
 //
-// The 10-tool batch-CRUD surface (read/list/search/write/patch/
-// append/delete/request_file_upload) is retired. Agents who can shell
-// out to `git` use it directly — clone, branch, commit, push. Agents
-// whose runtime can't ship `git` use the workspaces/pull/propose/
-// resolve_conflict triplet to do the same things server-side. Events
-// flow through subscribe. Grab + fire_event carry over unchanged.
-//
-// Seven tools:
-//
-//   agentboard_workspaces            — list workspaces visible to this token
+//   agentboard_workspaces            — list workspaces visible to this caller
 //   agentboard_pull(ws, ref?)        — return the working tree as a bundle
-//   agentboard_propose(ws, base,
-//                      branch, files,
+//   agentboard_propose(ws, base?,
+//                      branch?, files,
 //                      message)      — server-side branch + commit + push
 //   agentboard_resolve_conflict(
 //       proposal, file, resolution)  — submit a resolved file body
-//   agentboard_subscribe(events)     — open an SSE-shaped event stream
-//   agentboard_grab(picks)           — cross-page materializer (carryover)
-//   agentboard_fire_event(event, …)  — webhook bus (carryover)
+//   agentboard_subscribe(events)     — events newer than a cursor
+//   agentboard_fire_event(event, …)  — emit on the webhook bus
 //
-// Single-leaf reads / writes don't have dedicated tools — agents with
-// `git` use `git show <ref>:<path>` / a branch + commit + push; agents
-// without `git` either `pull` and pick a path out of the bundle, or
-// `propose` a one-file change.
+// Agents that can shell out use `git` directly; those that can't
+// (some sandboxed runtimes) use pull / propose / resolve_conflict.
+// The agentboard_grab materializer is gone with the substrate pivot
+// — it walked a v0.13 page index that doesn't exist anymore; agents
+// pull whatever paths they need via agentboard_pull.
 
 import (
 	"encoding/json"
@@ -111,22 +104,6 @@ func (s *Server) toolDefinitions() []ToolDef {
 			},
 		},
 		{
-			Name:        "agentboard_grab",
-			Description: "Cross-leaf materializer. Takes a list of `picks` (paths or globs) and returns one assembled text blob — frontmatter + body of each leaf concatenated with delimiters. The single canonical tool for 'gather the context I need to think about X.' Works against the workspace's working tree.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace id."},
-					"picks": map[string]any{
-						"type":     "array",
-						"items":    map[string]string{"type": "string"},
-						"minItems": 1,
-					},
-				},
-				"required": []string{"picks"},
-			},
-		},
-		{
 			Name:        "agentboard_fire_event",
 			Description: "Emit a user-defined event on the webhook bus. Any subscriber registered for this event name receives it. Useful for 'I finished step X; downstream agents, you can start now.' Management of subscribers (subscribe / list) lives on REST + CLI; this tool only dispatches.",
 			InputSchema: map[string]any{
@@ -171,8 +148,6 @@ func (s *Server) handleToolCall(r *http.Request, raw json.RawMessage) (any, *RPC
 		return s.toolResolveConflict(r, args)
 	case "agentboard_subscribe":
 		return s.toolSubscribe(r, args)
-	case "agentboard_grab":
-		return s.toolGrab(r, args)
 	case "agentboard_fire_event":
 		return s.toolFireEvent(r, args)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/invitations"
 )
 
-// Public GET /api/invitations/{id} returns a restricted view and 404s
+// Public GET /_api/invitations/{id} returns a restricted view and 404s
 // on any unusable state (redeemed / expired / revoked / not found),
 // to prevent probing for valid IDs.
 
@@ -28,7 +28,7 @@ func TestInvitation_PublicView(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := bareClient().Get(ts.URL + "/api/invitations/" + inv.ID)
+	r, err := bareClient().Get(ts.URL + "/_api/invitations/" + inv.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestInvitation_PublicView(t *testing.T) {
 	if err := srv.Invitations.Revoke(inv.ID); err != nil {
 		t.Fatal(err)
 	}
-	r2, _ := bareClient().Get(ts.URL + "/api/invitations/" + inv.ID)
+	r2, _ := bareClient().Get(ts.URL + "/_api/invitations/" + inv.ID)
 	if r2.StatusCode != 404 {
 		t.Errorf("revoked invite public GET = %d, want 404", r2.StatusCode)
 	}
@@ -75,7 +75,7 @@ func TestInvitation_RedeemHappyPath(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"username": "dana"})
 	r, err := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestInvitation_RedeemHappyPath(t *testing.T) {
 	}
 
 	// The returned token works.
-	req, _ := http.NewRequest("GET", ts.URL+"/api/me", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/_api/me", nil)
 	req.Header.Set("Authorization", "Bearer "+resp.Token)
 	meResp, err := bareClient().Do(req)
 	if err != nil {
@@ -113,13 +113,13 @@ func TestInvitation_RedeemHappyPath(t *testing.T) {
 	}
 	defer meResp.Body.Close()
 	if meResp.StatusCode != 200 {
-		t.Errorf("/api/me with fresh token = %d", meResp.StatusCode)
+		t.Errorf("/_api/me with fresh token = %d", meResp.StatusCode)
 	}
 
 	// Second redeem fails with 410 Gone.
 	body2, _ := json.Marshal(map[string]string{"username": "eve"})
 	r2, _ := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body2))
 	if r2.StatusCode != 410 {
 		t.Errorf("second redeem = %d, want 410", r2.StatusCode)
@@ -143,7 +143,7 @@ func TestInvitation_UsernameTakenDoesNotConsume(t *testing.T) {
 
 	body, _ := json.Marshal(map[string]string{"username": "dana"})
 	r, _ := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body))
 	if r.StatusCode != 409 {
 		t.Errorf("taken redeem = %d, want 409", r.StatusCode)
@@ -157,7 +157,7 @@ func TestInvitation_UsernameTakenDoesNotConsume(t *testing.T) {
 	}
 	body2, _ := json.Marshal(map[string]string{"username": "elena"})
 	r2, _ := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body2))
 	if r2.StatusCode != 201 {
 		t.Errorf("retry with different name = %d, want 201", r2.StatusCode)
@@ -175,7 +175,7 @@ func TestInvitation_ExpiredRedeem(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	body, _ := json.Marshal(map[string]string{"username": "dana"})
 	r, _ := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body))
 	if r.StatusCode != 410 {
 		t.Errorf("expired redeem = %d, want 410", r.StatusCode)
@@ -190,7 +190,7 @@ func TestInvitation_AdminCreateListRevoke(t *testing.T) {
 	// Create.
 	body := `{"role":"member","label":"cx team","expires_in_days":14}`
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/invitations", body, adminToken))
+		ts.URL+"/_api/admin/invitations", body, adminToken))
 	if r.StatusCode != 201 {
 		t.Fatalf("create invite = %d", r.StatusCode)
 	}
@@ -207,7 +207,7 @@ func TestInvitation_AdminCreateListRevoke(t *testing.T) {
 
 	// List.
 	r2, _ := http.DefaultClient.Do(authReq(t, "GET",
-		ts.URL+"/api/admin/invitations", "", adminToken))
+		ts.URL+"/_api/admin/invitations", "", adminToken))
 	var list struct {
 		Invitations []struct {
 			ID     string `json:"id"`
@@ -222,7 +222,7 @@ func TestInvitation_AdminCreateListRevoke(t *testing.T) {
 
 	// Revoke.
 	r3, _ := http.DefaultClient.Do(authReq(t, "DELETE",
-		ts.URL+"/api/admin/invitations/"+created.ID, "", adminToken))
+		ts.URL+"/_api/admin/invitations/"+created.ID, "", adminToken))
 	if r3.StatusCode != 200 {
 		t.Errorf("revoke = %d", r3.StatusCode)
 	}
@@ -233,7 +233,7 @@ func TestInvitation_AdminBadRole(t *testing.T) {
 	srv, ts := newTestServer(t)
 	adminToken := seedAdmin(t, srv)
 	r, _ := http.DefaultClient.Do(authReq(t, "POST",
-		ts.URL+"/api/admin/invitations", `{"role":"agent"}`, adminToken))
+		ts.URL+"/_api/admin/invitations", `{"role":"agent"}`, adminToken))
 	if r.StatusCode != 400 {
 		t.Errorf("agent role = %d, want 400", r.StatusCode)
 	}
@@ -257,7 +257,7 @@ func TestInvitation_RedeemWithPassword(t *testing.T) {
 		"password": "redeem-password-1234",
 	})
 	r, err := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -299,7 +299,7 @@ func TestInvitation_RedeemRejectsWeakPassword(t *testing.T) {
 		"password": "short", // < MinPasswordLen
 	})
 	r, err := bareClient().Post(
-		ts.URL+"/api/invitations/"+inv.ID+"/redeem",
+		ts.URL+"/_api/invitations/"+inv.ID+"/redeem",
 		"application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -311,11 +311,12 @@ func TestInvitation_RedeemRejectsWeakPassword(t *testing.T) {
 }
 
 func TestInvitation_NonAdminCannotCreate(t *testing.T) {
-	_, ts := newTestServer(t)
-	// default client is member-kind — 403 on admin subtree.
-	r, _ := http.DefaultClient.Post(
-		ts.URL+"/api/admin/invitations",
-		"application/json", strings.NewReader(`{"role":"member"}`))
+	srv, ts := newTestServer(t)
+	// newTestServer seeds an admin; provision a separate member and
+	// hit the admin subtree as them — must come back 403.
+	memberTok := seedAgent(t, srv, "member-alice")
+	r, _ := http.DefaultClient.Do(authReq(t, "POST",
+		ts.URL+"/_api/admin/invitations", `{"role":"member"}`, memberTok))
 	if r.StatusCode != 403 {
 		t.Errorf("member on admin = %d, want 403", r.StatusCode)
 	}

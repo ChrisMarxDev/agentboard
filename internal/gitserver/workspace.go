@@ -239,15 +239,31 @@ func (s *Store) writeFile(ctx context.Context, workspaceID, path, body, actor, c
 		}
 	}
 
-	// Clone, write, commit, push.
+	// Clone, write, commit, push. When the bare repo has no commits
+	// yet, `clone --branch main` fails — fall back to a plain clone
+	// (which still works on an empty bare; the resulting workdir has
+	// no HEAD until we make the first commit).
 	tmp, err := os.MkdirTemp("", "ab-ensure-*")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(tmp)
 
-	if out, err := runGit("", "clone", "--branch", ws.DefaultBranch, bare, tmp); err != nil {
-		return fmt.Errorf("clone bare: %w (output: %s)", err, out)
+	hasCommits, _ := bareHasCommits(bare)
+	if hasCommits {
+		if out, err := runGit("", "clone", "--branch", ws.DefaultBranch, bare, tmp); err != nil {
+			return fmt.Errorf("clone bare: %w (output: %s)", err, out)
+		}
+	} else {
+		if out, err := runGit("", "clone", bare, tmp); err != nil {
+			return fmt.Errorf("clone empty bare: %w (output: %s)", err, out)
+		}
+		// Force the workdir's HEAD onto the default branch so the
+		// commit we're about to make lands there rather than on the
+		// "master" git might have defaulted to.
+		if out, err := runGitIn(tmp, "checkout", "-B", ws.DefaultBranch); err != nil {
+			return fmt.Errorf("git checkout -B %s: %w (output: %s)", ws.DefaultBranch, err, out)
+		}
 	}
 	for _, kv := range [][2]string{
 		{"user.email", actor + "@agentboard.local"},

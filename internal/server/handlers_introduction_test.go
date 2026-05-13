@@ -12,7 +12,7 @@ import (
 // markdown primer, because that's the artifact most callers want.
 func TestIntroduction_DefaultIsMarkdown(t *testing.T) {
 	_, ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/introduction", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/_api/introduction", nil)
 	req.Header.Del("Authorization")
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -31,7 +31,7 @@ func TestIntroduction_DefaultIsMarkdown(t *testing.T) {
 	if !strings.Contains(s, "# AgentBoard") {
 		t.Errorf("markdown missing top-level heading")
 	}
-	if !strings.Contains(s, "/api/") {
+	if !strings.Contains(s, "/_api/") && !strings.Contains(s, "/api/") {
 		t.Errorf("markdown missing API examples")
 	}
 }
@@ -39,7 +39,7 @@ func TestIntroduction_DefaultIsMarkdown(t *testing.T) {
 // TestIntroduction_JSONOnRequest — Accept: application/json → structured.
 func TestIntroduction_JSONOnRequest(t *testing.T) {
 	_, ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/introduction", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/_api/introduction", nil)
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -61,7 +61,7 @@ func TestIntroduction_JSONOnRequest(t *testing.T) {
 // TestIntroduction_Markdown — Accept: text/markdown returns prose.
 func TestIntroduction_Markdown(t *testing.T) {
 	_, ts := newTestServer(t)
-	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/introduction", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/_api/introduction", nil)
 	req.Header.Set("Accept", "text/markdown")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
