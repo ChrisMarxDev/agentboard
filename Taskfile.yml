@@ -96,6 +96,17 @@ tasks:
     cmds:
       - ./scripts/integration-test.sh
 
+  test:dogfood:
+    desc: |
+      Self-test the bootstrap loop (CORE_GUIDELINES §15). Spins up an
+      ephemeral AgentBoard, hands a clean (--bare) Claude session the
+      one-sentence bootstrap prompt, and verifies the agent can find
+      its way from the URL → README → useful work. Captures everything
+      into test/dogfood/results/<timestamp>/. Costs real Claude budget.
+    deps: [build]
+    cmds:
+      - ./test/dogfood/run.sh
+
   lint:
     desc: Run all linters (Go + frontend)
     deps: [lint:go, lint:frontend]

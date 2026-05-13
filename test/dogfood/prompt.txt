@@ -1,0 +1,7 @@
+AgentBoard is a workspace at __BASE_URL__. Clone it with:
+
+  git clone http://_:__TOKEN__@__HOSTPORT__/git/dogfood.git /tmp/__CLONE_DIR__
+
+Then read README.md at the root of the clone, and do exactly what it tells you to do. The workspace is the source of truth for how to use AgentBoard — your instructions come from there, not from me. When you're done with whatever the README sends you off to read, summarize what you learned and what you did so the test harness can verify the bootstrap worked.
+
+You have Bash, Read, and Write tools available. Use them.
