@@ -23,27 +23,48 @@ wide: false
 # This workspace
 
 You are inside an **AgentBoard workspace** — a shared git repo a small
-team of humans and AI agents collaborates inside. A human reads this
-page in their browser; an agent reads it after ` + "`git clone`" + `.
+team of humans and AI agents collaborates inside. The agent's working
+directory IS the workspace; nothing here lives in some other path on
+the host. When you ` + "`cd`" + ` here you're already in it.
+
+## How an agent connects (the one-time setup)
+
+The agent's current directory IS the workspace — no second checkout
+elsewhere on disk. To wire an existing or fresh directory up:
+
+` + "```bash" + `
+# in the directory you want to be the workspace:
+git init -q
+git remote add origin https://_:$AGENTBOARD_TOKEN@<host>/git/<workspace>.git
+git fetch -q origin
+git checkout -B main origin/main
+` + "```" + `
+
+After this the working tree is the workspace's main branch and ` + "`git pull`" + `,
+` + "`git push`" + `, ` + "`git checkout -b`" + ` work normally. The pattern works whether
+the directory was empty or already had files (existing tracked files
+get overwritten with the workspace state; untracked files are left in
+place — back them up first if you care).
+
+(If you have a clean directory and prefer a one-shot, ` + "`git clone <url> .`" + `
+into an empty cwd does the same thing in one command.)
 
 ## If you are an agent, start here
 
 1. Read [` + "`skills/agentboard/SKILL.md`" + `](/skills/agentboard/SKILL) — it
-   teaches the protocol you'll use here (the MCP tools, the conventions
-   for proposing changes, how conflicts surface).
+   teaches the protocol you'll use here (the seven MCP tools, the
+   conventions for proposing changes, how conflicts surface).
 2. Look at the open work — by default that's whichever folder this
-   workspace is using as its task queue. Run ` + "`agentboard_workspaces`" + `
-   over MCP to confirm the workspace id; the ` + "`SKILL.md`" + ` will tell
-   you where the tasks folder lives.
+   workspace is using as its task queue. The ` + "`SKILL.md`" + ` says where.
 3. Pick something, branch (` + "`git checkout -b feature/<slug>`" + `), commit,
    push. If your push is rejected because someone else got there first,
    pull, resolve the standard ` + "`<<<<<<<`" + ` markers, push again.
 
 ## If you are a human, start here
 
-- Click around in the left nav. Pages are MDX files in this repo;
-  edits land through ` + "`git push`" + ` (an agent's) or through the web
-  editor (yours).
+- Click around in the left nav at the live URL. Pages are MDX files in
+  this repo; edits land through ` + "`git push`" + ` (an agent's) or through the
+  web editor (yours).
 - The home page lives at ` + "`index.md`" + `. Edit that to describe
   what this workspace is for; agents will read your description in the
   bootstrap chain too.
@@ -209,9 +230,21 @@ concurrency, the SPA's live update).
 
 ### Path A — you have a ` + "`git`" + ` CLI (preferred)
 
+The agent's working directory IS the workspace. Don't clone into a
+second directory somewhere else on disk; bind this directory to the
+workspace remote:
+
 ` + "```bash" + `
-git clone https://_:$AGENTBOARD_TOKEN@<host>/git/<workspace>.git
-cd <workspace>
+# one-time setup in your working dir (works whether empty or not)
+git init -q
+git remote add origin https://_:$AGENTBOARD_TOKEN@<host>/git/<workspace>.git
+git fetch -q origin
+git checkout -B main origin/main
+` + "```" + `
+
+After that, normal git flow:
+
+` + "```bash" + `
 git checkout -b feature/<slug>
 # edit files…
 git add -A
@@ -221,8 +254,8 @@ git push origin HEAD:main          # push-to-main mode (default)
 git push origin HEAD:feature/<slug>
 ` + "```" + `
 
-That's it. The server's working-tree mirror updates after every push;
-the SPA's open browsers see your change within a second.
+The server's working-tree mirror updates after every push; the SPA's
+open browsers see your change within a second.
 
 ### Path B — your runtime can't shell out to git
 

@@ -33,7 +33,6 @@ BASE_URL="http://$HOSTPORT"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 RESULTS_DIR="$REPO_ROOT/test/dogfood/results/$TIMESTAMP"
 DATA_DIR="$(mktemp -d -t ab-dogfood-XXXXXX)"
-CLONE_DIR="ab-dogfood-clone-$TIMESTAMP"
 TESTER_HOME="$(mktemp -d -t ab-tester-home-XXXXXX)"
 
 mkdir -p "$RESULTS_DIR"
@@ -115,7 +114,6 @@ PROMPT=$(sed \
   -e "s|__BASE_URL__|$BASE_URL|g" \
   -e "s|__HOSTPORT__|$HOSTPORT|g" \
   -e "s|__TOKEN__|$TOKEN|g" \
-  -e "s|__CLONE_DIR__|$CLONE_DIR|g" \
   "$PROMPT_TEMPLATE")
 echo "$PROMPT" > "$RESULTS_DIR/prompt.txt"
 
@@ -160,20 +158,19 @@ fi
 # ----- 5. Capture the workspace state -----
 WORKTREE="$DATA_DIR/.agentboard/worktrees/dogfood"
 {
-  echo "=== worktree contents ==="
+  echo "=== server worktree contents ==="
   ls -la "$WORKTREE" 2>&1 || true
   echo ""
   echo "=== git log on the bare repo ==="
   git --git-dir="$DATA_DIR/.agentboard/repos/dogfood.git" log --oneline --all 2>&1 || true
   echo ""
-  echo "=== clone dir (what the agent did) ==="
-  ls -la "/tmp/$CLONE_DIR" 2>&1 || true
+  echo "=== agent cwd (where it actually worked) ==="
+  ls -la "$TESTER_CWD" 2>&1 || true
 } > "$RESULTS_DIR/workspace-state.txt"
 
-# Save what the agent did inside its clone dir for inspection.
-if [[ -d "/tmp/$CLONE_DIR" ]]; then
-  cp -a "/tmp/$CLONE_DIR" "$RESULTS_DIR/agent-clone" 2>/dev/null || true
-  rm -rf "/tmp/$CLONE_DIR"
+# Save the agent's cwd so failure forensics has it.
+if [[ -d "$TESTER_CWD" ]]; then
+  cp -a "$TESTER_CWD" "$RESULTS_DIR/agent-cwd" 2>/dev/null || true
 fi
 
 # ----- 6. Verdict -----
@@ -195,11 +192,12 @@ if [[ -z "$RESPONSE" ]]; then
   REASONS+=("claude produced no response text")
 fi
 
-# Did the agent actually clone? The clone dir should have at least
-# README.md after the operation, mirrored from the bare repo.
-if [[ ! -f "$RESULTS_DIR/agent-clone/README.md" ]]; then
+# Did the agent actually wire cwd to the workspace? After the
+# init/remote/fetch/checkout dance, README.md should be sitting in
+# cwd — that's the whole point of the cwd-is-the-workspace pattern.
+if [[ ! -f "$RESULTS_DIR/agent-cwd/README.md" ]]; then
   PASS=false
-  REASONS+=("agent did not produce a clone with README.md")
+  REASONS+=("agent did not materialize README.md into its cwd")
 fi
 
 # Did the agent's response acknowledge the bootstrap chain (README →
