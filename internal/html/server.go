@@ -325,9 +325,17 @@ func (s *Server) renderHTML(w http.ResponseWriter, r *http.Request, urlPath stri
 }
 
 func (s *Server) renderJSON(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte) {
-	// Default JSON view: pretty-printed inside a <pre>. Typed views
-	// (Taskboard etc.) override this in a later cut by serving an
-	// .html companion alongside the .json.
+	// Typed view: if the JSON's shape matches a taskboard, render it
+	// as a kanban board. Otherwise fall back to pretty-printed JSON.
+	if tb, ok := parseTaskboard(raw); ok {
+		title := tb.Title
+		if title == "" {
+			title = pathLabel(urlPath)
+		}
+		s.renderShell(w, r, urlPath, title, renderTaskboardBody(tb), nil, true)
+		return
+	}
+
 	pretty := indentJSON(raw)
 	body := fmt.Sprintf(`<h1>%s</h1><pre><code>%s</code></pre>`,
 		template.HTMLEscapeString(pathLabel(urlPath)),

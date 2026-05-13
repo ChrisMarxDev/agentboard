@@ -183,7 +183,7 @@ The HTML catch-all serves files out of the working tree by extension:
 
 - ` + "`.md`" + ` → rendered as HTML via goldmark, wrapped in the dashboard shell.
 - ` + "`.html`" + ` → served as-is inside a sandboxed iframe (no parent-page DOM access).
-- ` + "`.json`" + ` → pretty-printed JSON. Future cuts will let typed views (` + "`Taskboard`" + `, ` + "`Counter`" + `, etc.) read these directly.
+- ` + "`.json`" + ` → either a **typed view** (e.g. Taskboard — a JSON file with ` + "`columns`" + ` + ` + "`cards`" + ` arrays renders as a kanban board) or pretty-printed JSON.
 - ` + "`.txt`" + ` / ` + "`.ndjson`" + ` → preformatted plain text.
 - Directories → GitHub-style listings (filename + size).
 - Anything else → ` + "`text/plain`" + ` download.

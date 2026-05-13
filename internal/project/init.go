@@ -312,6 +312,46 @@ Edit the file, commit, push. That's it.
 ` + "`agentboard_pull`" + ` the file, change the body locally, ` + "`agentboard_propose`" + `
 the new body. Whole-file writes only; there is no field-level patch.
 
+## Build a taskboard
+
+A JSON file whose top-level shape has ` + "`columns`" + ` and ` + "`cards`" + ` arrays
+renders as a kanban board (the **Taskboard typed view**) instead of as
+pretty-printed JSON. Drop it anywhere — convention is ` + "`taskboards/`" + `
+but the path doesn't matter.
+
+### git
+` + "```bash" + `
+mkdir -p taskboards
+cat > taskboards/sprint.json <<'EOF'
+{
+  "title": "Sprint 14",
+  "columns": [
+    {"id": "todo",  "label": "To do"},
+    {"id": "doing", "label": "In progress"},
+    {"id": "done",  "label": "Done"}
+  ],
+  "cards": [
+    {"id": "c1", "title": "Ship Taskboard", "column": "doing",
+     "labels": ["substrate"], "assignees": ["alice"],
+     "priority": 1, "order": 1.0},
+    {"id": "c2", "title": "Add OAuth", "column": "done",
+     "labels": ["mcp"], "priority": 2}
+  ]
+}
+EOF
+git add taskboards/sprint.json
+git commit -m "Add sprint 14 board"
+git push
+` + "```" + `
+
+To move a card, edit its ` + "`column`" + ` field and push. To add a card,
+append to the ` + "`cards`" + ` array. Whole-file rewrites are the unit —
+there is no field-level patch RPC.
+
+The dashboard renders ` + "`/taskboards/sprint.json`" + ` as a kanban board.
+The JSON file remains the source of truth; cloning the workspace
+gives you the bytes you can edit offline.
+
 ## Host a binary
 
 Commit binary files directly into the workspace alongside the doc
