@@ -63,6 +63,13 @@ type Server struct {
 	Router               chi.Router
 	SkillFile            string
 	AllowComponentUpload bool
+
+	// GitServer mounts at /git/<workspace>.git for the smart-HTTPS
+	// protocol. Nil when the operator hasn't wired the git substrate
+	// yet (during the v0.13 → git pivot). When non-nil it lives inside
+	// the auth-gated chain — bearer tokens flow through git Basic auth
+	// (see AUTH.md + spec §7).
+	GitServer http.Handler
 }
 
 // ServerConfig holds configuration for creating a new server.
@@ -79,6 +86,11 @@ type ServerConfig struct {
 	DevProxy             string // Vite dev server URL for dev mode
 	AllowComponentUpload bool
 	MaxFileSizeMB        int
+
+	// GitServer is the git smart-HTTPS handler from internal/gitserver.
+	// Optional during the pivot; required once the new substrate is the
+	// live one.
+	GitServer http.Handler
 }
 
 // New creates a new AgentBoard server.
@@ -335,6 +347,7 @@ func New(cfg ServerConfig) *Server {
 		ViewPublic:           publicMatcher,
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
+		GitServer:            cfg.GitServer,
 	}
 
 	// MCP fallback for the upload-token flow when the agent doesn't
@@ -606,6 +619,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		r.Get("/skill", s.handleSkill)
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
+		// Git smart-HTTPS. Mounted under the same gated chain as /api so
+		// bearer tokens accepted there also unlock `git clone` / push.
+		// Spec §§2, 7.
+		if s.GitServer != nil {
+			r.Handle("/git/*", s.GitServer)
+		}
 	})
 
 	// Frontend — serve embedded SPA or proxy to dev server. Unknown

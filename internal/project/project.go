@@ -10,6 +10,12 @@ import (
 type Project struct {
 	Path   string
 	Config *Config
+	// ContentOverride, when non-empty, replaces the default
+	// `<Path>/content` location returned by ContentDir(). The
+	// git-substrate pivot sets this to the active workspace's
+	// working-tree mirror so page reads come straight off git
+	// without changing every call site.
+	ContentOverride string
 }
 
 // DefaultProjectDir returns the default project directory.
@@ -43,9 +49,14 @@ func (p *Project) DatabasePath() string {
 	return filepath.Join(p.DataDir(), "data.sqlite")
 }
 
-// ContentDir returns the content/ directory path — where MDX dashboards and
-// knowledge docs live.
+// ContentDir returns the directory the page manager and file watcher
+// read from. By default that's `<Path>/content`; when the git substrate
+// is active, serve.go sets `ContentOverride` to the working-tree mirror
+// path so reads transparently come off the git-managed tree.
 func (p *Project) ContentDir() string {
+	if p.ContentOverride != "" {
+		return p.ContentOverride
+	}
 	return filepath.Join(p.Path, "content")
 }
 
@@ -80,8 +91,14 @@ func (p *Project) MigrateLegacyPagesDir() (bool, error) {
 	return true, nil
 }
 
-// ComponentsDir returns the components/ directory path.
+// ComponentsDir returns the components/ directory path. When
+// ContentOverride is active (git substrate), components live inside
+// the worktree at `<worktree>/components/` so a `git push` of a new
+// `.jsx` file picks up the same way a page push does.
 func (p *Project) ComponentsDir() string {
+	if p.ContentOverride != "" {
+		return filepath.Join(p.ContentOverride, "components")
+	}
 	return filepath.Join(p.Path, "components")
 }
 

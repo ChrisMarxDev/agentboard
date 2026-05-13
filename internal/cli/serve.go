@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -16,6 +18,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/auth"
 	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
+	"github.com/christophermarx/agentboard/internal/gitserver"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -168,6 +171,58 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("")
 	}
 
+	// Git substrate (spec §§2–5). The Store owns the workspaces table
+	// + bare-repo + working-tree dirs under <project>/.agentboard/.
+	// Workspace registration happens *before* server.New so the
+	// post-receive hook (wired through Hooks.OnPush) can reach the
+	// SSE broadcaster the moment the substrate is mounted.
+	gitRoot := filepath.Join(proj.Path, ".agentboard")
+	gitStore, err := gitserver.NewStore(dbConn.Conn(), gitRoot)
+	if err != nil {
+		return fmt.Errorf("open git workspace store: %w", err)
+	}
+	// Seed the dogfood workspace from the existing content/ tree on
+	// first boot. Idempotent: if the workspace already exists the
+	// call returns the existing row.
+	contentSeed := filepath.Join(proj.Path, "content")
+	if _, err := gitStore.Create(context.Background(), "dogfood", "system", contentSeed); err != nil {
+		log.Printf("Warning: could not initialize dogfood workspace: %v", err)
+	}
+	// Materialize the working tree so the SPA has something to read
+	// on the first request even if no push has happened yet.
+	wtPath, err := gitStore.EnsureWorktree(context.Background(), "dogfood")
+	if err != nil {
+		log.Printf("Warning: could not materialize dogfood working tree: %v", err)
+	} else {
+		// Cut 3: SPA reads through the working-tree mirror. The page
+		// manager + file watcher + components watcher all key off
+		// proj.ContentDir(); routing them through the override turns
+		// every push into a live SPA update without touching their
+		// internals.
+		proj.ContentOverride = wtPath
+		log.Printf("Git: dogfood worktree → %s", wtPath)
+	}
+
+	// The push hook fires after every successful receive-pack. It
+	// re-checks out the default branch into the working-tree mirror
+	// and broadcasts a page-updated event so open browsers refresh.
+	var gitSrvForHooks *gitserver.Server
+	gitHooks := gitserver.Hooks{
+		OnPush: func(ctx context.Context, workspace string, refs []gitserver.PushedRef) {
+			if _, err := gitStore.SyncWorktree(ctx, workspace); err != nil {
+				log.Printf("Warning: working-tree sync after push to %s: %v", workspace, err)
+				return
+			}
+			log.Printf("Git: pushed %d ref(s) to workspace %s", len(refs), workspace)
+			_ = gitSrvForHooks // currently unused; kept for later cuts where the hook reaches into the server.
+		},
+	}
+	gitSrv, err := gitserver.New(gitStore, gitHooks)
+	if err != nil {
+		return fmt.Errorf("open git server: %w", err)
+	}
+	gitSrvForHooks = gitSrv
+
 	// Create server
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
@@ -182,6 +237,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		DevProxy:             "http://localhost:5173",
 		AllowComponentUpload: uploadEnabled,
 		MaxFileSizeMB:        proj.Config.MaxFileSizeMB,
+		GitServer:            gitSrv,
 	})
 
 	if uploadEnabled {

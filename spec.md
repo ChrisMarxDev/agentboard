@@ -109,8 +109,10 @@ SKILL, never in the bootstrap sentence.
 One Go process. Listens on a port. Three things share that port:
 
 1. **Smart-HTTPS git** at `/git/<workspace>.git` — `git clone`, `pull`,
-   `push`, branches, tags. Uses [`go-git`][go-git] for a pure-Go
-   implementation; no shell-out to a `git` binary.
+   `push`, branches, tags. Implementation is a thin CGI wrapper around
+   the system `git http-backend` for the initial cuts (battle-tested,
+   correct on day one); the Cut 8 polish swaps in [`go-git`][go-git]
+   for a fully pure-Go single-binary story.
 2. **Read API** at `/api/<path>` — the existing SPA-facing shape, unchanged.
    Returns the rendered page envelope, folder listing, stream tail, or binary
    file. Backed by the working-tree mirror, not by the bare repo or any
