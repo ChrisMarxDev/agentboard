@@ -216,9 +216,28 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("Git: dogfood worktree → %s", wtPath)
 	}
 
-	// The push hook fires after every successful receive-pack. It
-	// re-checks out the default branch into the working-tree mirror
-	// and broadcasts a page-updated event so open browsers refresh.
+	// GC any stale proposals (older than 24h, still pending). Cheap
+	// recovery for crashes mid-conflict-resolution; on a clean run
+	// this is a no-op.
+	_ = gitStore.GCStaleProposals(context.Background(), 24*time.Hour)
+
+	// Server-side pushes (Propose, ResolveConflict, EnsureFile,
+	// sync-seed) bypass the HTTP push hook, so they wire to this
+	// parallel callback to get the same after-push behavior: an
+	// event recorded for subscribe + (TODO) SSE for open browsers.
+	gitStore.OnInternalPush = func(ctx context.Context, workspace string) {
+		_, _ = gitStore.AppendEvent(ctx, gitserver.Event{
+			Workspace: workspace,
+			Type:      "push",
+			At:        time.Now().Unix(),
+		})
+	}
+
+	// The HTTP push hook fires after every successful receive-pack
+	// served over /git/<workspace>.git. It re-checks out the default
+	// branch into the working-tree mirror, records an event on the
+	// subscribe stream, and broadcasts a page-updated event so open
+	// browsers refresh.
 	var gitSrvForHooks *gitserver.Server
 	gitHooks := gitserver.Hooks{
 		OnPush: func(ctx context.Context, workspace string, refs []gitserver.PushedRef) {
@@ -226,6 +245,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 				log.Printf("Warning: working-tree sync after push to %s: %v", workspace, err)
 				return
 			}
+			refsJSON, _ := json.Marshal(map[string]any{"refs": refs})
+			_, _ = gitStore.AppendEvent(ctx, gitserver.Event{
+				Workspace: workspace,
+				Type:      "push",
+				At:        time.Now().Unix(),
+				Payload:   refsJSON,
+			})
 			log.Printf("Git: pushed %d ref(s) to workspace %s", len(refs), workspace)
 			_ = gitSrvForHooks // currently unused; kept for later cuts where the hook reaches into the server.
 		},
@@ -255,11 +281,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 			return nil, err
 		}
 		return &mcp.ProposeResult{
-			Success:   gsRes.Success,
-			Branch:    gsRes.Branch,
-			Commit:    gsRes.Commit,
-			Conflicts: gsRes.Conflicts,
-			Message:   gsRes.Message,
+			Success:    gsRes.Success,
+			Branch:     gsRes.Branch,
+			Commit:     gsRes.Commit,
+			ProposalID: gsRes.ProposalID,
+			Conflicts:  gsRes.Conflicts,
+			Message:    gsRes.Message,
 		}, nil
 	}
 
@@ -281,11 +308,46 @@ func runServe(cmd *cobra.Command, args []string) error {
 	})
 
 	// Plumb the git substrate into the MCP server. The agentboard_*
-	// tools that talk to git (workspaces, pull, propose) read these
-	// fields on first use; without them they return "git substrate
-	// not configured" errors.
+	// tools that talk to git (workspaces, pull, propose,
+	// resolve_conflict, subscribe) read these fields on first use;
+	// without them they return "git substrate not configured" errors.
 	srv.MCP.GitStore = gitStore
 	srv.MCP.ProposeFn = proposeFn
+	srv.MCP.ResolveConflictFn = func(ctx context.Context, proposalID, file, resolution string) (*mcp.ProposeResult, error) {
+		gsRes, err := gitStore.ResolveConflict(ctx, proposalID, file, resolution)
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.ProposeResult{
+			Success:    gsRes.Success,
+			Branch:     gsRes.Branch,
+			Commit:     gsRes.Commit,
+			ProposalID: gsRes.ProposalID,
+			Conflicts:  gsRes.Conflicts,
+			Message:    gsRes.Message,
+		}, nil
+	}
+	srv.MCP.SubscribeFn = func(ctx context.Context, workspace string, since int64, types []string, limit int) (*mcp.SubscribeResult, error) {
+		events, err := gitStore.ListEvents(ctx, workspace, since, types, limit)
+		if err != nil {
+			return nil, err
+		}
+		// If the caller passed since=0 and got nothing back, hand them
+		// the current cursor so they can skip historical events and
+		// start subscribing from "now."
+		cursor := since
+		out := make([]any, 0, len(events))
+		for _, e := range events {
+			out = append(out, e)
+			if e.ID > cursor {
+				cursor = e.ID
+			}
+		}
+		if cursor == 0 {
+			cursor, _ = gitStore.CurrentEventCursor(ctx)
+		}
+		return &mcp.SubscribeResult{Events: out, Cursor: cursor}, nil
+	}
 
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")

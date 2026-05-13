@@ -261,11 +261,12 @@ type ProposeFile struct {
 }
 
 type ProposeResult struct {
-	Success   bool     `json:"success"`
-	Branch    string   `json:"branch"`
-	Commit    string   `json:"commit,omitempty"`
-	Conflicts []string `json:"conflicts,omitempty"`
-	Message   string   `json:"message,omitempty"`
+	Success    bool     `json:"success"`
+	Branch     string   `json:"branch"`
+	Commit     string   `json:"commit,omitempty"`
+	ProposalID string   `json:"proposal_id,omitempty"`
+	Conflicts  []string `json:"conflicts,omitempty"`
+	Message    string   `json:"message,omitempty"`
 }
 
 // ProposeFunc is the server-side implementation of agentboard_propose.
@@ -275,29 +276,66 @@ type ProposeFunc func(ctx context.Context, req ProposeRequest) (*ProposeResult, 
 // ---------- agentboard_resolve_conflict ----------
 
 func (s *Server) toolResolveConflict(r *http.Request, args map[string]json.RawMessage) (any, *RPCError) {
-	// Stub: surface in v1 returns a guidance message. Cut 6 wires the
-	// real merge-resolution path off a `proposals` SQLite row.
-	_ = r
-	_ = args
-	return mcpJSON(map[string]any{
-		"success": false,
-		"message": "resolve_conflict is not wired yet (Cut 6). For now: pull, resolve markers locally, push.",
-	}), nil
+	if s.ResolveConflictFn == nil {
+		return nil, &RPCError{Code: -32000, Message: "resolve_conflict not wired (git substrate offline?)"}
+	}
+	proposal := getString(args, "proposal")
+	file := getString(args, "file")
+	resolution := getString(args, "resolution")
+	if proposal == "" || file == "" {
+		return nil, &RPCError{Code: -32602, Message: "proposal and file required"}
+	}
+	res, err := s.ResolveConflictFn(r.Context(), proposal, file, resolution)
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: "resolve_conflict: " + err.Error()}
+	}
+	return mcpJSON(res), nil
 }
+
+// ResolveConflictFunc is the server-side implementation of
+// agentboard_resolve_conflict. cli/serve.go wires it to
+// gitserver.Store.ResolveConflict.
+type ResolveConflictFunc func(ctx context.Context, proposalID, file, resolution string) (*ProposeResult, error)
 
 // ---------- agentboard_subscribe ----------
 
 func (s *Server) toolSubscribe(r *http.Request, args map[string]json.RawMessage) (any, *RPCError) {
-	// Stub: return a snapshot of recent activity (the SSE-shaped
-	// streaming version arrives once the MCP transport supports it
-	// in this codebase).
-	_ = r
-	_ = args
-	return mcpJSON(map[string]any{
-		"events":  []any{},
-		"message": "subscribe is not yet streaming; v1 returns an empty snapshot. Push events fire over /api/events SSE today.",
-	}), nil
+	if s.SubscribeFn == nil {
+		return nil, &RPCError{Code: -32000, Message: "subscribe not wired (git substrate offline?)"}
+	}
+	workspace := getString(args, "workspace")
+	events := getStringList(args, "events")
+	// `since` is an opaque cursor returned by a previous call. First
+	// call: pass 0 to start from the current tip (skip historical
+	// noise). Pass "" or omit to get a snapshot of the latest
+	// `limit` events.
+	var since int64
+	if raw, ok := args["since"]; ok && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &since)
+	}
+	limit := 50
+	if raw, ok := args["limit"]; ok && len(raw) > 0 {
+		_ = json.Unmarshal(raw, &limit)
+	}
+	res, err := s.SubscribeFn(r.Context(), workspace, since, events, limit)
+	if err != nil {
+		return nil, &RPCError{Code: -32000, Message: "subscribe: " + err.Error()}
+	}
+	return mcpJSON(res), nil
 }
+
+// SubscribeResult is the polling shape. `cursor` is the highest event
+// id in the response — callers persist it and pass it back as `since`
+// on the next call to get only newer events.
+type SubscribeResult struct {
+	Events []any `json:"events"`
+	Cursor int64 `json:"cursor"`
+}
+
+// SubscribeFunc is the server-side implementation of
+// agentboard_subscribe. cli/serve.go wires it to
+// gitserver.Store.ListEvents.
+type SubscribeFunc func(ctx context.Context, workspace string, since int64, types []string, limit int) (*SubscribeResult, error)
 
 // ---------- agentboard_grab ----------
 

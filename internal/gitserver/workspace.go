@@ -35,6 +35,13 @@ type Store struct {
 	db      *sql.DB
 	root    string // base dir containing repos/ and worktrees/
 	rootMux struct{}
+
+	// OnInternalPush is fired after any successful push that
+	// originated server-side (Propose, EnsureFile, sync-seed, etc.).
+	// HTTP pushes already fire their own Hooks.OnPush via the
+	// gitserver.Server; this is the parallel hook for in-process
+	// writes. Set by cli/serve.go after NewStore returns. Nil = no-op.
+	OnInternalPush func(ctx context.Context, workspace string)
 }
 
 // NewStore wires up the registry against an existing SQLite DB. The
@@ -63,8 +70,13 @@ CREATE TABLE IF NOT EXISTS git_workspaces (
     created_by      TEXT
 ) STRICT;
 `
-	_, err := s.db.Exec(schemaSQL)
-	return err
+	if _, err := s.db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	if err := s.proposalsMigrate(); err != nil {
+		return err
+	}
+	return s.eventsMigrate()
 }
 
 // BarePath returns the on-disk path for a workspace's bare repo.
@@ -267,6 +279,7 @@ func (s *Store) writeFile(ctx context.Context, workspaceID, path, body, actor, c
 	// Re-sync the working-tree mirror so the SPA sees the new file
 	// without waiting for the post-receive hook.
 	_, _ = s.SyncWorktree(ctx, workspaceID)
+	s.fireInternalPush(ctx, workspaceID)
 	return nil
 }
 

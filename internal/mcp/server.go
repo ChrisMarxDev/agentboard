@@ -31,6 +31,16 @@ type Server struct {
 	// "not configured" error.
 	ProposeFn ProposeFunc
 
+	// ResolveConflictFn — server-side impl of agentboard_resolve_conflict.
+	// Looks up the pending proposal, applies the file resolution,
+	// retries the push when the conflict set empties.
+	ResolveConflictFn ResolveConflictFunc
+
+	// SubscribeFn — server-side impl of agentboard_subscribe. Polling
+	// transport: returns events newer than `since` from the gitserver
+	// events table.
+	SubscribeFn SubscribeFunc
+
 	// PublicBaseURL is what agentboard_workspaces uses to build
 	// `clone_url`. Empty falls back to the inbound request's scheme +
 	// host.
