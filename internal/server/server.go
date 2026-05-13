@@ -821,21 +821,30 @@ func apiRoutes(s *Server) func(r chi.Router) {
 		// doesn't collide with the discovery endpoint.
 		r.Get("/introduction", s.handleIntroduction)
 
-		// ---------- Cut 7: unified /api/<path> namespace (spec §5) ----------
+		// ---------- /api/<path> read namespace (spec §5) ----------
 		//
-		// One namespace, one CRUD per leaf. Reserved /api/* prefixes
-		// above (admin, auth, content, data, files, components, etc.)
-		// win the chi dispatcher; this catch-all picks up anything
-		// else as a content-tier path. Mirrors handlers_unified.go's
-		// dispatcher logic — page tree first, data catalog second.
+		// Reads come off the working-tree mirror that the git push hook
+		// keeps in sync. Reserved /api/* prefixes above (admin, auth,
+		// content, data, files, components, etc.) win the chi dispatcher;
+		// this catch-all picks up anything else as a content-tier path.
+		//
+		// Writes used to land here too (legacy v0.13: PUT/PATCH/DELETE
+		// /api/<path>). They were retired in the git-substrate pivot
+		// (spec §§2, 5; CORE_GUIDELINES §15) because:
+		//
+		//   - The worktree mirror is read-only by design; a server-side
+		//     write here didn't commit, so the change vanished on the
+		//     next push (re-checkout overwrites the working tree from
+		//     the bare repo).
+		//   - The substrate is git. Writes go through `git push` for
+		//     agents that can shell out, or `agentboard_propose` over
+		//     MCP for runtimes that can't. Both routes land a real
+		//     commit with attribution and history; the legacy write
+		//     handlers landed neither.
 		//
 		// MUST stay last in this function so the more-specific routes
 		// register first.
 		r.Get("/*", s.handleUnifiedRead)
-		r.Put("/*", s.handleUnifiedWrite)
-		r.Patch("/*", s.handleUnifiedPatch)
-		r.Delete("/*", s.handleUnifiedDelete)
-		r.Post("/*", s.handleUnifiedAppend) // requires `:append` suffix on the path
 	}
 }
 

@@ -109,6 +109,36 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server) {
 	return srv, ts
 }
 
+// seedPage writes `body` (full MDX source including frontmatter) to
+// the page tree directly via the PageManager AND runs the same post-
+// write hooks the production write path does (PageMeta, Search,
+// PageRefs). The refs are particularly important — the view broker
+// builds its scope from them, so without recording refs an authed
+// view/open returns an empty `data` map even when the page has
+// frontmatter keys.
+//
+// Replaces the legacy pattern of seeding pages over HTTP PUT, which
+// doesn't exist anymore in the git-substrate world (writes go through
+// `git push`).
+func seedPage(t *testing.T, srv *Server, path, body string) {
+	t.Helper()
+	if err := srv.Pages.WritePageIfMatch(path, body, ""); err != nil {
+		t.Fatalf("seedPage(%s): %v", path, err)
+	}
+	normalized := store.NormalizePagePath(path)
+	if srv.PageMeta != nil {
+		_ = srv.PageMeta.Record(normalized, "test-agent")
+	}
+	if p := srv.Pages.GetPage(normalized); p != nil {
+		if srv.Search != nil {
+			_ = srv.Search.IndexPage(p.Path, p.Title, p.Source)
+		}
+		if srv.PageRefs != nil {
+			_ = srv.PageRefs.Record(normalized, store.ExtractRefs(p.Source, normalized))
+		}
+	}
+}
+
 // newAuthedTestServer wraps newTestServer for tests that named the
 // helper after its behaviour. The token argument is accepted for
 // source compatibility with the pre-rewrite signature.

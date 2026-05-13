@@ -17,21 +17,18 @@ import (
 // rendering page's own frontmatter (or folder collections), never
 // against another page's scalars.
 func TestView_AuthedOpen(t *testing.T) {
-	_, ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 
 	// Seed a page whose frontmatter holds the metric value its body
-	// references.
-	seed := bytes.NewBufferString(`---
+	// references. Direct PageManager write — the v0.13 REST PUT
+	// surface was retired in the git-substrate pivot.
+	seedPage(t, srv, "hello", `---
 counter_value: 42
 ---
 # Hello
 
 <Metric source="counter_value" />
 `)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/hello", seed)
-	wr.Header.Set("Content-Type", "text/markdown")
-	seedResp, _ := http.DefaultClient.Do(wr)
-	seedResp.Body.Close()
 
 	// view/open as admin.
 	body, _ := json.Marshal(map[string]any{"path": "hello"})
@@ -76,17 +73,10 @@ func TestView_SessionCookieAccepted(t *testing.T) {
 	seedUserWithPassword(t, srv, "alice", "view-cookie-pw-1234", auth.KindAdmin)
 
 	// Seed a page.
-	seed := bytes.NewBufferString(`# Hello
+	seedPage(t, srv, "hello", `# Hello
 
 <Metric source="counter.value" />
 `)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/hello", seed)
-	wr.Header.Set("Content-Type", "text/markdown")
-	sr, err := http.DefaultClient.Do(wr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sr.Body.Close()
 
 	// Log in via /api/auth/login with a cookie jar — same shape the
 	// SPA uses.
@@ -118,14 +108,10 @@ func TestView_SessionCookieAccepted(t *testing.T) {
 // TestView_AnonymousOnPrivateIs401 — an anonymous visitor hitting
 // view/open for a page that isn't in public.paths → 401.
 func TestView_AnonymousOnPrivateIs401(t *testing.T) {
-	_, ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 
 	// Seed a page.
-	seed := bytes.NewBufferString(`# Private`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/private", seed)
-	wr.Header.Set("Content-Type", "text/markdown")
-	seedResp, _ := http.DefaultClient.Do(wr)
-	seedResp.Body.Close()
+	seedPage(t, srv, "private", `# Private`)
 
 	// Bare client (no default token transport).
 	bare := &http.Client{}
@@ -145,20 +131,16 @@ func TestView_AnonymousOnPrivateIs401(t *testing.T) {
 // TestView_RedeemCookieFlow — mint share, redeem to cookie, bare
 // client with the cookie can view/open; cookie cannot read /api/data/*.
 func TestView_RedeemCookieFlow(t *testing.T) {
-	_, ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 
 	// Seed a page whose own frontmatter holds the metric value.
 	// (Per CORE_GUIDELINES §14, source bindings resolve against the
 	// rendering page's frontmatter, not a sibling singleton.)
-	seed := bytes.NewBufferString(`---
+	seedPage(t, srv, "shareme", `---
 share_demo: ok
 ---
 # Shareme
 <Metric source="share_demo" />`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/shareme", seed)
-	wr.Header.Set("Content-Type", "text/markdown")
-	seedResp, _ := http.DefaultClient.Do(wr)
-	seedResp.Body.Close()
 
 	// Mint a share.
 	mintBody, _ := json.Marshal(map[string]any{"path": "/shareme"})
@@ -229,30 +211,22 @@ share_demo: ok
 		t.Errorf("cookie direct read: status = %d, want 401", dresp.StatusCode)
 	}
 
-	// Cookie → write must 401.
-	wreq, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/shareme", strings.NewReader(`"x"`))
-	wresp, err := bare.Do(wreq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wresp.Body.Close()
-	if wresp.StatusCode != http.StatusUnauthorized {
-		t.Errorf("cookie write: status = %d, want 401", wresp.StatusCode)
-	}
+	// (The legacy "cookie → PUT /api/<path>" check used to live here.
+	// That endpoint was retired in the git-substrate pivot; cookie
+	// writes against the workspace go through git push and inherit
+	// repo-level ACLs, not the HTTP middleware. No replacement test
+	// needed here — the cookie-can't-read check above already proves
+	// the cookie's scope is bounded.)
 }
 
 // TestView_CookieReAnchors — a share cookie issued for /shareme cannot
 // request /otherpath; the broker re-anchors to the share's scoped path.
 func TestView_CookieReAnchors(t *testing.T) {
-	_, ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 
 	// Two pages.
 	for _, p := range []string{"shareme", "other"} {
-		seed := bytes.NewBufferString("# " + p)
-		wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/"+p, seed)
-		wr.Header.Set("Content-Type", "text/markdown")
-		wresp, _ := http.DefaultClient.Do(wr)
-		wresp.Body.Close()
+		seedPage(t, srv, p, "# "+p)
 	}
 
 	// Mint share for /shareme.
@@ -298,14 +272,10 @@ func TestView_CookieReAnchors(t *testing.T) {
 // TestView_RevokeCascadesToSession — revoking the share token deletes
 // the cookie session (FK cascade). The cookie then stops working.
 func TestView_RevokeCascadesToSession(t *testing.T) {
-	_, ts := newTestServer(t)
+	srv, ts := newTestServer(t)
 
 	// Seed + mint + redeem.
-	seed := bytes.NewBufferString(`# x`)
-	wr, _ := http.NewRequest(http.MethodPut, ts.URL+"/api/revoketest", seed)
-	wr.Header.Set("Content-Type", "text/markdown")
-	wresp, _ := http.DefaultClient.Do(wr)
-	wresp.Body.Close()
+	seedPage(t, srv, "revoketest", `# x`)
 
 	mintBody, _ := json.Marshal(map[string]any{"path": "/revoketest"})
 	mintReq, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/share", bytes.NewBuffer(mintBody))
