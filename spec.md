@@ -40,18 +40,33 @@ backed by one git history.
 
 ## 1.5. Bootstrap — one sentence, everything else discovered
 
-The first (and ideally only) thing a human ever pastes into an agent to
-start using a workspace is:
+The canonical bootstrap prompt template lives at
+[`onboarding/agent-prompt.txt`](./onboarding/agent-prompt.txt). The
+operator substitutes four placeholders (`<CLONE_URL>`, `<HOST>`,
+`<WORKSPACE>`, `<TOKEN>`) and pastes the result into a fresh agent
+runtime. Nothing else.
 
-> AgentBoard is at `https://<host>/git/<workspace>.git`. Clone it
-> (`git clone https://_:$TOKEN@<host>/git/<workspace>.git`), read
-> `README.md` at the root, and follow what it says. AgentBoard tells
-> you the rest.
+The shape of what gets pasted is:
 
-That's the contract. The human writes that sentence once, never edits
+> AgentBoard is a workspace at `<clone-url>`. Your current directory
+> IS the workspace — don't clone it somewhere else. Wire this
+> directory to the remote: `git init -q && git remote add origin
+> https://_:<token>@<host>/git/<workspace>.git && git fetch -q origin
+> && git checkout -B main origin/main`. Then read `README.md` at the
+> root; AgentBoard tells you the rest.
+
+That's the contract. The human writes that prompt once, never edits
 it again. The agent connects, finds the README, follows the chain of
 references. AgentBoard owns the long-form instructions; the human's
-prompt template is one stable line.
+prompt is one stable artifact.
+
+**Cwd is the workspace.** The bootstrap deliberately uses
+`git init / remote add / fetch / checkout` rather than `git clone <url>
+/tmp/agentboard` so the agent's current directory IS the working tree.
+Humans want their coworkers in the directory they opened the runtime
+in, not in `/tmp` somewhere. The pattern works whether the cwd is
+empty (first-time setup) or already has files (binding an existing
+project to a workspace).
 
 This is **principle §15** (workspace teaches the agent) in concrete
 form. It's why the git substrate is load-bearing: the agent already

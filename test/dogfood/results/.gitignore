@@ -1,2 +1,6 @@
+# Auto-generated dogfood-test runs land here as <timestamp>/ directories.
+# Ignore the runs; keep this .gitignore and operator-curated .md reports
+# (verification records of notable runs, like first-time-cowork passes).
 *
 !.gitignore
+!*.md
