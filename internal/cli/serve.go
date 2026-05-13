@@ -21,6 +21,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/gitserver"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/locks"
+	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/server"
 	storepkg "github.com/christophermarx/agentboard/internal/store"
@@ -188,6 +189,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if _, err := gitStore.Create(context.Background(), "dogfood", "system", contentSeed); err != nil {
 		log.Printf("Warning: could not initialize dogfood workspace: %v", err)
 	}
+	// Bootstrap README at workspace root (CORE_GUIDELINES §15, spec §1.5).
+	// Idempotent — no-op if README.md already exists in git history.
+	if err := gitStore.EnsureFile(
+		context.Background(),
+		"dogfood",
+		"README.md",
+		project.BootstrapReadmeMd,
+		"system",
+		"Add bootstrap README (CORE_GUIDELINES §15)",
+	); err != nil {
+		log.Printf("Warning: could not seed bootstrap README: %v", err)
+	}
 	// Materialize the working tree so the SPA has something to read
 	// on the first request even if no push has happened yet.
 	wtPath, err := gitStore.EnsureWorktree(context.Background(), "dogfood")
@@ -223,6 +236,33 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	gitSrvForHooks = gitSrv
 
+	// MCP-side propose adapter. The mcp package carries its own
+	// ProposeRequest/Result types so it doesn't have to import
+	// gitserver; this shim translates between the two.
+	proposeFn := func(ctx context.Context, req mcp.ProposeRequest) (*mcp.ProposeResult, error) {
+		gsReq := gitserver.ProposeRequest{
+			Workspace: req.Workspace,
+			Base:      req.Base,
+			Branch:    req.Branch,
+			Message:   req.Message,
+			Actor:     req.Actor,
+		}
+		for _, f := range req.Files {
+			gsReq.Files = append(gsReq.Files, gitserver.ProposeFile{Path: f.Path, Body: f.Body})
+		}
+		gsRes, err := gitStore.Propose(ctx, gsReq)
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.ProposeResult{
+			Success:   gsRes.Success,
+			Branch:    gsRes.Branch,
+			Commit:    gsRes.Commit,
+			Conflicts: gsRes.Conflicts,
+			Message:   gsRes.Message,
+		}, nil
+	}
+
 	// Create server
 	srv := server.New(server.ServerConfig{
 		Project:              proj,
@@ -239,6 +279,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		MaxFileSizeMB:        proj.Config.MaxFileSizeMB,
 		GitServer:            gitSrv,
 	})
+
+	// Plumb the git substrate into the MCP server. The agentboard_*
+	// tools that talk to git (workspaces, pull, propose) read these
+	// fields on first use; without them they return "git substrate
+	// not configured" errors.
+	srv.MCP.GitStore = gitStore
+	srv.MCP.ProposeFn = proposeFn
 
 	if uploadEnabled {
 		log.Printf("WARNING: component upload is enabled. Any caller of this server can inject JS that runs in every dashboard visitor's browser.")

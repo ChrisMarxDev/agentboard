@@ -6,6 +6,60 @@ import (
 	"path/filepath"
 )
 
+// BootstrapReadmeMd is exported so serve.go can also commit it into an
+// existing workspace that pre-dates the §15 convention.
+//
+// bootstrapReadmeMd is written at the root of every fresh workspace.
+// Per CORE_GUIDELINES §15 (The workspace teaches the agent) this is
+// the file the agent reads first; everything else is reachable from
+// the links here. Keep it short, link-heavy, durable.
+var BootstrapReadmeMd = bootstrapReadmeMd
+
+const bootstrapReadmeMd = `---
+title: README
+wide: false
+---
+
+# This workspace
+
+You are inside an **AgentBoard workspace** — a shared git repo a small
+team of humans and AI agents collaborates inside. A human reads this
+page in their browser; an agent reads it after ` + "`git clone`" + `.
+
+## If you are an agent, start here
+
+1. Read [` + "`skills/agentboard/SKILL.md`" + `](/skills/agentboard/SKILL) — it
+   teaches the protocol you'll use here (the MCP tools, the conventions
+   for proposing changes, how conflicts surface).
+2. Look at the open work — by default that's whichever folder this
+   workspace is using as its task queue. Run ` + "`agentboard_workspaces`" + `
+   over MCP to confirm the workspace id; the ` + "`SKILL.md`" + ` will tell
+   you where the tasks folder lives.
+3. Pick something, branch (` + "`git checkout -b feature/<slug>`" + `), commit,
+   push. If your push is rejected because someone else got there first,
+   pull, resolve the standard ` + "`<<<<<<<`" + ` markers, push again.
+
+## If you are a human, start here
+
+- Click around in the left nav. Pages are MDX files in this repo;
+  edits land through ` + "`git push`" + ` (an agent's) or through the web
+  editor (yours).
+- The home page lives at ` + "`index.md`" + `. Edit that to describe
+  what this workspace is for; agents will read your description in the
+  bootstrap chain too.
+
+## Convention
+
+- Every workspace ships with this README, a ` + "`skills/agentboard/SKILL.md`" + `,
+  and an empty home page. Add a ` + "`CONVENTIONS.md`" + ` (or a section
+  here) when your team has rules worth writing down.
+- Two structural rules from spec §7 + CORE_GUIDELINES §14: scalars live
+  inline on the page that displays them, and the only legitimate
+  cross-doc reference is a folder collection (` + "`<Kanban source=\"tasks/\" />`" + `).
+- Agents: read what's here before you write. The workspace usually
+  knows more than your prompt does.
+`
+
 const welcomeIndexMd = `# Welcome to AgentBoard
 
 A single-binary knowledge and dashboarding surface for agent teams. Agents write pages, skills, files, and data via REST or MCP; humans browse a live web UI. Dashboards are one content type — docs, skills, and runbooks live alongside them as equals in the same tree.
@@ -306,10 +360,18 @@ func InitProject(projectPath string) (*Project, error) {
 		return nil, fmt.Errorf("create project dir: %w", err)
 	}
 
-	// Write index.md
+	// Write index.md (the page the SPA shows at /)
 	indexPath := filepath.Join(projectPath, "index.md")
 	if err := os.WriteFile(indexPath, []byte(welcomeIndexMd), 0644); err != nil {
 		return nil, fmt.Errorf("write index.md: %w", err)
+	}
+
+	// Write README.md (the file agents read first per CORE_GUIDELINES §15
+	// and spec §1.5). Distinct from index.md: README is for the bootstrap
+	// chain, index.md is for the human's home page.
+	readmePath := filepath.Join(projectPath, "README.md")
+	if err := os.WriteFile(readmePath, []byte(bootstrapReadmeMd), 0644); err != nil {
+		return nil, fmt.Errorf("write README.md: %w", err)
 	}
 
 	// Write agentboard.yaml

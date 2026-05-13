@@ -277,12 +277,10 @@ func New(cfg ServerConfig) *Server {
 	grabber := &grab.Materializer{Pages: pageManager, FileStore: cfg.FileStore}
 
 	mcpServer := &mcp.Server{
-		FileStore: cfg.FileStore,
-		Pages:     pageManager,
-		Files:     fileManager,
-		Grab:      grabber,
-		Auth:      cfg.Auth,
-		// WebhookDispatcher is set below after the dispatcher is built.
+		Files: fileManager,
+		Grab:  grabber,
+		Auth:  cfg.Auth,
+		// GitStore, ProposeFn, WebhookDispatcher set below.
 	}
 	// AfterPageWrite — Cut 10. Run the same post-write hooks the REST
 	// handler runs whenever an MCP write lands a page. The file

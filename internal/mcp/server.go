@@ -8,8 +8,8 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/files"
+	"github.com/christophermarx/agentboard/internal/gitserver"
 	"github.com/christophermarx/agentboard/internal/grab"
-	"github.com/christophermarx/agentboard/internal/store"
 	"github.com/christophermarx/agentboard/internal/webhooks"
 )
 
@@ -21,43 +21,42 @@ import (
 // subscriptions) moved to REST + CLI per the AUTH.md MCP invariant
 // (admin operations never expose through MCP).
 type Server struct {
-	// FileStore + Pages cover the entire content tier. The 8 generic
-	// tools dispatch by path through these two — the dispatcher tries
-	// the page index first, then the data catalog.
-	FileStore *store.Store
-	Pages     *store.PageManager
+	// GitStore is the workspace registry — agentboard_workspaces and
+	// agentboard_pull read from it directly. Required for those tools
+	// to function; absent during early-pivot bring-up.
+	GitStore *gitserver.Store
 
-	// Files backs agentboard_request_file_upload (mints a presigned URL).
+	// ProposeFn is the server-side implementation of
+	// agentboard_propose. Wired by cli/serve.go. Nil → tool returns a
+	// "not configured" error.
+	ProposeFn ProposeFunc
+
+	// PublicBaseURL is what agentboard_workspaces uses to build
+	// `clone_url`. Empty falls back to the inbound request's scheme +
+	// host.
+	PublicBaseURL string
+
+	// Files backs agentboard_request_file_upload (deferred — file
+	// uploads happen via git LFS or just as ordinary blobs now).
+	// Kept on the struct for compatibility with serve.go wiring; not
+	// dispatched in the Cut-5 surface.
 	Files *files.Manager
 
 	// Grab is the cross-page materializer behind agentboard_grab.
 	Grab *grab.Materializer
 
-	// WebhookDispatcher backs agentboard_fire_event. Admin
-	// (subscribe / revoke / list) operations live on REST under
-	// /api/admin/webhooks/* and the CLI — never on MCP.
+	// WebhookDispatcher backs agentboard_fire_event.
 	WebhookDispatcher *webhooks.Dispatcher
 
-	// Auth lets every tool resolve the bearer token to the actor's
-	// username for write attribution. Without this every MCP write
-	// landed under the generic `agent` actor (Issue 7). Optional —
-	// nil falls back to "agent".
+	// Auth: tool-side bearer-to-user resolution for commit attribution.
 	Auth *auth.Store
 
-	// MintUploadToken minds a one-shot presigned upload token. Wired
-	// in by the HTTP server (mcp tests stub it). Returns the URL and
-	// expiry. Nil means the upload feature isn't configured.
+	// MintUploadToken — kept on the struct for serve.go wiring; not
+	// dispatched in the Cut-5 surface.
 	MintUploadToken func(name, actor string, sizeBytes int64) (uploadURL, expiresAt string, maxBytes int64, ok bool)
 
-	// AfterPageWrite runs after every successful page write through
-	// the MCP layer. The HTTP server wires this to the same post-write
-	// hooks the REST handlers run: PageMeta.Record, PageRefs.Record,
-	// Search.IndexPage, mention dispatch, SSE broadcast. Without it the
-	// MCP-driven page writes rely entirely on the file watcher to pick
-	// up the change — fine for direct-disk drops but unreliable for
-	// rapid batch writes where directory-create races can drop events.
-	// Nil → no post-write hook (tests stub it; the unified watcher
-	// still picks up the change on a 500ms debounce as a safety net).
+	// AfterPageWrite — kept on the struct for serve.go wiring; the new
+	// surface routes writes through ProposeFn instead.
 	AfterPageWrite func(path, source, actor string)
 }
 

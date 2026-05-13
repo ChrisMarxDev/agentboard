@@ -1,26 +1,31 @@
 package mcp
 
-// Cut 6: 10 tools cover the content tier. Always-plural batch shape;
-// best-effort partial-success semantics; native JSON values; full
-// envelope on read; non-blocking shape warnings on write. Spec §6.
+// Cut 5 — MCP surface for the git substrate. Spec §6.
 //
-// Read tier:
-//   agentboard_read(paths)              — paths: [string]
-//   agentboard_list(path)               — folder children + frontmatter snippets
-//   agentboard_search(q, scope?)        — FTS + substring across the tree
+// The 10-tool batch-CRUD surface (read/list/search/write/patch/
+// append/delete/request_file_upload) is retired. Agents who can shell
+// out to `git` use it directly — clone, branch, commit, push. Agents
+// whose runtime can't ship `git` use the workspaces/pull/propose/
+// resolve_conflict triplet to do the same things server-side. Events
+// flow through subscribe. Grab + fire_event carry over unchanged.
 //
-// Write tier (always batch):
-//   agentboard_write(items)             — items: [{path, frontmatter?, body?, version?}]
-//   agentboard_patch(items)             — items: [{path, frontmatter_patch?, body?, version?}]
-//   agentboard_append(path, items)      — items: [any]; one stream per call
-//   agentboard_delete(items)            — items: [{path, version?}]
+// Seven tools:
 //
-// Files:
-//   agentboard_request_file_upload(items) — items: [{name, size_bytes}]
+//   agentboard_workspaces            — list workspaces visible to this token
+//   agentboard_pull(ws, ref?)        — return the working tree as a bundle
+//   agentboard_propose(ws, base,
+//                      branch, files,
+//                      message)      — server-side branch + commit + push
+//   agentboard_resolve_conflict(
+//       proposal, file, resolution)  — submit a resolved file body
+//   agentboard_subscribe(events)     — open an SSE-shaped event stream
+//   agentboard_grab(picks)           — cross-page materializer (carryover)
+//   agentboard_fire_event(event, …)  — webhook bus (carryover)
 //
-// Named extensions:
-//   agentboard_grab(picks)              — cross-page materializer
-//   agentboard_fire_event(event, body?) — emit on webhook bus
+// Single-leaf reads / writes don't have dedicated tools — agents with
+// `git` use `git show <ref>:<path>` / a branch + commit + push; agents
+// without `git` either `pull` and pick a path out of the bundle, or
+// `propose` a one-file change.
 
 import (
 	"encoding/json"
@@ -30,193 +35,108 @@ import (
 
 func (s *Server) toolDefinitions() []ToolDef {
 	return []ToolDef{
-		// ---------- Read tier ----------
 		{
-			Name:        "agentboard_read",
-			Description: "Read one or more leaves by path. Always-plural batch — wrap a single read in a one-element array. Returns a `results` array; each entry has the full envelope (frontmatter + body + version) on success or a structured error. Paths resolve against the page tree first (e.g. `tasks/task-42`), then the data tier (e.g. `metrics/dau`). Body-only `read_page` is gone — every read returns the same shape.",
+			Name:        "agentboard_workspaces",
+			Description: "List the workspaces this caller can see. Each entry has {id, default_branch, policy, clone_url}. Call this first — `clone_url` is the value to pass to `git clone` (or to `agentboard_pull` for git-less runtimes). Spec §1.5 (the start-here flow) describes how the workspace teaches the rest.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "agentboard_pull",
+			Description: "Return the working tree of `workspace` at `ref` (default: workspace's default branch) as a bundle: `{files: [{path, frontmatter?, body, sha}]}`. For agents whose runtime can't `git clone`. The bundle is read-only; to write back, use `agentboard_propose`. `README.md` at the root is always present and tells you how this workspace is organized — read it first.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"paths": map[string]any{
+					"workspace": map[string]string{"type": "string", "description": "Workspace id from agentboard_workspaces."},
+					"ref":       map[string]string{"type": "string", "description": "Optional ref (branch, tag, sha). Defaults to the workspace's default branch."},
+				},
+				"required": []string{"workspace"},
+			},
+		},
+		{
+			Name:        "agentboard_propose",
+			Description: "Server-side commit + push. Writes the given `files` onto a fresh branch (or directly onto the default branch in push-to-main mode), commits with `message`, pushes back. Returns `{success, branch, conflicts?}`. On conflict, the conflicting files are listed and you call `agentboard_resolve_conflict` for each.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace": map[string]string{"type": "string"},
+					"base":      map[string]string{"type": "string", "description": "Optional base ref (defaults to workspace's default branch)."},
+					"branch":    map[string]string{"type": "string", "description": "Optional explicit branch name. Auto-generated if absent."},
+					"message":   map[string]string{"type": "string", "description": "Commit message."},
+					"files": map[string]any{
 						"type":        "array",
-						"description": "List of leaf paths to read. No `.md` suffix.",
+						"description": "List of {path, body} pairs. `body` is the full new file contents; deletion is `body: null`.",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"path": map[string]string{"type": "string"},
+								"body": map[string]string{"type": "string"},
+							},
+							"required": []string{"path"},
+						},
+						"minItems": 1,
+					},
+				},
+				"required": []string{"workspace", "files", "message"},
+			},
+		},
+		{
+			Name:        "agentboard_resolve_conflict",
+			Description: "Submit a resolved file body for a pending proposal that failed to merge. The server replays the merge with this file's resolution applied and retries the push. Repeat until no conflicts remain or the proposal is dropped.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"proposal":   map[string]string{"type": "string", "description": "Proposal id from a previous failed propose call."},
+					"file":       map[string]string{"type": "string", "description": "Path that conflicted."},
+					"resolution": map[string]string{"type": "string", "description": "The resolved file body (no <<<<<<<<< markers)."},
+				},
+				"required": []string{"proposal", "file", "resolution"},
+			},
+		},
+		{
+			Name:        "agentboard_subscribe",
+			Description: "Open a long-lived event stream of push / merge / conflict / mention events for workspaces this caller can read. The transport is MCP streaming. Useful for agents that want to react to pushes from peers in real time. (v1 returns a snapshot of recent activity; live streaming arrives in a later cut.)",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"events": map[string]any{
+						"type":        "array",
+						"description": "Event types to subscribe to. Empty = all.",
 						"items":       map[string]string{"type": "string"},
-						"minItems":    1,
 					},
-				},
-				"required": []string{"paths"},
-			},
-		},
-		{
-			Name:        "agentboard_list",
-			Description: "List the children of a folder leaf. Pass `path: \"\"` to list the project root. Each child carries its frontmatter snippet so the caller can render a kanban / table without a follow-up read.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path": map[string]any{
-						"type":        "string",
-						"description": "Folder path (no trailing slash). Pass empty string for the root.",
-					},
+					"workspace": map[string]string{"type": "string", "description": "Optional filter to a single workspace."},
 				},
 			},
 		},
-		{
-			Name:        "agentboard_search",
-			Description: "Full-text + substring search across the tree. Pass `scope: \"pages\"` or `\"data\"` to narrow; default is everything. Returns ranked hits with path, snippet, and score.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"q":     map[string]string{"type": "string", "description": "Whitespace-separated terms (implicit AND); quote for exact phrases."},
-					"scope": map[string]string{"type": "string", "description": "pages | data | all (default)"},
-					"limit": map[string]any{"type": "integer", "description": "Max hits (default 20, cap 100)"},
-				},
-				"required": []string{"q"},
-			},
-		},
-
-		// ---------- Write tier (always batch) ----------
-		{
-			Name:        "agentboard_write",
-			Description: "Create or replace one or more leaves. Always-plural batch; pass `items: [{path, frontmatter?, body?, version?}]`. Best-effort partial-success — inspect each result for success/error and retry the failures. `frontmatter` is native JSON (no double-stringify). When a path matches a suggested-shape glob (spec §8) and required fields are missing, the response includes a non-blocking `shape_hint` warning — the write still succeeds.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"items": map[string]any{
-						"type":     "array",
-						"minItems": 1,
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"path":        map[string]string{"type": "string"},
-								"frontmatter": map[string]any{"type": "object", "description": "Native JSON object merged into the page's frontmatter (replacing any prior value)."},
-								"body":        map[string]string{"type": "string", "description": "Optional MDX body. Omit for a frontmatter-only singleton."},
-								"version":     map[string]string{"type": "string", "description": "Echo from a prior read (CAS) or '*' to force-overwrite. Omit on initial writes."},
-							},
-							"required": []string{"path"},
-						},
-					},
-				},
-				"required": []string{"items"},
-			},
-		},
-		{
-			Name:        "agentboard_patch",
-			Description: "Merge frontmatter into one or more existing leaves and/or replace bodies. Always-plural batch; pass `items: [{path, frontmatter_patch?, body?, version?}]`. RFC-7396 shallow merge: `null` deletes a key, missing keys are preserved. `body` is optional — when set (even empty string) it replaces the body verbatim; when absent the body is preserved.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"items": map[string]any{
-						"type":     "array",
-						"minItems": 1,
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"path":              map[string]string{"type": "string"},
-								"frontmatter_patch": map[string]any{"type": "object", "description": "Top-level keys merged into the existing frontmatter. null deletes a key."},
-								"body":              map[string]string{"type": "string", "description": "Optional. Replaces the body when set."},
-								"version":           map[string]string{"type": "string", "description": "Echo from a prior read (CAS) or '*' to force."},
-							},
-							"required": []string{"path"},
-						},
-					},
-				},
-				"required": []string{"items"},
-			},
-		},
-		{
-			Name:        "agentboard_append",
-			Description: "Append items to a stream (`.ndjson`) leaf. One stream per call. Lock-free; never conflicts. Pass `items: [<any JSON value>]` — each becomes a timestamped line.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path":  map[string]string{"type": "string", "description": "Stream path (no `.ndjson` suffix)."},
-					"items": map[string]any{"type": "array", "minItems": 1, "description": "Values to append in order. Each is JSON-encoded as one stream line."},
-				},
-				"required": []string{"path", "items"},
-			},
-		},
-		{
-			Name:        "agentboard_delete",
-			Description: "Delete one or more leaves. Always-plural batch; pass `items: [{path, version?}]`. Idempotent — already-gone paths return success. CAS via `version`.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"items": map[string]any{
-						"type":     "array",
-						"minItems": 1,
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"path":    map[string]string{"type": "string"},
-								"version": map[string]string{"type": "string"},
-							},
-							"required": []string{"path"},
-						},
-					},
-				},
-				"required": []string{"items"},
-			},
-		},
-
-		// ---------- Files ----------
-		{
-			Name:        "agentboard_request_file_upload",
-			Description: "Mint one or more one-shot presigned upload URLs for binary files. Always-plural batch; pass `items: [{name, size_bytes?}]`. Each result carries `upload_url`, `expires_at`, and `max_size_bytes`. Agent shells out: `curl -X PUT --data-binary @<file> <upload_url>`. Keeps bytes off the JSON channel and out of the context window.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"items": map[string]any{
-						"type":     "array",
-						"minItems": 1,
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"name":       map[string]string{"type": "string", "description": "Filename, may contain nested path segments (exports/q1.csv)."},
-								"size_bytes": map[string]any{"type": "integer", "description": "Expected size; rejected if it exceeds the per-project cap."},
-							},
-							"required": []string{"name"},
-						},
-					},
-				},
-				"required": []string{"items"},
-			},
-		},
-
-		// ---------- Named extensions ----------
 		{
 			Name:        "agentboard_grab",
-			Description: "Materialize a list of cross-page picks (Cards or headings) into a single agent-ready payload. Each pick is `{page, card_id?}` or `{page, heading_slug?, heading_level?}`. Returns `text` (markdown | xml | json) plus the resolved sections. Use to pull cross-page context when responding to the user.",
+			Description: "Cross-leaf materializer. Takes a list of `picks` (paths or globs) and returns one assembled text blob — frontmatter + body of each leaf concatenated with delimiters. The single canonical tool for 'gather the context I need to think about X.' Works against the workspace's working tree.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
+					"workspace": map[string]string{"type": "string", "description": "Workspace id."},
 					"picks": map[string]any{
-						"type":        "array",
-						"description": "List of picks in render order.",
-						"items": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"kind":          map[string]string{"type": "string", "description": "card | heading | page (default card)"},
-								"page":          map[string]string{"type": "string", "description": "Page URL path, e.g. /features/auth"},
-								"card_id":       map[string]string{"type": "string"},
-								"heading_slug":  map[string]string{"type": "string"},
-								"heading_level": map[string]any{"type": "integer"},
-							},
-							"required": []string{"page"},
-						},
+						"type":     "array",
+						"items":    map[string]string{"type": "string"},
+						"minItems": 1,
 					},
-					"format": map[string]string{"type": "string", "description": "markdown | xml | json (default markdown)"},
 				},
 				"required": []string{"picks"},
 			},
 		},
 		{
 			Name:        "agentboard_fire_event",
-			Description: "Emit a user-triggered event onto the webhook bus. Every active subscription whose pattern matches `event` receives a signed POST. Useful for agent-triggered signals (\"deploy started\", \"runbook completed\") when data writes don't capture the intent. Subscription management lives on REST + CLI; this tool only fires events.",
+			Description: "Emit a user-defined event on the webhook bus. Any subscriber registered for this event name receives it. Useful for 'I finished step X; downstream agents, you can start now.' Management of subscribers (subscribe / list) lives on REST + CLI; this tool only dispatches.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"event":   map[string]string{"type": "string", "description": "Event name, e.g. 'deploy.prod' or 'alert.pager'."},
-					"payload": map[string]any{"type": "object", "description": "Structured payload carried as event.data."},
+					"event": map[string]string{"type": "string"},
+					"payload": map[string]any{
+						"type":        "object",
+						"description": "Arbitrary JSON delivered to subscribers.",
+					},
 				},
 				"required": []string{"event"},
 			},
@@ -224,81 +144,37 @@ func (s *Server) toolDefinitions() []ToolDef {
 	}
 }
 
-// handleToolCall dispatches one MCP tool call. The HTTP request is
-// threaded through to every handler so they can resolve the bearer
-// token to the calling user (Issue 7) for attribution.
-func (s *Server) handleToolCall(r *http.Request, params json.RawMessage) (interface{}, *RPCError) {
-	var call struct {
+// handleToolCall dispatches a single tools/call invocation. Spec §6
+// is the surface contract; this is the wiring.
+func (s *Server) handleToolCall(r *http.Request, raw json.RawMessage) (any, *RPCError) {
+	var p struct {
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments"`
 	}
-	if err := json.Unmarshal(params, &call); err != nil {
-		return nil, &RPCError{Code: -32602, Message: "Invalid params"}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: -32602, Message: "bad params: " + err.Error()}
 	}
-
 	var args map[string]json.RawMessage
-	if len(call.Arguments) > 0 {
-		if err := json.Unmarshal(call.Arguments, &args); err != nil {
-			return nil, &RPCError{Code: -32602, Message: "Invalid arguments"}
+	if len(p.Arguments) > 0 {
+		if err := json.Unmarshal(p.Arguments, &args); err != nil {
+			return nil, &RPCError{Code: -32602, Message: "arguments must be a JSON object"}
 		}
 	}
-	if args == nil {
-		args = map[string]json.RawMessage{}
-	}
-
-	switch call.Name {
-	case "agentboard_read":
-		return s.toolRead(r, args)
-	case "agentboard_list":
-		return s.toolList(r, args)
-	case "agentboard_search":
-		return s.toolSearch(r, args)
-	case "agentboard_write":
-		return s.toolWrite(r, args)
-	case "agentboard_patch":
-		return s.toolPatch(r, args)
-	case "agentboard_append":
-		return s.toolAppend(r, args)
-	case "agentboard_delete":
-		return s.toolDelete(r, args)
-	case "agentboard_request_file_upload":
-		return s.toolRequestFileUpload(r, args)
+	switch p.Name {
+	case "agentboard_workspaces":
+		return s.toolWorkspaces(r, args)
+	case "agentboard_pull":
+		return s.toolPull(r, args)
+	case "agentboard_propose":
+		return s.toolPropose(r, args)
+	case "agentboard_resolve_conflict":
+		return s.toolResolveConflict(r, args)
+	case "agentboard_subscribe":
+		return s.toolSubscribe(r, args)
 	case "agentboard_grab":
 		return s.toolGrab(r, args)
 	case "agentboard_fire_event":
 		return s.toolFireEvent(r, args)
 	}
-	return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("Unknown tool: %s", call.Name)}
-}
-
-// getString pulls a string arg from the marshalled-once map. Returns
-// "" when the key is missing or doesn't decode as a string.
-func getString(args map[string]json.RawMessage, key string) string {
-	v, ok := args[key]
-	if !ok {
-		return ""
-	}
-	var s string
-	_ = json.Unmarshal(v, &s)
-	return s
-}
-
-// mcpJSON wraps a structured value into MCP's text-content shape.
-// MCP doesn't have a structured-data content type yet, so we stringify
-// and let the agent re-parse — same pattern every other tool uses.
-func mcpJSON(v any) any {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return mcpContent(fmt.Sprintf("error encoding result: %v", err))
-	}
-	return mcpContent(string(b))
-}
-
-// mcpContent wraps plain text into MCP's content-block shape.
-func mcpContent(text string) interface{} {
-	return map[string]interface{}{
-		"content": []map[string]string{
-			{"type": "text", "text": text},
-		},
-	}
+	return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("tool not found: %s", p.Name)}
 }

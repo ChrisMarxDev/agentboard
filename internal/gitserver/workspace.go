@@ -181,6 +181,71 @@ func (s *Store) Create(ctx context.Context, id string, createdBy string, seed st
 	return w, nil
 }
 
+// EnsureFile writes `body` at `path` inside the workspace and commits
+// it if no file at that path exists yet on the default branch. Used
+// to retrofit pre-§15 workspaces with a bootstrap README without
+// stepping on any file an operator might already have authored.
+//
+// Idempotent: if the path already exists, EnsureFile is a no-op.
+func (s *Store) EnsureFile(ctx context.Context, workspaceID, path, body, actor, commitMsg string) error {
+	ws, err := s.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	bare := s.BarePath(workspaceID)
+
+	// Check whether the file already exists on the default branch.
+	if out, err := runGit("", "--git-dir", bare, "cat-file", "-e", ws.DefaultBranch+":"+path); err == nil {
+		_ = out
+		return nil
+	}
+
+	// Clone, write, commit, push.
+	tmp, err := os.MkdirTemp("", "ab-ensure-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+
+	if out, err := runGit("", "clone", "--branch", ws.DefaultBranch, bare, tmp); err != nil {
+		return fmt.Errorf("clone bare: %w (output: %s)", err, out)
+	}
+	for _, kv := range [][2]string{
+		{"user.email", actor + "@agentboard.local"},
+		{"user.name", actor},
+	} {
+		if out, err := runGitIn(tmp, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("git config %s: %w (output: %s)", kv[0], err, out)
+		}
+	}
+	target := filepath.Join(tmp, path)
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
+		return err
+	}
+	if out, err := runGitIn(tmp, "add", path); err != nil {
+		return fmt.Errorf("git add: %w (output: %s)", err, out)
+	}
+	if commitMsg == "" {
+		commitMsg = "Add " + path
+	}
+	if out, err := runGitIn(tmp, "commit", "-m", commitMsg); err != nil {
+		return fmt.Errorf("git commit: %w (output: %s)", err, out)
+	}
+	if out, err := runGitIn(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
+		return fmt.Errorf("git push: %w (output: %s)", err, out)
+	}
+	// Re-sync the working-tree mirror so the SPA sees the new file
+	// without waiting for the post-receive hook.
+	_, _ = s.SyncWorktree(ctx, workspaceID)
+	return nil
+}
+
 // validWorkspaceID rejects names that would break the URL or the disk
 // path: empty, with slashes, dots at the boundary, control chars.
 func validWorkspaceID(id string) bool {
