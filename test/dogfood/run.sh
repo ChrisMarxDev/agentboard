@@ -120,24 +120,30 @@ PROMPT=$(sed \
 echo "$PROMPT" > "$RESULTS_DIR/prompt.txt"
 
 # ----- 4. Run a clean Claude session against the bootstrap prompt -----
-echo "▸ Invoking claude (--bare, no project context)" >&2
+echo "▸ Invoking claude in a fresh /tmp cwd (no CLAUDE.md, no project memory)" >&2
 TESTER_CWD=$(mktemp -d -t ab-tester-cwd-XXXXXX)
 trap "cleanup; rm -rf $TESTER_CWD" EXIT
 
-# --bare strips the project CLAUDE.md, skills, hooks, and auto-memory so
-# the bootstrap sentence is the agent's only context.
-# --permission-mode bypassPermissions lets Bash + Edit run without prompts
-# in this controlled sandbox.
+# Context isolation strategy: run from a fresh /tmp dir so no project
+# CLAUDE.md or memory loads (memory is keyed by project path); the
+# operator's ~/.claude has no global CLAUDE.md or skills to leak in
+# (verified for this box). We don't use --bare because it disables
+# keychain reads and the operator authenticates via keychain rather
+# than ANTHROPIC_API_KEY.
+#
+# --allowedTools enumerates the tool surface the bootstrap needs and
+# skips per-tool permission prompts in --print mode without invoking
+# --dangerously-skip-permissions (which is blocked under root).
 # --add-dir /tmp lets the agent clone into /tmp/$CLONE_DIR.
 CLAUDE_RC=0
 (
   cd "$TESTER_CWD"
-  HOME="$TESTER_HOME" claude \
+  claude \
     --print \
-    --bare \
-    --output-format json \
-    --permission-mode bypassPermissions \
     --add-dir /tmp \
+    --output-format json \
+    --allowedTools "Bash Read Write Edit Grep Glob" \
+    -- \
     "$PROMPT" \
     > "$RESULTS_DIR/claude.json" \
     2> "$RESULTS_DIR/claude.stderr.log"
