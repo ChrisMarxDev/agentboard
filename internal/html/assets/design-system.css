@@ -1,0 +1,146 @@
+/*
+ * AgentBoard design system — reference idioms for HTML authored by agents.
+ *
+ * The pivot retired the JSX component library; agents write plain HTML
+ * and CSS. This file is the shared idiom: include it via
+ * <link rel="stylesheet" href="/_static/design-system.css"> and your
+ * page inherits the dashboard's typography, palette, and a small set
+ * of utility classes that match the chrome.
+ *
+ * Tokens: any property prefixed with --ab- is a documented stable
+ * variable. Agents can override them per-page if they need a different
+ * accent or background — that's a feature, not a violation.
+ */
+
+:root {
+  /* Light theme defaults. Dark theme via @media below. */
+  --bg: #ffffff;
+  --bg-secondary: #f7f8fa;
+  --text: #1a1d24;
+  --text-secondary: #5c6470;
+  --border: #e1e4ea;
+  --accent: #2563eb;
+  --accent-light: rgba(37, 99, 235, 0.08);
+  --success: #16a34a;
+  --warning: #d97706;
+  --error: #dc2626;
+
+  /* AB-prefixed stable tokens for agent-authored HTML. */
+  --ab-bg: var(--bg);
+  --ab-fg: var(--text);
+  --ab-border: var(--border);
+  --ab-accent: var(--accent);
+  --ab-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ab-radius: 6px;
+  --ab-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --bg-secondary: #161a21;
+    --text: #e5e7eb;
+    --text-secondary: #9ba2ad;
+    --border: #2a2f38;
+    --accent-light: rgba(96, 165, 250, 0.16);
+  }
+}
+
+/* Reset-ish — minimal so agent HTML doesn't have to import a reset. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+img, video { max-width: 100%; height: auto; }
+a { color: var(--accent); }
+
+/* Headings — tighter than browser defaults. */
+h1, h2, h3, h4 { margin: 1.5rem 0 0.75rem; font-weight: 600; line-height: 1.25; }
+h1 { font-size: 1.875rem; margin-top: 0; }
+h2 { font-size: 1.375rem; }
+h3 { font-size: 1.125rem; }
+h4 { font-size: 1rem; }
+p { margin: 0.75rem 0; }
+
+/* Utility classes agents can compose with. Names follow the
+ * "ab-" prefix convention so they won't collide with anything the
+ * agent might name in its own CSS. */
+.ab-card {
+  background: var(--ab-bg);
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius);
+  padding: 1rem 1.25rem;
+  box-shadow: var(--ab-shadow);
+}
+
+.ab-row { display: flex; gap: 0.75rem; align-items: center; }
+.ab-col { display: flex; flex-direction: column; gap: 0.75rem; }
+.ab-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+.ab-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 9999px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--ab-border);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.ab-badge.accent { background: var(--accent-light); color: var(--accent); border-color: transparent; }
+.ab-badge.success { background: rgba(34, 197, 94, 0.12); color: var(--success); border-color: transparent; }
+.ab-badge.warn { background: rgba(245, 158, 11, 0.15); color: var(--warning); border-color: transparent; }
+.ab-badge.error { background: rgba(220, 38, 38, 0.12); color: var(--error); border-color: transparent; }
+
+.ab-metric {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius);
+  background: var(--ab-bg);
+  min-width: 8rem;
+}
+.ab-metric .value { font-size: 1.75rem; font-weight: 600; line-height: 1; }
+.ab-metric .label { font-size: 0.8rem; color: var(--text-secondary); }
+.ab-metric .trend.up { color: var(--success); }
+.ab-metric .trend.down { color: var(--error); }
+
+.ab-kbd {
+  display: inline-block;
+  font-family: var(--ab-mono);
+  font-size: 0.8em;
+  padding: 0.05rem 0.4rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--ab-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.ab-muted { color: var(--text-secondary); }
+.ab-mono { font-family: var(--ab-mono); }
+
+/* Taskboard typed view — minimal styling so the rendered HTML
+ * companion is readable in cloned-offline mode too. */
+.taskboard {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.taskboard .lane {
+  background: var(--bg-secondary);
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius);
+  padding: 0.75rem;
+}
+.taskboard .lane > h3 { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.02em; }
+.taskboard .card {
+  background: var(--ab-bg);
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius);
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+.taskboard .card .title { font-weight: 500; margin-bottom: 0.25rem; }
+.taskboard .card .meta { font-size: 0.7rem; color: var(--text-secondary); display: flex; gap: 0.4rem; flex-wrap: wrap; }

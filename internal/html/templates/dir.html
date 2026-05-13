@@ -1,0 +1,14 @@
+{{define "dir"}}
+<h1>{{.Title}}</h1>
+<div class="dir-listing">
+  {{if .Entries}}
+  <ul>
+    {{range .Entries}}
+    <li><a href="{{.Href}}">{{if .IsDir}}📁 {{else}}📄 {{end}}{{.Name}}{{if .IsDir}}/{{end}}</a></li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="empty">This folder is empty. Push a file to make it useful.</p>
+  {{end}}
+</div>
+{{end}}

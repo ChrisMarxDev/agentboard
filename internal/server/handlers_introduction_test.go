@@ -86,17 +86,19 @@ func TestIntroduction_Markdown(t *testing.T) {
 
 // TestIntroduction_AccessibleWithoutAuth — the route must bypass the
 // token middleware unconditionally. Even on a fresh board with zero
-// users claimed, /introduction MUST answer 200.
+// users claimed, /_api/introduction MUST answer 200. (Root /
+// introduction is no longer reserved — it can be a user-authored
+// page; the discovery endpoint lives under the /_api/ namespace.)
 func TestIntroduction_AccessibleWithoutAuth(t *testing.T) {
 	// newPublicTestServer doesn't install the default token transport,
 	// so this exercises the anonymous path directly.
 	ts := newPublicTestServer(t, nil)
-	resp, err := http.Get(ts.URL + "/introduction")
+	resp, err := http.Get(ts.URL + "/_api/introduction")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("anonymous GET /introduction: status = %d, want 200", resp.StatusCode)
+		t.Fatalf("anonymous GET /_api/introduction: status = %d, want 200", resp.StatusCode)
 	}
 }

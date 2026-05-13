@@ -70,6 +70,11 @@ type Server struct {
 	// the auth-gated chain — bearer tokens flow through git Basic auth
 	// (see AUTH.md + spec §7).
 	GitServer http.Handler
+
+	// HTML is the server-rendered dashboard surface (replaces the SPA).
+	// Mounted as the catch-all at /; reads files out of the workspace's
+	// working-tree mirror and renders them via Go templates + goldmark.
+	HTML http.Handler
 }
 
 // ServerConfig holds configuration for creating a new server.
@@ -91,6 +96,10 @@ type ServerConfig struct {
 	// Optional during the pivot; required once the new substrate is the
 	// live one.
 	GitServer http.Handler
+
+	// HTML is the server-rendered dashboard. cli/serve.go constructs
+	// it after the working-tree mirror exists.
+	HTML http.Handler
 }
 
 // New creates a new AgentBoard server.
@@ -346,6 +355,7 @@ func New(cfg ServerConfig) *Server {
 		SkillFile:            cfg.SkillFile,
 		AllowComponentUpload: cfg.AllowComponentUpload,
 		GitServer:            cfg.GitServer,
+		HTML:                 cfg.HTML,
 	}
 
 	// MCP fallback for the upload-token flow when the agent doesn't
@@ -527,6 +537,12 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 		// paste-one-URL-to-teach-an-agent entry point. Under /api/ so a
 		// user page at "/introduction" can't collide.
 		OpenPaths: []string{
+			"/_api/setup/status",
+			"/_api/config",
+			"/_api/introduction",
+			"/_api/share/redeem",
+			// Backwards-compat aliases — drop once external callers
+			// migrate.
 			"/api/setup/status",
 			"/api/config",
 			"/api/introduction",
@@ -540,6 +556,9 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 			// probe sign-in status — the handler reads the
 			// session cookie directly and 401s when none is
 			// present, but no /login redirect is triggered.
+			"/_api/auth/login",
+			"/_api/auth/logout",
+			"/_api/auth/me",
 			"/api/auth/login",
 			"/api/auth/logout",
 			"/api/auth/me",
@@ -574,8 +593,10 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	// can hit them to see the invite metadata and redeem it. Mounted
 	// OUTSIDE the gated group so no 401 slips in; the invite ID is
 	// the credential.
-	r.Get("/api/invitations/{id}", s.handleGetInvitationPublic)
-	r.Post("/api/invitations/{id}/redeem", s.handleRedeemInvitation)
+	r.Get("/_api/invitations/{id}", s.handleGetInvitationPublic)
+	r.Post("/_api/invitations/{id}/redeem", s.handleRedeemInvitation)
+	r.Get("/api/invitations/{id}", s.handleGetInvitationPublic)       // backcompat
+	r.Post("/api/invitations/{id}/redeem", s.handleRedeemInvitation)  // backcompat
 
 	// /api/upload/{token} is public — the unguessable token is the
 	// credential. Mounted here so the bearer-required middleware
@@ -602,68 +623,63 @@ func (s *Server) buildRouter(cfg ServerConfig) chi.Router {
 	r.Post("/oauth/authorize/decide", s.handleOAuthAuthorizeDecide)
 	r.Post("/oauth/token", s.handleOAuthToken)
 
-	// API routes
+	// Reserved /_api/ namespace per spec-filesystem-substrate.md §1.
+	// The leading underscore makes "reserved by the platform" visually
+	// load-bearing — content paths live at the repo root with no
+	// reserved prefix.
 	r.Group(func(r chi.Router) {
 		gated(r)
-		r.Route("/api", func(api chi.Router) {
-			// Mount the registered handlers, then override chi's default
-			// plaintext "404 page not found" with a JSON envelope so
-			// agents that mistype an /api/* path get a parseable error
-			// instead of a wall of HTML or "404 page not found" text.
+		r.Route("/_api", func(api chi.Router) {
 			apiRoutes(s)(api)
 			api.NotFound(apiNotFound)
 			api.MethodNotAllowed(apiMethodNotAllowed)
 		})
-		r.Get("/skill", s.handleSkill)
+		r.Get("/_skill", s.handleSkill)
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
-		// Git smart-HTTPS. Mounted under the same gated chain as /api so
-		// bearer tokens accepted there also unlock `git clone` / push.
-		// Spec §§2, 7.
+		// Git smart-HTTPS. Bearer tokens accepted on /_api/ also unlock
+		// `git clone` / push. Spec §§2, 7.
 		if s.GitServer != nil {
 			r.Handle("/git/*", s.GitServer)
 		}
 	})
 
-	// Frontend — serve embedded SPA or proxy to dev server. Unknown
-	// `/api/*` requests are caught by the api router's NotFound
-	// handler above (apiNotFound). This fallback fires for non-API
-	// URLs.
-	//
-	// Guard: only GET/HEAD/OPTIONS fall through to the SPA. A write
-	// verb (PUT/POST/PATCH/DELETE) hitting an unmatched non-API path
-	// — e.g. a client that strips `..` from `/api/content/../foo`
-	// before sending and lands on `/foo` — must NOT receive 200 +
-	// dashboard HTML. Return JSON 404 so the caller sees an error.
-	spaFallback := func() http.HandlerFunc {
-		if cfg.DevMode && cfg.DevProxy != "" {
-			return devProxyHandler(cfg.DevProxy)
-		}
-		if cfg.FrontendFS != nil {
-			fileServer := http.FileServer(cfg.FrontendFS)
-			return func(w http.ResponseWriter, r *http.Request) {
-				path := r.URL.Path
-				f, err := cfg.FrontendFS.Open(path[1:])
-				if err != nil {
-					r.URL.Path = "/"
-					fileServer.ServeHTTP(w, r)
-					return
-				}
-				f.Close()
-				fileServer.ServeHTTP(w, r)
-			}
-		}
-		return s.handleFrontend
-	}()
-	r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-			spaFallback(w, r)
-		default:
-			respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
-				"no route matches "+r.Method+" "+r.URL.Path)
-		}
+	// Backwards-compat alias: keep /api/ as a thin pass-through to
+	// /_api/ until external callers migrate. Drops in the cleanup
+	// cut after the bootstrap chain only mentions /_api/.
+	r.Group(func(r chi.Router) {
+		gated(r)
+		r.Route("/api", func(api chi.Router) {
+			apiRoutes(s)(api)
+			api.NotFound(apiNotFound)
+			api.MethodNotAllowed(apiMethodNotAllowed)
+		})
 	})
+
+	// Catch-all is the new HTML server. Reads against the workspace's
+	// working-tree mirror; renders .md via goldmark, .html as-is,
+	// directories as index.html-or-listing. Spec
+	// spec-filesystem-substrate.md §3.
+	//
+	// Writes (any verb other than GET/HEAD/OPTIONS) against unmatched
+	// non-API paths get a JSON 404 so misrouted callers see a
+	// parseable error.
+	if s.HTML != nil {
+		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet, http.MethodHead, http.MethodOptions:
+				s.HTML.ServeHTTP(w, r)
+			default:
+				respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
+					"no route matches "+r.Method+" "+r.URL.Path)
+			}
+		})
+	} else {
+		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+			respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
+				"HTML renderer not configured")
+		})
+	}
 
 	return r
 }

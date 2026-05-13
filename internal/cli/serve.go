@@ -19,6 +19,7 @@ import (
 	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
 	"github.com/christophermarx/agentboard/internal/gitserver"
+	htmlserver "github.com/christophermarx/agentboard/internal/html"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/locks"
 	"github.com/christophermarx/agentboard/internal/mcp"
@@ -262,6 +263,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	gitSrvForHooks = gitSrv
 
+	// HTML renderer: server-rendered dashboard over the worktree mirror.
+	// Replaces the React SPA. spec-filesystem-substrate.md §3.
+	htmlSrv := &htmlserver.Server{
+		WorktreeRoot: wtPath,
+		Workspace:    "dogfood",
+		Branch:       "main",
+		UserResolver: func(r *http.Request) string {
+			if u := auth.UserFromContext(r.Context()); u != nil {
+				return u.Username
+			}
+			return ""
+		},
+	}
+
 	// MCP-side propose adapter. The mcp package carries its own
 	// ProposeRequest/Result types so it doesn't have to import
 	// gitserver; this shim translates between the two.
@@ -305,6 +320,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		AllowComponentUpload: uploadEnabled,
 		MaxFileSizeMB:        proj.Config.MaxFileSizeMB,
 		GitServer:            gitSrv,
+		HTML:                 htmlSrv,
 	})
 
 	// Plumb the git substrate into the MCP server. The agentboard_*
