@@ -140,6 +140,7 @@ func (s *Server) buildRouter() chi.Router {
 			"/oauth/authorize",
 			"/oauth/authorize/decide",
 			"/oauth/token",
+			"/_api/events",
 		},
 	})
 	csrfMW := auth.CSRFMiddleware()
@@ -157,6 +158,10 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/_api/introduction", s.handleIntroduction)
 	r.Get("/_api/invitations/{id}", s.handleGetInvitationPublic)
 	r.Post("/_api/invitations/{id}/redeem", s.handleRedeemInvitation)
+	// SSE stream — open to allow the public dashboard to subscribe.
+	// Per-event payloads only carry path + workspace, no auth-scoped
+	// data, so this is safe to leave anonymous.
+	r.Get("/_api/events", s.Broadcaster.ServeHTTP)
 
 	// Auth endpoints. Login / logout / me run anonymously by design;
 	// session resolution happens inside the handler.

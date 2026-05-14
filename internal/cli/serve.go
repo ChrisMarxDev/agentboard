@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -272,6 +273,31 @@ func runServe(cmd *cobra.Command, args []string) error {
 		GitServer:   gitSrv,
 		HTML:        htmlSrv,
 	})
+	// SSE fan-out: any push (HTTP smart-protocol or server-internal)
+	// now broadcasts a "workspace-changed" event over /_api/events so
+	// open dashboard tabs can offer a non-modal "reload" toast.
+	wireSSE := func(workspace string) {
+		payload, _ := json.Marshal(map[string]string{"workspace": workspace})
+		srv.Broadcaster.Broadcast(server.SSEEvent{
+			Type: "workspace-changed",
+			Data: payload,
+		})
+	}
+	prevInternal := gitStore.OnInternalPush
+	gitStore.OnInternalPush = func(ctx context.Context, workspace string) {
+		if prevInternal != nil {
+			prevInternal(ctx, workspace)
+		}
+		wireSSE(workspace)
+	}
+	prevHook := gitHooks.OnPush
+	gitHooks.OnPush = func(ctx context.Context, workspace string, refs []gitserver.PushedRef) {
+		if prevHook != nil {
+			prevHook(ctx, workspace, refs)
+		}
+		wireSSE(workspace)
+	}
+
 	srv.MCP.GitStore = gitStore
 	srv.MCP.ProposeFn = proposeFn
 	srv.MCP.ResolveConflictFn = func(ctx context.Context, proposalID, file, resolution string) (*mcp.ProposeResult, error) {

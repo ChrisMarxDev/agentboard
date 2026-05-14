@@ -117,6 +117,46 @@
   {{end}}
   {{.Content}}
 </main>
+<div id="ab-toast" role="status" aria-live="polite" style="position:fixed;bottom:1rem;left:50%;transform:translateX(-50%) translateY(2rem);opacity:0;pointer-events:none;background:var(--text);color:var(--bg);padding:.6rem 1rem;border-radius:9999px;font-size:.85rem;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity .2s, transform .2s;z-index:60;display:flex;align-items:center;gap:.75rem"></div>
+<script>
+(function(){
+  // Live-reload toast. Subscribes to /_api/events; when the
+  // workspace this dashboard is rendering gets a push, offer a
+  // non-modal "reload" toast. Cheap, no framework, degrades silently
+  // if EventSource isn't available.
+  if (typeof EventSource === 'undefined') return;
+  var es = new EventSource('/_api/events');
+  var toast = document.getElementById('ab-toast');
+  function show(text, action){
+    if (!toast) return;
+    toast.innerHTML = '';
+    var span = document.createElement('span'); span.textContent = text;
+    toast.appendChild(span);
+    if (action){
+      var btn = document.createElement('button');
+      btn.textContent = action.label;
+      btn.style.cssText = 'background:var(--accent);color:#fff;border:0;padding:.3rem .8rem;border-radius:9999px;font:inherit;cursor:pointer';
+      btn.onclick = action.run;
+      toast.appendChild(btn);
+    }
+    toast.style.pointerEvents = 'auto';
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateX(-50%) translateY(0)';
+  }
+  function hide(){
+    if (!toast) return;
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(-50%) translateY(2rem)';
+    toast.style.pointerEvents = 'none';
+  }
+  es.addEventListener('workspace-changed', function(){
+    show('Workspace updated', { label: 'Reload', run: function(){ location.reload(); } });
+    // Auto-hide after 20s if the user doesn't click.
+    setTimeout(hide, 20000);
+  });
+  // Heartbeats and the initial 'connected' event are uninteresting.
+})();
+</script>
 </body>
 </html>
 {{end}}
