@@ -138,29 +138,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("Warning: could not seed examples: %v", err)
 	}
 	// Demo content. HTML is the primary expressive primitive
-	// (spec-filesystem-substrate.md); markdown stays only for
+	// (spec-filesystem-substrate.md); markdown stays for the
 	// conventional surfaces (README, SKILL.md). Typed JSON for the
-	// Taskboard. Each EnsureFile is idempotent on presence, so existing
-	// boards keep their authored content.
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"index.html", project.SeededIndexHTML, "system",
-		"Add home page (HTML)"); err != nil {
-		log.Printf("Warning: could not seed index.html: %v", err)
-	}
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"pages/getting-started.html", project.SeededGettingStartedHTML, "system",
-		"Add getting-started demo page (HTML)"); err != nil {
-		log.Printf("Warning: could not seed getting-started: %v", err)
-	}
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"pages/changelog.html", project.SeededChangelogHTML, "system",
-		"Add changelog page (HTML)"); err != nil {
-		log.Printf("Warning: could not seed changelog: %v", err)
-	}
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "system",
-		"Add sprint taskboard example"); err != nil {
-		log.Printf("Warning: could not seed sprint taskboard: %v", err)
+	// Taskboard. PutFile is content-idempotent: same body = no commit,
+	// different body = a single update commit. The dogfood board is
+	// the public showcase, so keeping the seeds current here is the
+	// point. (Agents fork demo content into their own paths.)
+	for _, seed := range []struct{ path, body, msg string }{
+		{"index.html", project.SeededIndexHTML, "Update home page"},
+		{"pages/getting-started.html", project.SeededGettingStartedHTML, "Update getting-started"},
+		{"pages/changelog.html", project.SeededChangelogHTML, "Update changelog"},
+		{"pages/roadmap.html", project.SeededRoadmapHTML, "Update roadmap"},
+		{"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "Update sprint board"},
+	} {
+		if err := gitStore.PutFile(context.Background(), "dogfood",
+			seed.path, seed.body, "system", seed.msg); err != nil {
+			log.Printf("Warning: could not seed %s: %v", seed.path, err)
+		}
 	}
 
 	// Retire legacy .md seeds from boards that received the earlier cut.

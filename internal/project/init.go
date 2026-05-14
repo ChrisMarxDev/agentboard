@@ -471,6 +471,11 @@ const seededIndexHTML = `<!doctype html>
     <div class="label">Changelog</div>
     <div class="desc">Short, glance-friendly log of recent ships.</div>
   </a>
+  <a class="card-link" href="/pages/roadmap.html">
+    <div class="eyebrow">Plan</div>
+    <div class="label">Roadmap</div>
+    <div class="desc">Quality-of-life features the board could grow into next.</div>
+  </a>
   <a class="card-link" href="/README.md">
     <div class="eyebrow">Convention</div>
     <div class="label">README</div>
@@ -624,42 +629,22 @@ git push</code></pre>
 var SeededChangelogHTML = seededChangelogHTML
 
 const seededChangelogHTML = `<!doctype html>
-<title>Changelog</title>
-<style>
-  .timeline { list-style: none; padding: 0; margin: 1.5rem 0; }
-  .timeline > li { position: relative; padding: 0 0 1.5rem 1.5rem;
-    border-left: 2px solid var(--border); margin-left: 4px; }
-  .timeline > li:last-child { border-left-color: transparent; }
-  .timeline > li::before {
-    content: ""; position: absolute; left: -7px; top: .35rem;
-    width: 12px; height: 12px; border-radius: 50%;
-    background: var(--accent); border: 2px solid var(--bg);
-  }
-  .timeline time { font-size: .8rem; color: var(--text-secondary);
-    font-variant-numeric: tabular-nums; }
-  .timeline h3 { margin: .15rem 0 .25rem; font-size: 1rem; }
-  .timeline p { margin: 0; color: var(--text-secondary); font-size: .9rem; }
-  .pill { display: inline-block; padding: .05rem .45rem; border-radius: 9999px;
-    font-size: .7rem; font-weight: 500; margin-right: .35rem;
-    background: var(--bg-secondary); color: var(--text-secondary);
-    border: 1px solid var(--border); }
-  .pill.substrate { background: var(--accent-light); color: var(--accent);
-    border-color: transparent; }
-</style>
+<title>Changelog</title>` + changelogStyles + `
 
 <h1>Changelog</h1>
-<p class="ab-muted">Short, glance-friendly. One entry per shipping moment.</p>
+<p class="ab-muted">Short, glance-friendly. One entry per shipping moment. Newest first.</p>
 
 <ol class="timeline">
   <li>
     <time>2026-05-14</time>
-    <h3>HTML primitive landed in seeded content</h3>
-    <p><span class="pill substrate">substrate</span>
-       Switched seeded examples from <code>.md</code> to <code>.html</code>:
-       <a href="/index.html">home</a>,
-       <a href="/pages/getting-started.html">getting started</a>,
-       <a href="/pages/changelog.html">changelog</a>.
-       Markdown stays for READMEs and SKILL.md per convention.</p>
+    <h3>Human-facing auth UI</h3>
+    <p><span class="pill">auth</span>
+       <code>/login</code> and <code>/invite/&lt;id&gt;</code> are real HTML
+       forms now; <code>/logout</code> hops home. The header shows
+       <code>@username</code> + a sign-out link when a session cookie is
+       set. Self-tested by <code>test/dogfood/auth-e2e.sh</code> — 21
+       assertions covering anonymous probes, login, invite redemption,
+       cookie persistence, and bad-credentials handling.</p>
   </li>
   <li>
     <time>2026-05-14</time>
@@ -667,6 +652,15 @@ const seededChangelogHTML = `<!doctype html>
     <p><span class="pill">ux</span>
        Hamburger toggle, drawer-style sidebar overlay, larger tap targets,
        horizontal-scroll behavior on tables and code blocks.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>HTML is the primary expressive primitive</h3>
+    <p><span class="pill substrate">substrate</span>
+       Seeded examples shipped as <code>.md</code> in the first cut — wrong
+       reflex. Switched to authored <code>.html</code>: home,
+       getting-started, changelog, roadmap. Markdown stays for READMEs and
+       SKILL.md per convention.</p>
   </li>
   <li>
     <time>2026-05-13</time>
@@ -692,6 +686,219 @@ const seededChangelogHTML = `<!doctype html>
 </ol>
 `
 
+// changelogStyles is broken out so the roadmap page can reuse the
+// timeline styling without duplicating the CSS.
+const changelogStyles = `
+<style>
+  .timeline { list-style: none; padding: 0; margin: 1.5rem 0; }
+  .timeline > li { position: relative; padding: 0 0 1.5rem 1.5rem;
+    border-left: 2px solid var(--border); margin-left: 4px; }
+  .timeline > li:last-child { border-left-color: transparent; }
+  .timeline > li::before {
+    content: ""; position: absolute; left: -7px; top: .35rem;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .timeline time { font-size: .8rem; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; }
+  .timeline h3 { margin: .15rem 0 .25rem; font-size: 1rem; }
+  .timeline p { margin: 0; color: var(--text-secondary); font-size: .9rem; }
+  .pill { display: inline-block; padding: .05rem .45rem; border-radius: 9999px;
+    font-size: .7rem; font-weight: 500; margin-right: .35rem;
+    background: var(--bg-secondary); color: var(--text-secondary);
+    border: 1px solid var(--border); }
+  .pill.substrate { background: var(--accent-light); color: var(--accent);
+    border-color: transparent; }
+</style>
+`
+
+// SeededRoadmapHTML is the quality-of-life roadmap page seeded at
+// pages/roadmap.html. Lives on the dashboard as a living document
+// agents can update. The categories below were chosen as the natural
+// next moves once the substrate cuts stabilize.
+var SeededRoadmapHTML = seededRoadmapHTML
+
+const seededRoadmapHTML = `<!doctype html>
+<title>Roadmap</title>` + changelogStyles + `
+<style>
+  .category { margin: 2rem 0 1rem; padding-bottom: .35rem;
+    border-bottom: 1px solid var(--border); font-size: .8rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-secondary); }
+  .pill.size-s { background: rgba(34,197,94,.10); color: var(--success);
+    border-color: transparent; }
+  .pill.size-m { background: var(--accent-light); color: var(--accent);
+    border-color: transparent; }
+  .pill.size-l { background: rgba(245,158,11,.15); color: var(--warning);
+    border-color: transparent; }
+</style>
+
+<h1>Roadmap</h1>
+<p class="ab-muted">
+  Quality-of-life features the board could grow into next. Each item
+  carries a rough size estimate (S/M/L) — these are nudges, not
+  commitments. Reorder freely.
+</p>
+
+<div class="category">History &amp; versioning</div>
+<ol class="timeline">
+  <li>
+    <time>v0.2</time>
+    <h3>Page history viewer</h3>
+    <p><span class="pill size-m">M</span>
+       <code>GET /&lt;path&gt;?history=1</code> lists every commit that
+       touched the file with author, date, and a one-line summary. Backed
+       by <code>git log --follow</code>; cheap to serve.</p>
+  </li>
+  <li>
+    <time>v0.2</time>
+    <h3>Diff between revisions</h3>
+    <p><span class="pill size-m">M</span>
+       Side-by-side diff at <code>/&lt;path&gt;?diff=&lt;sha&gt;..&lt;sha&gt;</code>.
+       Rendered server-side via <code>git diff --color-words</code> →
+       HTML; agents can deep-link to a diff URL.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Annotated blame view</h3>
+    <p><span class="pill size-l">L</span>
+       Per-line author + commit hover. Useful for "who put this status
+       to <em>done</em>?" without leaving the page. Cache the blame
+       computation per (path, sha) — expensive without caching.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Restore-from-history</h3>
+    <p><span class="pill size-s">S</span>
+       One-click "restore this version" on history rows — opens a
+       confirmed POST that round-trips through <code>agentboard_propose</code>
+       with the old body as the new commit.</p>
+  </li>
+</ol>
+
+<div class="category">Discovery &amp; navigation</div>
+<ol class="timeline">
+  <li>
+    <time>v0.2</time>
+    <h3>Full-text search</h3>
+    <p><span class="pill size-m">M</span>
+       SQLite FTS5 index over the working tree, rebuilt on the
+       post-receive hook. <code>/?q=needle</code> as a top-level query;
+       results show the path + matching line context. Headers, frontmatter
+       fields, and code blocks are searchable equally.</p>
+  </li>
+  <li>
+    <time>v0.2</time>
+    <h3>Sidebar nested folders</h3>
+    <p><span class="pill size-s">S</span>
+       Today the tree is one level deep. Recurse into subfolders, lazy-
+       expand on click, remember open state in <code>localStorage</code>.
+       Critical once the tree grows past 20-ish entries.</p>
+  </li>
+  <li>
+    <time>v0.2</time>
+    <h3>Recently-edited surface</h3>
+    <p><span class="pill size-s">S</span>
+       Home-page card "recent activity" listing the 10 most-recently
+       committed files. Pulls from git log; useful for jumping back into
+       wherever the team was working.</p>
+  </li>
+</ol>
+
+<div class="category">Typed views (more)</div>
+<ol class="timeline">
+  <li>
+    <time>v0.2</time>
+    <h3>Mention typed view</h3>
+    <p><span class="pill size-m">M</span>
+       <code>@username</code> tokens in any file get indexed; per-user
+       <code>/mentions/&lt;user&gt;</code> renders the inbox as a list.
+       Materializer runs on every commit; cheap incremental update.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Metric typed view</h3>
+    <p><span class="pill size-s">S</span>
+       <code>metrics/*.json</code> with <code>{value, label, trend}</code>
+       renders as a styled metric card with a big number + a delta arrow.
+       Trivial to add once we agree on a shape.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>User typed view</h3>
+    <p><span class="pill size-m">M</span>
+       <code>/users/&lt;username&gt;</code> is the canonical per-user page —
+       avatar, display name, recent activity, tokens (admin-only). Replaces
+       the today's per-user admin pages that live under <code>/_api/admin</code>.</p>
+  </li>
+</ol>
+
+<div class="category">Editing &amp; collaboration</div>
+<ol class="timeline">
+  <li>
+    <time>v0.2</time>
+    <h3>In-browser edit</h3>
+    <p><span class="pill size-l">L</span>
+       A <strong>(edit)</strong> link in the meta-bar opens a textarea
+       view of the file with monospaced styling; saving POSTs through the
+       cookie + CSRF and round-trips into a git commit. Optimistic
+       concurrency via the existing CAS check.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Presence: who's looking now</h3>
+    <p><span class="pill size-m">M</span>
+       Long-poll <code>/_api/presence/&lt;path&gt;</code> reports recent
+       viewers; the meta-bar shows avatars of anyone currently on the
+       page. Helps avoid edit-collisions before they happen.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Live page-changed toasts</h3>
+    <p><span class="pill size-s">S</span>
+       Reuse the existing SSE broadcaster: when a push touches the page
+       you're viewing, a non-modal toast offers "reload". Already wired —
+       just needs the post-receive hook to broadcast.</p>
+  </li>
+</ol>
+
+<div class="category">Substrate</div>
+<ol class="timeline">
+  <li>
+    <time>v0.2</time>
+    <h3>Split-origin sandbox</h3>
+    <p><span class="pill size-l">L</span>
+       Serve user-authored HTML on <code>usercontent.&lt;host&gt;</code>
+       inside a sandbox iframe so untrusted page CSS / JS can't reach the
+       dashboard chrome. Spec-filesystem-substrate.md §security covers the
+       deployment plan.</p>
+  </li>
+  <li>
+    <time>v0.2</time>
+    <h3>Multiple workspaces per board</h3>
+    <p><span class="pill size-m">M</span>
+       Today every board has one workspace (<code>dogfood</code>). The
+       gitserver already supports n workspaces; the dashboard and MCP need
+       a workspace-picker in the header + a route prefix.</p>
+  </li>
+  <li>
+    <time>v0.3</time>
+    <h3>Always-PR mode</h3>
+    <p><span class="pill size-l">L</span>
+       Per-workspace policy: <code>push-to-main</code> (today) vs
+       <code>always-PR</code> (server creates a branch, holds the merge
+       until reviewer approval). Surface PRs as a typed view under
+       <code>/proposals/</code>.</p>
+  </li>
+</ol>
+
+<p class="ab-muted" style="margin-top:2.5rem;font-size:.85rem">
+  Ideas welcome — propose new entries via
+  <code>git push</code> to <code>pages/roadmap.html</code> or via
+  <code>agentboard_propose</code>.
+</p>
+`
+
 // SeededSprintTaskboardJSON is a working Taskboard example. Shape
 // matches what the renderer recognizes: top-level ` + "`columns`" + ` and
 // ` + "`cards`" + ` arrays. Cards span all three lanes so a visitor lands on
@@ -702,67 +909,133 @@ const seededSprintTaskboardJSON = `{
   "kind": "taskboard",
   "title": "Sprint 14",
   "columns": [
-    {"id": "todo",  "label": "To do"},
-    {"id": "doing", "label": "In progress"},
-    {"id": "done",  "label": "Done"}
+    {"id": "backlog", "label": "Backlog"},
+    {"id": "todo",    "label": "To do"},
+    {"id": "doing",   "label": "In progress"},
+    {"id": "done",    "label": "Done"}
   ],
   "cards": [
     {
-      "id": "c1",
+      "id": "c-done-auth-ui",
+      "title": "Human-facing auth UI",
+      "column": "done",
+      "body": "/login, /logout, /invite/<id> as real HTML forms. Self-tested by test/dogfood/auth-e2e.sh.",
+      "labels": ["auth", "ux"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 0.5
+    },
+    {
+      "id": "c-done-mobile-shell",
       "title": "Mobile-responsive dashboard shell",
       "column": "done",
-      "body": "Collapsible sidebar, overlay drawer, larger tap targets.",
+      "body": "Collapsible sidebar overlay, larger tap targets.",
       "labels": ["ux", "mobile"],
       "assignees": ["claude"],
       "priority": 1,
       "order": 1.0
     },
     {
-      "id": "c2",
-      "title": "Seed richer example content",
+      "id": "c-done-html-primitive",
+      "title": "HTML as primary expressive primitive",
       "column": "done",
-      "body": "Home page, getting-started, sprint board, changelog.",
-      "labels": ["content"],
+      "body": "Seeded examples switched from .md to .html. Markdown stays for READMEs / SKILLs.",
+      "labels": ["substrate"],
       "assignees": ["claude"],
-      "priority": 2,
+      "priority": 1,
       "order": 2.0
     },
     {
-      "id": "c3",
-      "title": "Restart prod board on hextorical.com",
+      "id": "c-done-taskboard",
+      "title": "Taskboard typed view",
       "column": "done",
-      "body": "Tunnel was healthy; binary had been killed.",
-      "labels": ["ops"],
+      "body": "JSON with columns+cards renders as kanban (you're looking at it).",
+      "labels": ["substrate", "typed-view"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 3.0
+    },
+    {
+      "id": "c-doing-self-loop",
+      "title": "Self-checking dev loop",
+      "column": "doing",
+      "body": "Auto-iterate on auth + content + QOL features under ScheduleWakeup over the next 3 hours.",
+      "labels": ["dogfood", "process"],
+      "assignees": ["claude"],
       "priority": 1,
       "order": 0.5
     },
     {
-      "id": "c4",
-      "title": "Dogfood §15 self-test on new shape",
-      "column": "doing",
-      "body": "Bootstrap chain README → SKILL passed first run.",
-      "labels": ["dogfood", "substrate"],
-      "assignees": ["claude"],
+      "id": "c-todo-history",
+      "title": "Page history viewer",
+      "column": "todo",
+      "body": "GET /<path>?history=1 lists commits via git log --follow.",
+      "labels": ["history", "qol"],
       "priority": 1,
       "order": 1.0
     },
     {
-      "id": "c5",
-      "title": "Push-to-PR mode polish",
+      "id": "c-todo-diff",
+      "title": "Diff between revisions",
       "column": "todo",
-      "body": "Server-side branch + status tracking for always-PR workspaces.",
-      "labels": ["substrate"],
+      "body": "Side-by-side diff at /<path>?diff=<sha>..<sha> via git diff --color-words.",
+      "labels": ["history", "qol"],
+      "priority": 1,
+      "order": 2.0
+    },
+    {
+      "id": "c-todo-search",
+      "title": "Full-text search",
+      "column": "todo",
+      "body": "SQLite FTS5 over the working tree, rebuilt on post-receive.",
+      "labels": ["discovery", "qol"],
+      "priority": 2,
+      "order": 3.0
+    },
+    {
+      "id": "c-todo-nested-tree",
+      "title": "Sidebar nested folders",
+      "column": "todo",
+      "body": "Recurse + lazy-expand. Critical once the tree grows.",
+      "labels": ["ux", "qol"],
+      "priority": 2,
+      "order": 4.0
+    },
+    {
+      "id": "c-backlog-mention",
+      "title": "Mention typed view",
+      "column": "backlog",
+      "body": "Materialize @mentions across the worktree into /mentions/<user>.",
+      "labels": ["typed-view"],
       "priority": 2,
       "order": 1.0
     },
     {
-      "id": "c6",
-      "title": "Add Mention typed view",
-      "column": "todo",
-      "body": "Materialize @mentions across the worktree into a per-user inbox view.",
-      "labels": ["typed-view"],
-      "priority": 3,
+      "id": "c-backlog-edit",
+      "title": "In-browser edit",
+      "column": "backlog",
+      "body": "Textarea view + POST-to-commit round-trip. Optimistic concurrency.",
+      "labels": ["editing", "qol"],
+      "priority": 2,
       "order": 2.0
+    },
+    {
+      "id": "c-backlog-presence",
+      "title": "Presence: who's looking now",
+      "column": "backlog",
+      "body": "Long-poll viewer list; avatars in the meta-bar.",
+      "labels": ["collab", "qol"],
+      "priority": 3,
+      "order": 3.0
+    },
+    {
+      "id": "c-backlog-pr-mode",
+      "title": "Always-PR workspace policy",
+      "column": "backlog",
+      "body": "Server creates a branch + holds the merge until approval.",
+      "labels": ["substrate"],
+      "priority": 3,
+      "order": 4.0
     }
   ]
 }
