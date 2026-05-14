@@ -223,23 +223,41 @@ func (s *Server) buildRouter() chi.Router {
 		}
 	})
 
+	// ----- human-facing auth UI -----
+	// Anonymous-OK by design (you have to be able to GET /login while
+	// logged out). SoftAuthMiddleware attaches user-context when a
+	// session cookie is present so /login can short-circuit to redirect
+	// when the visitor's already signed in.
+	softMW := auth.SoftAuthMiddleware(s.Auth)
+	r.Group(func(r chi.Router) {
+		r.Use(softMW)
+		s.registerAuthUIRoutes(r)
+	})
+
 	// ----- HTML catch-all -----
-	if s.HTML != nil {
-		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-			switch r.Method {
-			case http.MethodGet, http.MethodHead, http.MethodOptions:
-				s.HTML.ServeHTTP(w, r)
-			default:
+	// Anonymous reads are intentional, but we still want session
+	// cookies to resolve so the renderer can show "@username" + a
+	// logout link. SoftAuthMiddleware never 401s — perfect for the
+	// public dashboard.
+	r.Group(func(r chi.Router) {
+		r.Use(softMW)
+		if s.HTML != nil {
+			r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet, http.MethodHead, http.MethodOptions:
+					s.HTML.ServeHTTP(w, r)
+				default:
+					respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
+						"no route matches "+r.Method+" "+r.URL.Path)
+				}
+			})
+		} else {
+			r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 				respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
-					"no route matches "+r.Method+" "+r.URL.Path)
-			}
-		})
-	} else {
-		r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
-			respondError(w, http.StatusNotFound, "ROUTE_NOT_FOUND",
-				"HTML renderer not configured")
-		})
-	}
+					"HTML renderer not configured")
+			})
+		}
+	})
 
 	return r
 }

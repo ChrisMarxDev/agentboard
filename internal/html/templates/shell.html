@@ -80,7 +80,7 @@
   <span class="brand"><a href="/">{{.WorkspaceName}}</a></span>
   <span class="branch">{{.Branch}}</span>
   <span class="spacer"></span>
-  <span class="user">{{if .User}}@{{.User}}{{else}}<a href="/_api/auth/login">sign in</a>{{end}}</span>
+  <span class="user">{{if .User}}@{{.User}} · <a href="/logout">sign out</a>{{else}}<a href="/login">sign in</a>{{end}}</span>
 </header>
 <div class="backdrop" onclick="document.body.classList.remove('nav-open');document.querySelector('.menu-btn').setAttribute('aria-expanded','false')"></div>
 <aside id="ab-nav">

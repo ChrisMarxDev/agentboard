@@ -69,6 +69,11 @@ type MiddlewareConfig struct {
 	// open regardless. Used today for the /api/setup/* flow, which is
 	// only reachable before a user exists.
 	OpenPaths []string
+	// OpenPrefixes mark URL prefixes that pass through anonymous-OK.
+	// A prefix matches if r.URL.Path == prefix or r.URL.Path begins
+	// with prefix + "/". Used for routes whose URL carries a variable
+	// segment (e.g. /invite/<id>) and for the catch-all HTML surface.
+	OpenPrefixes []string
 }
 
 // TokenMiddleware resolves the Bearer / Basic / ?token= credential to a
@@ -93,11 +98,24 @@ type MiddlewareConfig struct {
 // token so it stays off the hot path.
 func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http.Handler {
 	openSet := buildOpenSet(cfg.OpenPaths)
+	openPrefixes := append([]string(nil), cfg.OpenPrefixes...)
 	updater := newUsageUpdater(store)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if passThrough(r, openSet) {
+			if passThrough(r, openSet) || hasOpenPrefix(r, openPrefixes) {
+				// Anonymous-OK path, but still try to resolve a session
+				// cookie if present so downstream handlers can show
+				// "@username" / personalize output. Bearer + invalid
+				// cookies are silently ignored on the open path so we
+				// never 401 here.
+				if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+					if user, sess, err := store.ResolveSession(cookie.Value); err == nil {
+						ctx := context.WithValue(r.Context(), ctxUser, user)
+						ctx = context.WithValue(ctx, ctxSession, sess)
+						r = r.WithContext(ctx)
+					}
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -370,6 +388,52 @@ func passThrough(r *http.Request, openSet map[string]struct{}) bool {
 	}
 	if _, ok := openSet[r.URL.Path]; ok {
 		return true
+	}
+	return false
+}
+
+// SoftAuthMiddleware resolves session cookies and bearer tokens when
+// present and attaches the user to the request context, but never
+// returns 401 on missing/invalid credentials. Use it for public
+// surfaces that personalize for signed-in users while still serving
+// anonymous traffic — the HTML dashboard catch-all, login/invite
+// pages, etc.
+func SoftAuthMiddleware(store *Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Bearer first — bearer-authenticated agents still want
+			// their identity visible.
+			if token := extractToken(r); token != "" && !strings.HasPrefix(token, OAuthAccessPrefix) {
+				if user, tok, err := store.ResolveToken(HashToken(token)); err == nil {
+					ctx := context.WithValue(r.Context(), ctxUser, user)
+					ctx = context.WithValue(ctx, ctxToken, tok)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			// Cookie path.
+			if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+				if user, sess, err := store.ResolveSession(cookie.Value); err == nil {
+					ctx := context.WithValue(r.Context(), ctxUser, user)
+					ctx = context.WithValue(ctx, ctxSession, sess)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func hasOpenPrefix(r *http.Request, prefixes []string) bool {
+	p := r.URL.Path
+	for _, pref := range prefixes {
+		if p == pref {
+			return true
+		}
+		if strings.HasPrefix(p, pref+"/") {
+			return true
+		}
 	}
 	return false
 }
