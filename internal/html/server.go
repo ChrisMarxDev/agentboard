@@ -627,20 +627,30 @@ func breadcrumbsFor(urlPath string) []breadcrumb {
 }
 
 // treeNode describes one entry in the left sidebar tree.
+// Folders carry their own Children; files have nil Children. Open is
+// true when the current request's URL is somewhere under this folder
+// — controls the <details> open state in the template.
 type treeNode struct {
-	Label  string
-	Href   string
-	IsDir  bool
-	Depth  int
-	Active bool
+	Label    string
+	Href     string
+	IsDir    bool
+	Depth    int
+	Active   bool
+	Open     bool
+	Children []treeNode
 }
 
-// buildTree walks the worktree (one level deep for now; nested
-// folders expand on click in a future cut) and produces a flat list
-// of nav entries.
+// buildTree walks the worktree recursively up to maxTreeDepth levels.
+// Hidden entries (.git, .agentboard) are skipped. Folders containing
+// the current page auto-expand; everything else stays collapsed.
+const maxTreeDepth = 3
+
 func (s *Server) buildTree(currentPath string) []treeNode {
-	root := s.WorktreeRoot
-	entries, err := os.ReadDir(root)
+	return s.walkTreeDir(s.WorktreeRoot, "", currentPath, 0)
+}
+
+func (s *Server) walkTreeDir(absDir, urlPrefix, currentPath string, depth int) []treeNode {
+	entries, err := os.ReadDir(absDir)
 	if err != nil {
 		return nil
 	}
@@ -650,22 +660,39 @@ func (s *Server) buildTree(currentPath string) []treeNode {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		// Skip the assets dir agents drop in next to content. Anything
-		// the user-content origin needs lives at the worktree root,
-		// not in a magic subdir.
-		href := "/" + name
 		isDir := e.IsDir()
+		nodeURL := urlPrefix + "/" + name
 		if isDir {
-			href += "/"
+			nodeURL += "/"
 		}
-		label := strings.TrimSuffix(name, filepath.Ext(name))
-		out = append(out, treeNode{
+		label := name
+		if !isDir {
+			label = strings.TrimSuffix(name, filepath.Ext(name))
+		}
+		active := strings.HasPrefix(currentPath, urlPrefix+"/"+name) &&
+			(len(currentPath) == len(urlPrefix+"/"+name) ||
+				currentPath[len(urlPrefix+"/"+name)] == '/' ||
+				currentPath[len(urlPrefix+"/"+name)] == '?')
+		node := treeNode{
 			Label:  label,
-			Href:   href,
+			Href:   nodeURL,
 			IsDir:  isDir,
-			Depth:  0,
-			Active: strings.HasPrefix(currentPath, "/"+name),
-		})
+			Depth:  depth,
+			Active: active,
+		}
+		if isDir && depth+1 < maxTreeDepth {
+			node.Children = s.walkTreeDir(
+				filepath.Join(absDir, name),
+				urlPrefix+"/"+name,
+				currentPath,
+				depth+1,
+			)
+			// Auto-expand when the active path goes through this folder.
+			if active {
+				node.Open = true
+			}
+		}
+		out = append(out, node)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].IsDir != out[j].IsDir {

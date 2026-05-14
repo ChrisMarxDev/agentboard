@@ -34,6 +34,17 @@
   aside .tree .indent-2{padding-left:2.5rem}
   aside .tree .indent-3{padding-left:3.5rem}
   aside .tree .folder{font-weight:500;color:var(--text)}
+  aside .tree .subnav{font-weight:400;font-style:italic;color:var(--text-secondary);font-size:.8rem}
+  aside .tree details.tree-folder{margin:0}
+  aside .tree details.tree-folder > summary{cursor:pointer;padding:.5rem .85rem;font-weight:500;color:var(--text);
+    list-style:none;border-radius:4px;margin:0 .35rem;min-height:44px;display:flex;align-items:center;gap:.4rem;user-select:none}
+  aside .tree details.tree-folder > summary::-webkit-details-marker{display:none}
+  aside .tree details.tree-folder > summary::before{content:"▸";display:inline-block;width:.85rem;transition:transform .12s}
+  aside .tree details.tree-folder[open] > summary::before{transform:rotate(90deg)}
+  aside .tree details.tree-folder > summary:hover{background:var(--bg)}
+  aside .tree details.tree-folder.indent-1 > summary{padding-left:1.5rem}
+  aside .tree details.tree-folder.indent-2 > summary{padding-left:2.5rem}
+  aside .tree details.tree-folder.indent-3 > summary{padding-left:3.5rem}
 
   main{padding:1.25rem 1rem;overflow-y:auto;max-width:1100px}
   main.wide{max-width:none}
@@ -112,6 +123,20 @@
 
 {{define "treenodes"}}
 {{range .}}
-  <a href="{{.Href}}" class="{{if .IsDir}}folder {{end}}indent-{{.Depth}}{{if .Active}} active{{end}}">{{.Label}}</a>
+  {{if .IsDir}}
+    {{if .Children}}
+      <details class="tree-folder indent-{{.Depth}}"{{if .Open}} open{{end}}>
+        <summary>{{.Label}}/</summary>
+        <div class="tree-children">
+          <a href="{{.Href}}" class="folder indent-{{.Depth}} subnav{{if .Active}} active{{end}}">/{{.Label}}/ (index)</a>
+          {{template "treenodes" .Children}}
+        </div>
+      </details>
+    {{else}}
+      <a href="{{.Href}}" class="folder indent-{{.Depth}}{{if .Active}} active{{end}}">{{.Label}}/</a>
+    {{end}}
+  {{else}}
+    <a href="{{.Href}}" class="indent-{{.Depth}}{{if .Active}} active{{end}}">{{.Label}}</a>
+  {{end}}
 {{end}}
 {{end}}
