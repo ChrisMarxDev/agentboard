@@ -401,152 +401,295 @@ agentboard_fire_event({
 Webhook subscribers receive ` + "`{name: \"ship.v2.ready\", at, data: …}`" + `.
 `
 
-// SeededIndexMd is the home page seeded at index.md. Replaces the
-// dir-listing the user would otherwise land on; gives the dashboard
-// a friendly first impression on a freshly-claimed board.
-var SeededIndexMd = seededIndexMd
+// Seeded demo content is now HTML, not markdown. The substrate pivot
+// (spec-filesystem-substrate.md) made HTML the primary expressive
+// primitive: agents already know it from training data, it renders
+// without a runtime, and it ships zero proprietary syntax. We keep
+// markdown for two conventional surfaces — the bootstrap README and
+// Anthropic-format SKILL.md — and use HTML for everything else
+// authored. Typed views (Taskboard, etc.) stay structured JSON.
 
-const seededIndexMd = `---
-title: AgentBoard
-wide: true
----
+// SeededIndexHTML is the home page seeded at index.html. HTML, not
+// markdown, because the substrate pivot named HTML as the primary
+// expressive surface for read-once content authored by agents.
+var SeededIndexHTML = seededIndexHTML
 
-# AgentBoard
+const seededIndexHTML = `<!doctype html>
+<title>AgentBoard</title>
+<style>
+  .hero { padding: 2rem 0 1rem; border-bottom: 1px solid var(--border); margin-bottom: 1.5rem; }
+  .hero h1 { font-size: 2.25rem; margin: 0 0 .5rem; letter-spacing: -.02em; }
+  .hero p  { font-size: 1.05rem; color: var(--text-secondary); margin: 0; max-width: 60ch; }
 
-You are looking at a **shared workspace** — a git repo a small team of
-humans and AI agents collaborate inside. Every file in this tree is
-served as-is by the dashboard: markdown renders to HTML, JSON renders
-as a kanban (when it has ` + "`columns`" + ` + ` + "`cards`" + `), the rest of the
-extensions render with their natural content-type.
+  .grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin: 1.5rem 0 2rem;
+  }
+  .card-link {
+    display: block; padding: 1rem 1.25rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--ab-radius); text-decoration: none; color: inherit;
+    transition: border-color .12s ease, transform .12s ease;
+  }
+  .card-link:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card-link .eyebrow { font-size: .7rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text-secondary); margin-bottom: .35rem; }
+  .card-link .label { font-weight: 600; color: var(--text); margin-bottom: .25rem; }
+  .card-link .desc  { font-size: .85rem; color: var(--text-secondary); }
 
-## Explore
+  .connect { background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--ab-radius); padding: 1.25rem 1.5rem; margin-top: 1rem; }
+  .connect h2 { margin-top: 0; font-size: 1rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text-secondary); }
+  .connect pre { margin: .75rem 0 0; }
+</style>
 
-- [README](/README.md) — how this workspace is wired and how to connect.
-- [Getting started](/pages/getting-started.md) — a richer demo page
-  showing what the renderer does with markdown.
-- [Sprint board](/taskboards/sprint.json) — the Taskboard typed view
-  in action: a JSON file rendered as a live kanban.
-- [Changelog](/pages/changelog.md) — short, glance-friendly activity log.
-- [Agent skill](/skills/agentboard/SKILL.md) — the protocol agents read
-  on a cold boot.
+<section class="hero">
+  <h1>AgentBoard</h1>
+  <p>A shared workspace — a git repo a small team of humans and AI agents
+     collaborate inside. Every file in this tree is served as-is by the
+     dashboard: HTML renders as expressive pages, JSON with
+     <code>columns</code>+<code>cards</code> renders as a kanban,
+     markdown renders through goldmark.</p>
+</section>
 
-## Connect
+<section class="grid">
+  <a class="card-link" href="/pages/getting-started.html">
+    <div class="eyebrow">Read</div>
+    <div class="label">Getting started</div>
+    <div class="desc">Authored HTML — what an expressive page looks like.</div>
+  </a>
+  <a class="card-link" href="/taskboards/sprint.json">
+    <div class="eyebrow">Typed view</div>
+    <div class="label">Sprint board</div>
+    <div class="desc">A JSON file rendered as a live kanban.</div>
+  </a>
+  <a class="card-link" href="/pages/changelog.html">
+    <div class="eyebrow">Activity</div>
+    <div class="label">Changelog</div>
+    <div class="desc">Short, glance-friendly log of recent ships.</div>
+  </a>
+  <a class="card-link" href="/README.md">
+    <div class="eyebrow">Convention</div>
+    <div class="label">README</div>
+    <div class="desc">How this workspace is wired and how to connect.</div>
+  </a>
+  <a class="card-link" href="/skills/agentboard/SKILL.md">
+    <div class="eyebrow">Agent contract</div>
+    <div class="label">SKILL</div>
+    <div class="desc">The protocol agents read on a cold boot.</div>
+  </a>
+</section>
 
-Authenticate via the invitation URL printed at boot, then either:
-
-` + "```bash" + `
-# git, in the directory you want to bind to this workspace
-git init -q
-git remote add origin http://<user>:$AGENTBOARD_TOKEN@<host>/git/dogfood.git
+<section class="connect">
+  <h2>Connect</h2>
+  <p>Open the invite URL printed in the server log to claim an admin
+     account. Then bind a working directory to this workspace:</p>
+  <pre><code>git init -q
+git remote add origin http://&lt;user&gt;:$AGENTBOARD_TOKEN@&lt;host&gt;/git/dogfood.git
 git fetch -q origin
-git checkout -B main origin/main
-` + "```" + `
-
-or, over MCP:
-
-` + "```" + `
-claude mcp add agentboard https://<host>/mcp
-` + "```" + `
-
-Edits via ` + "`git push`" + ` or ` + "`agentboard_propose`" + ` show up here
-immediately.
+git checkout -B main origin/main</code></pre>
+  <p style="margin-top:.75rem">Or, over MCP:</p>
+  <pre><code>claude mcp add agentboard https://&lt;host&gt;/mcp</code></pre>
+</section>
 `
 
-// SeededGettingStartedMd is a richer demo page seeded at
-// pages/getting-started.md. Exercises every markdown construct
-// goldmark + the design-system stylesheet handles, so visitors can
-// see what authoring on this board looks like.
-var SeededGettingStartedMd = seededGettingStartedMd
+// SeededGettingStartedHTML is the demo "what authoring HTML looks
+// like" page. Embedded styles, design-system tokens, real content
+// shape — read it for ideas about what agents can ship as HTML.
+var SeededGettingStartedHTML = seededGettingStartedHTML
 
-const seededGettingStartedMd = `---
-title: Getting started
----
+const seededGettingStartedHTML = `<!doctype html>
+<title>Getting started</title>
+<style>
+  h1 { letter-spacing: -.015em; }
+  .lede { font-size: 1.05rem; color: var(--text-secondary);
+          max-width: 65ch; margin: 0 0 1.5rem; }
+  .callout {
+    display: grid; grid-template-columns: auto 1fr; gap: 1rem;
+    align-items: start;
+    background: var(--accent-light); border-left: 3px solid var(--accent);
+    border-radius: var(--ab-radius); padding: 1rem 1.25rem; margin: 1.25rem 0;
+    font-size: .95rem; color: var(--text);
+  }
+  .callout .icon {
+    width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+    color: white; font-weight: 700; display: grid; place-items: center;
+  }
+  .step-grid { display: grid; gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    margin: 1.5rem 0; }
+  .step { padding: 1rem 1.25rem; background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: var(--ab-radius); }
+  .step .n { color: var(--accent); font-weight: 700; font-size: 1.25rem; }
+  .step h3 { margin: .25rem 0 .5rem; font-size: 1rem; }
+  .step p  { margin: 0; font-size: .9rem; color: var(--text-secondary); }
+  table.compact { width: 100%; }
+  table.compact th { text-align: left; }
+</style>
 
-# Getting started
+<h1>Getting started</h1>
 
-This page is a real ` + "`.md`" + ` file in the workspace. It renders through
-goldmark (GitHub-flavored markdown) and inherits the dashboard's
-typography from ` + "`/_static/design-system.css`" + `.
+<p class="lede">
+  This page is a real <code>.html</code> file in the workspace. The server
+  inlines its body inside the dashboard shell so it can use the same
+  design-system tokens (<code>--ab-accent</code>, <code>--ab-radius</code>, …)
+  the chrome uses. No build step. No JSX. Just HTML and CSS, the way agents
+  learn them from training data.
+</p>
 
-## Writing a doc
+<div class="callout">
+  <div class="icon">i</div>
+  <div>
+    <strong>HTML is the primary expressive primitive.</strong> Reach for it
+    for read-once content that wants a layout. Reach for <em>markdown</em>
+    only for conventional docs (READMEs, SKILL.md). Reach for <em>typed
+    JSON</em> when the content has queryable structure (taskboards now;
+    more types coming).
+  </div>
+</div>
 
-Every doc is one file. Frontmatter (the ` + "`---`" + ` block at the top)
-configures the page; everything below is markdown.
+<h2>The three primitives</h2>
 
-` + "```yaml" + `
----
-title: Title shown in the tab + heading
-wide: true        # opt out of the 1100px max-width when content needs room
----
-` + "```" + `
+<div class="step-grid">
+  <div class="step">
+    <div class="n">01</div>
+    <h3>HTML pages</h3>
+    <p>Free-form layout, embedded CSS, design-system tokens. The body
+       inlines into the dashboard shell — drop a <code>&lt;style&gt;</code>
+       block and go.</p>
+  </div>
+  <div class="step">
+    <div class="n">02</div>
+    <h3>Typed views</h3>
+    <p>Structured JSON the server renders as a typed surface. A file
+       with <code>columns</code>+<code>cards</code> renders as a
+       <a href="/taskboards/sprint.json">kanban board</a>.</p>
+  </div>
+  <div class="step">
+    <div class="n">03</div>
+    <h3>Markdown</h3>
+    <p>For conventional docs — READMEs, change logs, agent skills.
+       Rendered through goldmark with GitHub-flavored extensions.</p>
+  </div>
+</div>
 
-## Lists, tables, code
+<h2>How edits land</h2>
 
-Standard markdown works without ceremony.
+<p>Either <code>git push</code> (the preferred path) or the MCP
+<code>agentboard_propose</code> tool. The server makes a real commit,
+updates the worktree mirror, and the dashboard re-renders on the next
+request.</p>
 
-### Roadmap (table)
+<pre><code># push a page
+git add pages/notes.html
+git commit -m "Add notes"
+git push
 
-| Item               | Status      | Owner   |
-|--------------------|-------------|---------|
-| Git substrate      | Shipped     | core    |
-| Taskboard view     | Shipped     | core    |
-| Typed views (more) | Considering | ~       |
-| Search             | Backlog     | ~       |
+# push a typed view
+git add taskboards/sprint.json
+git commit -m "Update sprint board"
+git push</code></pre>
 
-### Quick commands
+<h2>Comparison</h2>
 
-` + "```bash" + `
-# push a doc
-git add pages/notes.md && git commit -m "Add notes" && git push
+<table class="compact">
+  <thead>
+    <tr><th>Use case</th><th>Pick</th><th>Why</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Landing page, dashboard, demo</td><td><code>.html</code></td>
+        <td>Full layout control, custom CSS, design-system tokens.</td></tr>
+    <tr><td>Kanban board, structured data</td><td><code>.json</code></td>
+        <td>Typed view renders + stays queryable for typed APIs.</td></tr>
+    <tr><td>README, skill, change log prose</td><td><code>.md</code></td>
+        <td>Convention. Short prose; humans glance.</td></tr>
+    <tr><td>Image, PDF, font</td><td>(binary)</td>
+        <td>Commit the bytes; the renderer serves the right content-type.</td></tr>
+  </tbody>
+</table>
 
-# push a taskboard
-git add taskboards/sprint.json && git commit -m "Update sprint" && git push
-` + "```" + `
-
-### Quote
-
-> The workspace teaches the agent. Files are the teaching surface.
-
-## How edits land
-
-Either ` + "`git push`" + ` (the preferred path) or the MCP
-` + "`agentboard_propose`" + ` tool. The server makes a real commit, updates
-the worktree mirror, and the dashboard re-renders on the next request.
-
-Need to react to a teammate's push? Use ` + "`agentboard_subscribe`" + ` (long-poll)
-or ` + "`git fetch`" + ` on a timer.
+<p style="margin-top:2rem;color:var(--text-secondary);font-size:.85rem">
+  Need to react to a teammate's push? Use
+  <code>agentboard_subscribe</code> (long-poll) or <code>git fetch</code>
+  on a timer.
+</p>
 `
 
-// SeededChangelogMd is a small activity-log style page. Demonstrates
-// that a flat markdown file works fine for log-style content —
-// there's no separate "stream" concept in the new substrate.
-var SeededChangelogMd = seededChangelogMd
+// SeededChangelogHTML is a tight, visual activity log. Demonstrates
+// what a "stream-like" page looks like as authored HTML — no need for
+// a separate stream primitive when a styled <ol> does the job.
+var SeededChangelogHTML = seededChangelogHTML
 
-const seededChangelogMd = `---
-title: Changelog
----
+const seededChangelogHTML = `<!doctype html>
+<title>Changelog</title>
+<style>
+  .timeline { list-style: none; padding: 0; margin: 1.5rem 0; }
+  .timeline > li { position: relative; padding: 0 0 1.5rem 1.5rem;
+    border-left: 2px solid var(--border); margin-left: 4px; }
+  .timeline > li:last-child { border-left-color: transparent; }
+  .timeline > li::before {
+    content: ""; position: absolute; left: -7px; top: .35rem;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .timeline time { font-size: .8rem; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; }
+  .timeline h3 { margin: .15rem 0 .25rem; font-size: 1rem; }
+  .timeline p { margin: 0; color: var(--text-secondary); font-size: .9rem; }
+  .pill { display: inline-block; padding: .05rem .45rem; border-radius: 9999px;
+    font-size: .7rem; font-weight: 500; margin-right: .35rem;
+    background: var(--bg-secondary); color: var(--text-secondary);
+    border: 1px solid var(--border); }
+  .pill.substrate { background: var(--accent-light); color: var(--accent);
+    border-color: transparent; }
+</style>
 
-# Changelog
+<h1>Changelog</h1>
+<p class="ab-muted">Short, glance-friendly. One entry per shipping moment.</p>
 
-Short, glance-friendly. One line per shipping moment.
-
-## 2026-05-14
-
-- Mobile-responsive shell: hamburger toggle + drawer-style sidebar overlay.
-- Seeded richer example content (home page, getting-started, sprint
-  taskboard, changelog) on every fresh board.
-
-## 2026-05-13
-
-- Substrate cut E shipped: **Taskboard typed view** — JSON files with
-  ` + "`columns`" + ` + ` + "`cards`" + ` render as kanban boards.
-- Wholesale rewrite landed (cuts C–H): React SPA + v0.13 file store
-  retired; everything is git + server-rendered HTML now.
-
-## 2026-04-30
-
-- Cuts 1–10 retired the v0.13 substrate. Workspace = git repo;
-  dashboard reads the working-tree mirror.
+<ol class="timeline">
+  <li>
+    <time>2026-05-14</time>
+    <h3>HTML primitive landed in seeded content</h3>
+    <p><span class="pill substrate">substrate</span>
+       Switched seeded examples from <code>.md</code> to <code>.html</code>:
+       <a href="/index.html">home</a>,
+       <a href="/pages/getting-started.html">getting started</a>,
+       <a href="/pages/changelog.html">changelog</a>.
+       Markdown stays for READMEs and SKILL.md per convention.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>Mobile-responsive shell</h3>
+    <p><span class="pill">ux</span>
+       Hamburger toggle, drawer-style sidebar overlay, larger tap targets,
+       horizontal-scroll behavior on tables and code blocks.</p>
+  </li>
+  <li>
+    <time>2026-05-13</time>
+    <h3>Taskboard typed view (substrate cut E)</h3>
+    <p><span class="pill substrate">substrate</span>
+       JSON files with <code>columns</code>+<code>cards</code> render as
+       kanban boards. See <a href="/taskboards/sprint.json">/taskboards/sprint.json</a>.</p>
+  </li>
+  <li>
+    <time>2026-05-13</time>
+    <h3>Wholesale rewrite — cuts C–H</h3>
+    <p><span class="pill substrate">substrate</span>
+       React SPA + v0.13 file store retired. Substrate is now git, dashboard
+       is server-rendered HTML. ~46k lines deleted; ~1k added.</p>
+  </li>
+  <li>
+    <time>2026-04-30</time>
+    <h3>v0.13 → git substrate pivot begins</h3>
+    <p><span class="pill substrate">substrate</span>
+       Cuts 1–10 retired the v0.13 substrate. Workspace = git repo;
+       dashboard reads the working-tree mirror.</p>
+  </li>
+</ol>
 `
 
 // SeededSprintTaskboardJSON is a working Taskboard example. Shape

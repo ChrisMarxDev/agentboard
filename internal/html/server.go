@@ -136,7 +136,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, os.ErrNotExist) {
 			// Auto-suffix: try .md or .html for extension-less paths.
 			if filepath.Ext(abs) == "" {
-				for _, ext := range []string{".md", ".html"} {
+				for _, ext := range []string{".html", ".md"} {
 					if i, ierr := os.Stat(abs + ext); ierr == nil && !i.IsDir() {
 						s.renderFile(w, r, urlPath, abs+ext, i)
 						return
@@ -192,7 +192,7 @@ func (s *Server) resolvePath(rel string) (string, bool) {
 // renderDirectory serves <dir>/index.html if it exists; otherwise
 // builds a directory listing.
 func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, urlPath, abs string) {
-	for _, idx := range []string{"index.md", "index.html"} {
+	for _, idx := range []string{"index.html", "index.md"} {
 		candidate := filepath.Join(abs, idx)
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			s.renderFile(w, r, urlPath, candidate, info)
@@ -311,17 +311,110 @@ func (s *Server) renderMarkdown(w http.ResponseWriter, r *http.Request, urlPath 
 }
 
 func (s *Server) renderHTML(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte) {
-	// For trusted authored HTML we strip the frontmatter (if any) and
-	// inline the rest into the shell. A future cut serves arbitrary
+	// For trusted authored HTML we extract the page <title> + the
+	// <body> contents (if the file is a full HTML document) and inline
+	// the result into the shell. Agents writing partial fragments work
+	// too — those pass through unchanged. A future cut serves arbitrary
 	// HTML on usercontent.<host> via a sandbox iframe; until that
-	// origin exists we render inline.
-	fm, body := splitFrontmatter(raw)
+	// origin exists, inline-into-shell is the chosen rendering.
+	//
+	// Frontmatter still works (YAML `---` block at the very top) for
+	// agents who prefer it; full HTML docs win when both are present.
+	fm, rest := splitFrontmatter(raw)
 	title := titleFromFrontmatter(fm)
+	if t := extractHTMLTitle(rest); t != "" {
+		title = t
+	}
+	body := extractHTMLBody(rest)
 	if title == "" {
 		title = pathLabel(urlPath)
 	}
 	wide := isWide(fm)
 	s.renderShell(w, r, urlPath, title, template.HTML(body), metaBarFrom(fm), wide)
+}
+
+// extractHTMLTitle pulls the inner text out of the first <title>…</title>
+// in a document. Tolerant of attributes and whitespace; returns "" when
+// no title is present.
+func extractHTMLTitle(s string) string {
+	lower := strings.ToLower(s)
+	start := strings.Index(lower, "<title")
+	if start < 0 {
+		return ""
+	}
+	gt := strings.Index(lower[start:], ">")
+	if gt < 0 {
+		return ""
+	}
+	inner := start + gt + 1
+	end := strings.Index(lower[inner:], "</title>")
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[inner : inner+end])
+}
+
+// extractHTMLBody returns the inside of the first <body>…</body> if the
+// document has one. Files written as fragments (no <html>/<body>) pass
+// through unchanged. Drops doctype, <head>, and the <body>'s own tag
+// when present so the shell's chrome doesn't get nested inside another
+// document.
+func extractHTMLBody(s string) string {
+	lower := strings.ToLower(s)
+	start := strings.Index(lower, "<body")
+	if start < 0 {
+		// Strip a leading doctype if the agent wrote a full doc without
+		// a <body> wrapper (which is valid HTML — the body element is
+		// optional). Also strip any <title>/<head> tags since the shell
+		// owns the document <head>.
+		out := stripTag(s, "head")
+		out = stripTag(out, "title")
+		out = stripDoctype(out)
+		return out
+	}
+	gt := strings.Index(lower[start:], ">")
+	if gt < 0 {
+		return s
+	}
+	bodyStart := start + gt + 1
+	end := strings.LastIndex(lower, "</body>")
+	if end < bodyStart {
+		return s[bodyStart:]
+	}
+	return s[bodyStart:end]
+}
+
+// stripDoctype removes a leading <!doctype …> declaration (case-
+// insensitive). No-op if absent.
+func stripDoctype(s string) string {
+	t := strings.TrimLeft(s, " \t\r\n")
+	if !strings.HasPrefix(strings.ToLower(t), "<!doctype") {
+		return s
+	}
+	gt := strings.Index(t, ">")
+	if gt < 0 {
+		return s
+	}
+	return strings.TrimLeft(t[gt+1:], "\r\n")
+}
+
+// stripTag removes the first <name …>…</name> block (case-insensitive)
+// from s. No-op if not found. Used to scrub <head> and <title> when
+// they appear outside a <body> wrapper — the shell owns the document
+// <head> and shouldn't nest a stray one inside <main>.
+func stripTag(s, name string) string {
+	lower := strings.ToLower(s)
+	open := "<" + name
+	close := "</" + name + ">"
+	start := strings.Index(lower, open)
+	if start < 0 {
+		return s
+	}
+	end := strings.Index(lower[start:], close)
+	if end < 0 {
+		return s
+	}
+	return s[:start] + s[start+end+len(close):]
 }
 
 func (s *Server) renderJSON(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte) {

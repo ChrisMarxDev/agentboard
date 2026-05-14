@@ -203,6 +203,60 @@ func (s *Store) EnsureFile(ctx context.Context, workspaceID, path, body, actor, 
 	return s.writeFile(ctx, workspaceID, path, body, actor, commitMsg, false)
 }
 
+// EnsureAbsent removes `path` from the workspace's default branch if
+// it exists. The inverse of EnsureFile — used when a previous seed
+// shipped a file we now want gone (e.g. retiring a .md seed in
+// favor of the .html replacement).
+//
+// Idempotent: if the path doesn't exist, EnsureAbsent is a no-op.
+func (s *Store) EnsureAbsent(ctx context.Context, workspaceID, path, actor, commitMsg string) error {
+	ws, err := s.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	bare := s.BarePath(workspaceID)
+
+	// Fast-path: nothing to delete.
+	if _, err := runGit("", "--git-dir", bare, "cat-file", "-e", ws.DefaultBranch+":"+path); err != nil {
+		return nil
+	}
+
+	tmp, err := os.MkdirTemp("", "ab-delete-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	if out, err := runGit("", "clone", "--branch", ws.DefaultBranch, bare, tmp); err != nil {
+		return fmt.Errorf("clone bare: %w (output: %s)", err, out)
+	}
+	for _, kv := range [][2]string{
+		{"user.email", actor + "@agentboard.local"},
+		{"user.name", actor},
+	} {
+		if out, err := runGitIn(tmp, "config", kv[0], kv[1]); err != nil {
+			return fmt.Errorf("git config %s: %w (output: %s)", kv[0], err, out)
+		}
+	}
+	if out, err := runGitIn(tmp, "rm", "-f", path); err != nil {
+		return fmt.Errorf("git rm: %w (output: %s)", err, out)
+	}
+	if commitMsg == "" {
+		commitMsg = "Remove " + path
+	}
+	if out, err := runGitIn(tmp, "commit", "-m", commitMsg); err != nil {
+		return fmt.Errorf("git commit: %w (output: %s)", err, out)
+	}
+	if out, err := runGitIn(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
+		return fmt.Errorf("git push: %w (output: %s)", err, out)
+	}
+	_, _ = s.SyncWorktree(ctx, workspaceID)
+	s.fireInternalPush(ctx, workspaceID)
+	return nil
+}
+
 // PutFile writes `body` at `path` and commits it, overwriting any
 // existing content at that path. Used by `agentboard admin sync-seed`
 // when an operator wants the latest README + SKILL pushed into an

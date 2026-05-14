@@ -137,28 +137,44 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"Add bootstrap examples"); err != nil {
 		log.Printf("Warning: could not seed examples: %v", err)
 	}
-	// Demo content — gives a freshly-claimed board something to look at
-	// beyond the bootstrap chain. Each EnsureFile is idempotent on
-	// presence, so existing boards keep their authored content.
+	// Demo content. HTML is the primary expressive primitive
+	// (spec-filesystem-substrate.md); markdown stays only for
+	// conventional surfaces (README, SKILL.md). Typed JSON for the
+	// Taskboard. Each EnsureFile is idempotent on presence, so existing
+	// boards keep their authored content.
 	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"index.md", project.SeededIndexMd, "system",
-		"Add home page"); err != nil {
-		log.Printf("Warning: could not seed index.md: %v", err)
+		"index.html", project.SeededIndexHTML, "system",
+		"Add home page (HTML)"); err != nil {
+		log.Printf("Warning: could not seed index.html: %v", err)
 	}
 	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"pages/getting-started.md", project.SeededGettingStartedMd, "system",
-		"Add getting-started demo page"); err != nil {
+		"pages/getting-started.html", project.SeededGettingStartedHTML, "system",
+		"Add getting-started demo page (HTML)"); err != nil {
 		log.Printf("Warning: could not seed getting-started: %v", err)
 	}
 	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"pages/changelog.md", project.SeededChangelogMd, "system",
-		"Add changelog page"); err != nil {
+		"pages/changelog.html", project.SeededChangelogHTML, "system",
+		"Add changelog page (HTML)"); err != nil {
 		log.Printf("Warning: could not seed changelog: %v", err)
 	}
 	if err := gitStore.EnsureFile(context.Background(), "dogfood",
 		"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "system",
 		"Add sprint taskboard example"); err != nil {
 		log.Printf("Warning: could not seed sprint taskboard: %v", err)
+	}
+
+	// Retire legacy .md seeds from boards that received the earlier cut.
+	// No-op on workspaces that never had them.
+	for _, legacy := range []string{
+		"index.md",
+		"pages/getting-started.md",
+		"pages/changelog.md",
+	} {
+		if err := gitStore.EnsureAbsent(context.Background(), "dogfood",
+			legacy, "system",
+			"Retire legacy .md seed (replaced by .html)"); err != nil {
+			log.Printf("Warning: could not retire %s: %v", legacy, err)
+		}
 	}
 	wtPath, err := gitStore.EnsureWorktree(context.Background(), "dogfood")
 	if err != nil {
