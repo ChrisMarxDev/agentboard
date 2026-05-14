@@ -83,11 +83,16 @@ check "GET / returns 200 (anonymous dashboard read)" \
 
 # ----- 2. Login UI -----
 echo "▸ Login UI"
-check "GET /login renders an HTML form (status 200)" \
-  "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/login') = 200 ]"
-check "GET /login body contains username + password inputs" \
-  "curl -sS '$REMOTE_BASE/login' | grep -qE 'name=\"username\"' && \
-   curl -sS '$REMOTE_BASE/login' | grep -qE 'name=\"password\"'"
+LOGIN_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "$REMOTE_BASE/login")"
+# On a claimed board /login renders the form (200). On an unclaimed
+# board it short-circuits to /invite/<id> (302). Either is correct.
+check "GET /login is 200 (claimed board) OR 302 (unclaimed → invite)" \
+  "[ '$LOGIN_STATUS' = 200 ] || [ '$LOGIN_STATUS' = 302 ]"
+if [[ "$LOGIN_STATUS" = 200 ]]; then
+  check "GET /login body contains username + password inputs" \
+    "curl -sS '$REMOTE_BASE/login' | grep -qE 'name=\"username\"' && \
+     curl -sS '$REMOTE_BASE/login' | grep -qE 'name=\"password\"'"
+fi
 check "GET /logout redirects (302)" \
   "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/logout') = 302 ]"
 

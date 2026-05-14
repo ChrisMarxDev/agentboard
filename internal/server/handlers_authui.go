@@ -132,6 +132,19 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, redirectTarget(r, "/"), http.StatusFound)
 		return
 	}
+	// If the board has no users yet, /login is the wrong UI — there's
+	// nothing to log into. Send the visitor at the active bootstrap
+	// invitation instead so they can claim the first admin in one
+	// click. If somehow there's no active bootstrap invite, fall
+	// through to the regular login form (with a hint in the foot).
+	if s.Auth != nil && s.Invitations != nil {
+		if has, _ := s.Auth.HasAnyUser(); !has {
+			if inv, err := s.Invitations.BootstrapActive(); err == nil && inv != nil {
+				http.Redirect(w, r, "/invite/"+inv.ID, http.StatusFound)
+				return
+			}
+		}
+	}
 	data := loginViewData(r, "", "")
 	s.renderAuthUI(w, data)
 }
