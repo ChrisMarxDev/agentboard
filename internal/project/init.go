@@ -637,6 +637,41 @@ const seededChangelogHTML = `<!doctype html>
 <ol class="timeline">
   <li>
     <time>2026-05-14</time>
+    <h3>Diff viewer + clickable history</h3>
+    <p><span class="pill">qol</span>
+       <code>?diff=&lt;sha&gt;</code> or <code>?diff=&lt;from&gt;..&lt;to&gt;</code> renders
+       a colored unified diff. History rows now link straight into the
+       diff for that commit. Backed by <code>git diff --no-color</code>
+       on the bare repo.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>Sidebar nested folders</h3>
+    <p><span class="pill">qol</span>
+       <code>buildTree</code> now recurses three levels. Folders render
+       as <code>&lt;details&gt;</code> with a rotating chevron — no JS,
+       keyboard-toggleable. The folder containing the active page
+       auto-expands.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>Page history viewer</h3>
+    <p><span class="pill">qol</span>
+       <code>?history=1</code> renders the file's git log as a styled
+       list. The shell shows a "(history)" link in the page-actions
+       strip on every real file page.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>Roadmap page + quality-of-life plan</h3>
+    <p><span class="pill">docs</span>
+       <a href="/pages/roadmap.html">/pages/roadmap.html</a> is the
+       living plan: history (shipped), search, typed views, editing,
+       presence, substrate work. Each item carries a rough size
+       estimate.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
     <h3>Human-facing auth UI</h3>
     <p><span class="pill">auth</span>
        <code>/login</code> and <code>/invite/&lt;id&gt;</code> are real HTML
@@ -956,32 +991,44 @@ const seededSprintTaskboardJSON = `{
       "order": 3.0
     },
     {
+      "id": "c-done-history",
+      "title": "Page history viewer",
+      "column": "done",
+      "body": "?history=1 lists commits via git log --follow on the bare repo.",
+      "labels": ["history", "qol"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 4.0
+    },
+    {
+      "id": "c-done-nested-tree",
+      "title": "Sidebar nested folders",
+      "column": "done",
+      "body": "Recurses 3 levels via <details>/<summary>. No JS dependency.",
+      "labels": ["ux", "qol"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 5.0
+    },
+    {
+      "id": "c-done-diff",
+      "title": "Diff between revisions",
+      "column": "done",
+      "body": "?diff=<sha> renders colored unified diff. History rows link in.",
+      "labels": ["history", "qol"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 6.0
+    },
+    {
       "id": "c-doing-self-loop",
       "title": "Self-checking dev loop",
       "column": "doing",
-      "body": "Auto-iterate on auth + content + QOL features under ScheduleWakeup over the next 3 hours.",
+      "body": "Auto-iterate on auth + content + QOL features under unsupervised 3-hour window.",
       "labels": ["dogfood", "process"],
       "assignees": ["claude"],
       "priority": 1,
       "order": 0.5
-    },
-    {
-      "id": "c-todo-history",
-      "title": "Page history viewer",
-      "column": "todo",
-      "body": "GET /<path>?history=1 lists commits via git log --follow.",
-      "labels": ["history", "qol"],
-      "priority": 1,
-      "order": 1.0
-    },
-    {
-      "id": "c-todo-diff",
-      "title": "Diff between revisions",
-      "column": "todo",
-      "body": "Side-by-side diff at /<path>?diff=<sha>..<sha> via git diff --color-words.",
-      "labels": ["history", "qol"],
-      "priority": 1,
-      "order": 2.0
     },
     {
       "id": "c-todo-search",
@@ -990,16 +1037,16 @@ const seededSprintTaskboardJSON = `{
       "body": "SQLite FTS5 over the working tree, rebuilt on post-receive.",
       "labels": ["discovery", "qol"],
       "priority": 2,
-      "order": 3.0
+      "order": 1.0
     },
     {
-      "id": "c-todo-nested-tree",
-      "title": "Sidebar nested folders",
+      "id": "c-todo-live-reload",
+      "title": "Live page-changed toast (SSE)",
       "column": "todo",
-      "body": "Recurse + lazy-expand. Critical once the tree grows.",
-      "labels": ["ux", "qol"],
+      "body": "Reuse SSE broadcaster: post-receive → toast offering reload.",
+      "labels": ["collab", "qol"],
       "priority": 2,
-      "order": 4.0
+      "order": 2.0
     },
     {
       "id": "c-backlog-mention",
