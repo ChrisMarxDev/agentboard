@@ -637,6 +637,15 @@ const seededChangelogHTML = `<!doctype html>
 <ol class="timeline">
   <li>
     <time>2026-05-14</time>
+    <h3>Live page-changed toast (SSE)</h3>
+    <p><span class="pill">qol</span>
+       Push events broadcast over <code>/_api/events</code>; the
+       dashboard shell pops a non-modal "Reload" toast when the workspace
+       changes under your feet. EventSource-based; graceful degradation
+       on browsers without it.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
     <h3>Diff viewer + clickable history</h3>
     <p><span class="pill">qol</span>
        <code>?diff=&lt;sha&gt;</code> or <code>?diff=&lt;from&gt;..&lt;to&gt;</code> renders
@@ -1021,6 +1030,16 @@ const seededSprintTaskboardJSON = `{
       "order": 6.0
     },
     {
+      "id": "c-done-sse-toast",
+      "title": "Live page-changed toast (SSE)",
+      "column": "done",
+      "body": "Workspace pushes broadcast over /_api/events; dashboard pops a Reload toast.",
+      "labels": ["collab", "qol"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 7.0
+    },
+    {
       "id": "c-doing-self-loop",
       "title": "Self-checking dev loop",
       "column": "doing",
@@ -1038,15 +1057,6 @@ const seededSprintTaskboardJSON = `{
       "labels": ["discovery", "qol"],
       "priority": 2,
       "order": 1.0
-    },
-    {
-      "id": "c-todo-live-reload",
-      "title": "Live page-changed toast (SSE)",
-      "column": "todo",
-      "body": "Reuse SSE broadcaster: post-receive → toast offering reload.",
-      "labels": ["collab", "qol"],
-      "priority": 2,
-      "order": 2.0
     },
     {
       "id": "c-backlog-mention",
