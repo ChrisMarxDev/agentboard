@@ -141,15 +141,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"Add bootstrap README (CORE_GUIDELINES §15)"); err != nil {
 		log.Printf("Warning: could not seed bootstrap README: %v", err)
 	}
+	// One canonical SKILL.md at the workspace root. Agent tools that
+	// have a skill-loading convention (Claude reads .claude/skills/…,
+	// Codex reads .codex/skills/…, etc.) can symlink or mirror this
+	// file into their own tool-home — we don't pre-fork it into n
+	// directories. The board itself doesn't special-case the path; it's
+	// just markdown at the root, like the README.
 	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"skills/agentboard/SKILL.md", project.SeededSkillManifest, "system",
-		"Add bootstrap SKILL"); err != nil {
-		log.Printf("Warning: could not seed SKILL: %v", err)
+		"SKILL.md", project.SeededRootSkill, "system",
+		"Add canonical SKILL"); err != nil {
+		log.Printf("Warning: could not seed SKILL.md: %v", err)
 	}
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
-		"skills/agentboard/examples.md", project.SeededSkillExamples, "system",
-		"Add bootstrap examples"); err != nil {
-		log.Printf("Warning: could not seed examples: %v", err)
+	// Retire the legacy skill paths from any previously-seeded board.
+	for _, legacy := range []string{
+		"skills/agentboard/SKILL.md",
+		"skills/agentboard/examples.md",
+		".claude/skills/agentboard/SKILL.md",
+		".claude/skills/agentboard/examples.md",
+	} {
+		if err := gitStore.EnsureAbsent(context.Background(), "dogfood",
+			legacy, "system",
+			"Retire legacy skill path (single SKILL.md at root now)"); err != nil {
+			log.Printf("Warning: could not retire %s: %v", legacy, err)
+		}
 	}
 	// Demo content. HTML is the primary expressive primitive
 	// (spec-filesystem-substrate.md); markdown stays for the

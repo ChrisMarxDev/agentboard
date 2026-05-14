@@ -47,9 +47,12 @@ history.
 
 ## If you are an agent, start here
 
-1. Read [` + "`skills/agentboard/SKILL.md`" + `](/skills/agentboard/SKILL.md) — it teaches
-   the protocol you'll use here: the six MCP tools, the conventions
-   for proposing changes, conflict resolution.
+1. Read [` + "`SKILL.md`" + `](/SKILL.md) at the workspace root — the
+   canonical AgentBoard primer (the six MCP tools, conventions, recipes).
+   If your runtime expects skills under a specific path
+   (` + "`.claude/skills/`" + `, ` + "`.codex/skills/`" + `, etc.), symlink or
+   mirror ` + "`SKILL.md`" + ` there. The file is plain markdown — no
+   custom format, no board-side special-casing.
 2. Skim the rest of the tree. Whatever folder this workspace uses as
    its task queue (the SKILL says where) is where the open work lives.
 3. Pick something, branch (` + "`git checkout -b feature/<slug>`" + `), commit,
@@ -68,6 +71,10 @@ history.
 
 - Files are what they are. A ` + "`.md`" + ` is markdown; a ` + "`.json`" + ` is JSON; a
   ` + "`.html`" + ` is sandboxed HTML. There is no transcoded schema.
+- **One canonical SKILL.md at the workspace root.** Agent tools can
+  symlink or mirror it into their own convention folder (` + "`.claude/`" + `,
+  ` + "`.codex/`" + `, etc.) — the board renders these dotted folders like
+  any other; no special handling. Convention over configuration.
 - Inline first (CORE_GUIDELINES §14): scalars live on the page that
   displays them. Only folder collections may legitimately cross-reference.
 - Read what's already here before you write. The workspace usually
@@ -114,11 +121,16 @@ theme: auto
 history_retention_days: 30
 `
 
-// SeededSkillManifest is the SKILL.md seeded under
-// skills/agentboard/ of every fresh workspace. Per CORE_GUIDELINES §15
-// and spec §1.5 this is where the bootstrap README points the agent —
-// the canonical agent contract. The §15 dogfood test is the canary
-// that catches drift.
+// SeededRootSkill is the single canonical SKILL.md seeded at the
+// workspace root. Merges the manifest + examples into one document so
+// the README's bootstrap chain has exactly one target. Agent tools
+// that look in their own convention folders (.claude/skills/,
+// .codex/skills/, etc.) can symlink or mirror this file in — we don't
+// pre-fork the seed into n directories.
+var SeededRootSkill = seededSkillManifest + "\n\n" + seededSkillExamples
+
+// SeededSkillManifest is kept exported for the admin sync-seed
+// command; its content is the first half of SeededRootSkill.
 var SeededSkillManifest = seededSkillManifest
 
 const seededSkillManifest = `---
@@ -256,19 +268,25 @@ Via MCP: ` + "`agentboard_propose`" + ` returns a conflicts list on rejection;
 call ` + "`agentboard_resolve_conflict(proposal, file, resolution)`" + ` once
 per conflicted file, and the proposal retries.
 
-## Quick examples
+## Where this skill lives
 
-See [examples.md](/skills/agentboard/examples.md) for concrete recipes
-— writing a doc, hosting a binary, replying to a teammate's push.
+This skill ships at ` + "`/SKILL.md`" + ` — the workspace root, one file,
+the only canonical copy. The board doesn't special-case the path; if
+your agent tool expects a skill under a specific directory
+(` + "`.claude/skills/`" + `, ` + "`.codex/skills/`" + `, etc.), symlink or
+mirror this file in. Plain markdown, no custom format.
+
+## Quick examples
 `
 
 // SeededSkillExamples ships at skills/agentboard/examples.md. Concrete
 // recipes for the common operations, in both git and MCP form.
 var SeededSkillExamples = seededSkillExamples
 
-const seededSkillExamples = `# AgentBoard recipes
-
-Every recipe below has two flavors — **git** (when your runtime can
+// seededSkillExamples is appended after the manifest body when forming
+// SeededRootSkill. Its h1 is omitted on purpose: the parent SKILL.md
+// already uses an h1 and this is a continuation section under it.
+const seededSkillExamples = `Every recipe below has two flavors — **git** (when your runtime can
 shell out) and **MCP** (when it can't). They are the same operation.
 
 ## Create a doc
@@ -481,10 +499,10 @@ const seededIndexHTML = `<!doctype html>
     <div class="label">README</div>
     <div class="desc">How this workspace is wired and how to connect.</div>
   </a>
-  <a class="card-link" href="/skills/agentboard/SKILL.md">
+  <a class="card-link" href="/SKILL.md">
     <div class="eyebrow">Agent contract</div>
     <div class="label">SKILL</div>
-    <div class="desc">The protocol agents read on a cold boot.</div>
+    <div class="desc">The canonical AgentBoard primer at the workspace root — agent tools symlink it into their own convention folder.</div>
   </a>
 </section>
 
@@ -635,6 +653,27 @@ const seededChangelogHTML = `<!doctype html>
 <p class="ab-muted">Short, glance-friendly. One entry per shipping moment. Newest first.</p>
 
 <ol class="timeline">
+  <li>
+    <time>2026-05-14</time>
+    <h3>One canonical SKILL.md at the workspace root</h3>
+    <p><span class="pill">substrate</span>
+       Retired the <code>skills/agentboard/{SKILL.md, examples.md}</code>
+       split in favor of a single <code>/SKILL.md</code> at the
+       workspace root. Agent tools that look in their own convention
+       folder (<code>.claude/skills/</code>, <code>.codex/skills/</code>)
+       symlink or mirror this file in. The dashboard renders dotted
+       folders too — <code>.git</code> + <code>.agentboard</code> stay
+       server-internal; everything else is workspace content.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>In-browser edit</h3>
+    <p><span class="pill">qol</span>
+       Signed-in users get an <code>(edit)</code> link in the
+       page-actions strip. POSTs to <code>/_api/edit</code> with CSRF
+       (double-submit cookie + form field). Round-trips through
+       <code>gitserver.PutFile</code> — full git history captured.</p>
+  </li>
   <li>
     <time>2026-05-14</time>
     <h3>Full-text search + header search box</h3>
@@ -1078,6 +1117,26 @@ const seededSprintTaskboardJSON = `{
       "order": 9.0
     },
     {
+      "id": "c-done-inbrowser-edit",
+      "title": "In-browser edit",
+      "column": "done",
+      "body": "Cookie-auth + CSRF + PutFile round-trip. (edit) link in the meta-bar.",
+      "labels": ["editing", "qol"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 10.0
+    },
+    {
+      "id": "c-done-skill-root",
+      "title": "Single SKILL.md at root",
+      "column": "done",
+      "body": "Retired the skills/agentboard/ folder split; one canonical /SKILL.md. Agent tools mirror or symlink it into their own conventions.",
+      "labels": ["substrate", "convention"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 11.0
+    },
+    {
       "id": "c-doing-self-loop",
       "title": "Self-checking dev loop",
       "column": "doing",
@@ -1095,15 +1154,6 @@ const seededSprintTaskboardJSON = `{
       "labels": ["typed-view"],
       "priority": 2,
       "order": 1.0
-    },
-    {
-      "id": "c-backlog-edit",
-      "title": "In-browser edit",
-      "column": "backlog",
-      "body": "Textarea view + POST-to-commit round-trip. Optimistic concurrency.",
-      "labels": ["editing", "qol"],
-      "priority": 2,
-      "order": 2.0
     },
     {
       "id": "c-backlog-presence",

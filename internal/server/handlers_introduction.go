@@ -173,7 +173,9 @@ git push
               "resolution":"# Today\n\n(merged body)"}}}
 ` + "```" + `
 
-In both paths, **the workspace's ` + "`README.md`" + ` is canonical**. It tells the agent what files exist, what conventions the board uses, and where the workspace SKILL lives. Read it first.
+In both paths, **the workspace's ` + "`README.md`" + ` is canonical**. It tells the agent what files exist, what conventions the board uses, and where the workspace SKILL lives.
+
+The seeded board ships a canonical SKILL at ` + "`/SKILL.md`" + ` — one file, at the workspace root. Plain markdown, no custom format. Agent tools whose runtime looks for skills under a specific path (` + "`.claude/skills/`" + ` for Claude, ` + "`.codex/skills/`" + ` for Codex, etc.) can symlink or mirror ` + "`/SKILL.md`" + ` into that location. The board doesn't special-case any folder; dotted directories like ` + "`.claude/`" + ` render as ordinary tree entries.
 
 ---
 

@@ -110,13 +110,12 @@ func (s *Store) ReindexWorktree(ctx context.Context, workspace, worktreeRoot str
 		}
 		name := info.Name()
 		if info.IsDir() {
-			// Skip dotted dirs (.git, .agentboard) — they're noise.
-			if strings.HasPrefix(name, ".") && p != worktreeRoot {
+			// Skip only AgentBoard's own state directories. Agent-tool
+			// homes (.claude, .codex, etc.) are legitimate workspace
+			// content and should appear in search results.
+			if (name == ".git" || name == ".agentboard") && p != worktreeRoot {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		if strings.HasPrefix(name, ".") {
 			return nil
 		}
 		if !IndexableExtension(p) {

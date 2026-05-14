@@ -54,6 +54,16 @@ var templateFS embed.FS
 //go:embed assets/*
 var assetsFS embed.FS
 
+// isServerInternal reports whether a top-level directory entry is
+// AgentBoard's own state and must not be exposed via the dashboard.
+// Everything else, dotted or not, is legitimate workspace content —
+// `.claude`, `.codex`, `.github`, `.gitignore`, etc. are agent-tool
+// homes that the dashboard should surface so users can navigate them
+// like any other folder.
+func isServerInternal(name string) bool {
+	return name == ".git" || name == ".agentboard"
+}
+
 // CommitInfo mirrors gitserver.CommitInfo so this package doesn't
 // take a hard dep on gitserver — keeps the renderer testable in
 // isolation. The shape is identical; cli/serve.go bridges the two
@@ -270,8 +280,8 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, urlPath
 	var visible []entry
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
-			continue // skip hidden (.git etc.)
+		if isServerInternal(name) {
+			continue
 		}
 		href := path.Join(urlPath, name)
 		if e.IsDir() {
@@ -929,7 +939,7 @@ func (s *Server) walkTreeDir(absDir, urlPrefix, currentPath string, depth int) [
 	var out []treeNode
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasPrefix(name, ".") {
+		if isServerInternal(name) {
 			continue
 		}
 		isDir := e.IsDir()
