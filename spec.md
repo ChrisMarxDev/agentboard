@@ -76,10 +76,12 @@ the agent doesn't have to be taught first.
 **The README chain.** A workspace's `README.md` is the canonical
 entry point. By convention it links to:
 
-- `SKILL.md` (or `skills/agentboard/SKILL.md`) — the always-bundled
-  AgentBoard skill that teaches the protocol: how to find the task
-  queue, how to surface conflicts, how to subscribe to events, what
-  the available components do.
+- `SKILL.md` — the canonical AgentBoard skill at the workspace root.
+  Teaches the protocol: how to find the task queue, how to surface
+  conflicts, how to subscribe to events. One file. Agent tools whose
+  runtime looks for skills under a specific path (`.claude/skills/`,
+  `.codex/skills/`, etc.) symlink or mirror this file in — the board
+  itself doesn't special-case any folder.
 - `CONVENTIONS.md` (or a section inside README) — this team's
   workspace-specific rules: naming, who reviews what, the kanban's
   column meanings, anything the next agent needs to know that isn't

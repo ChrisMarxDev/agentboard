@@ -846,27 +846,33 @@ const seededRoadmapHTML = `<!doctype html>
 <h1>Roadmap</h1>
 <p class="ab-muted">
   Quality-of-life features the board could grow into next. Each item
-  carries a rough size estimate (S/M/L) — these are nudges, not
-  commitments. Reorder freely.
+  carries a rough size estimate (S/M/L). Items marked
+  <span class="ab-badge accent">shipped</span> already landed —
+  kept here as a record of what was on this list when planned.
 </p>
 
 <div class="category">History &amp; versioning</div>
 <ol class="timeline">
   <li>
-    <time>v0.2</time>
-    <h3>Page history viewer</h3>
+    <time>shipped</time>
+    <h3>Page history viewer <span class="ab-badge accent">shipped</span></h3>
     <p><span class="pill size-m">M</span>
-       <code>GET /&lt;path&gt;?history=1</code> lists every commit that
-       touched the file with author, date, and a one-line summary. Backed
-       by <code>git log --follow</code>; cheap to serve.</p>
+       <code>?history=1</code> on any file lists commits via
+       <code>git log --follow</code>.</p>
   </li>
   <li>
-    <time>v0.2</time>
-    <h3>Diff between revisions</h3>
+    <time>shipped</time>
+    <h3>Diff between revisions <span class="ab-badge accent">shipped</span></h3>
     <p><span class="pill size-m">M</span>
-       Side-by-side diff at <code>/&lt;path&gt;?diff=&lt;sha&gt;..&lt;sha&gt;</code>.
-       Rendered server-side via <code>git diff --color-words</code> →
-       HTML; agents can deep-link to a diff URL.</p>
+       <code>?diff=&lt;sha&gt;</code> renders colored unified diff. History
+       rows link in.</p>
+  </li>
+  <li>
+    <time>shipped</time>
+    <h3>Restore-from-history <span class="ab-badge accent">shipped</span></h3>
+    <p><span class="pill size-s">S</span>
+       <code>(restore)</code> button on every history row for signed-in
+       users. Re-commits the file's content at the chosen sha.</p>
   </li>
   <li>
     <time>v0.3</time>
@@ -876,42 +882,31 @@ const seededRoadmapHTML = `<!doctype html>
        to <em>done</em>?" without leaving the page. Cache the blame
        computation per (path, sha) — expensive without caching.</p>
   </li>
-  <li>
-    <time>v0.3</time>
-    <h3>Restore-from-history</h3>
-    <p><span class="pill size-s">S</span>
-       One-click "restore this version" on history rows — opens a
-       confirmed POST that round-trips through <code>agentboard_propose</code>
-       with the old body as the new commit.</p>
-  </li>
 </ol>
 
 <div class="category">Discovery &amp; navigation</div>
 <ol class="timeline">
   <li>
-    <time>v0.2</time>
-    <h3>Full-text search</h3>
+    <time>shipped</time>
+    <h3>Full-text search <span class="ab-badge accent">shipped</span></h3>
     <p><span class="pill size-m">M</span>
-       SQLite FTS5 index over the working tree, rebuilt on the
-       post-receive hook. <code>/?q=needle</code> as a top-level query;
-       results show the path + matching line context. Headers, frontmatter
-       fields, and code blocks are searchable equally.</p>
+       SQLite FTS5 index, rebuilt on every push. <code>/?q=needle</code>
+       renders <code>&lt;mark&gt;</code>-highlighted hits.</p>
   </li>
   <li>
-    <time>v0.2</time>
-    <h3>Sidebar nested folders</h3>
+    <time>shipped</time>
+    <h3>Sidebar nested folders <span class="ab-badge accent">shipped</span></h3>
     <p><span class="pill size-s">S</span>
-       Today the tree is one level deep. Recurse into subfolders, lazy-
-       expand on click, remember open state in <code>localStorage</code>.
-       Critical once the tree grows past 20-ish entries.</p>
+       Recurses 3 levels via <code>&lt;details&gt;</code>. Active folder
+       auto-expands.</p>
   </li>
   <li>
     <time>v0.2</time>
     <h3>Recently-edited surface</h3>
     <p><span class="pill size-s">S</span>
        Home-page card "recent activity" listing the 10 most-recently
-       committed files. Pulls from git log; useful for jumping back into
-       wherever the team was working.</p>
+       committed files. Cheap addition on top of the existing
+       <code>git log</code> machinery.</p>
   </li>
 </ol>
 
@@ -946,13 +941,19 @@ const seededRoadmapHTML = `<!doctype html>
 <div class="category">Editing &amp; collaboration</div>
 <ol class="timeline">
   <li>
-    <time>v0.2</time>
-    <h3>In-browser edit</h3>
+    <time>shipped</time>
+    <h3>In-browser edit <span class="ab-badge accent">shipped</span></h3>
     <p><span class="pill size-l">L</span>
-       A <strong>(edit)</strong> link in the meta-bar opens a textarea
-       view of the file with monospaced styling; saving POSTs through the
-       cookie + CSRF and round-trips into a git commit. Optimistic
-       concurrency via the existing CAS check.</p>
+       <code>(edit)</code> link in the meta-bar; CSRF + cookie-gated
+       POST round-trips through gitserver.PutFile. Includes
+       create-new-file via the directory listing's "+ new file" form.</p>
+  </li>
+  <li>
+    <time>shipped</time>
+    <h3>Live page-changed toasts <span class="ab-badge accent">shipped</span></h3>
+    <p><span class="pill size-s">S</span>
+       Workspace pushes broadcast over SSE; dashboard pops a Reload
+       toast.</p>
   </li>
   <li>
     <time>v0.3</time>
@@ -964,11 +965,12 @@ const seededRoadmapHTML = `<!doctype html>
   </li>
   <li>
     <time>v0.3</time>
-    <h3>Live page-changed toasts</h3>
-    <p><span class="pill size-s">S</span>
-       Reuse the existing SSE broadcaster: when a push touches the page
-       you're viewing, a non-modal toast offers "reload". Already wired —
-       just needs the post-receive hook to broadcast.</p>
+    <h3>Optimistic concurrency on save</h3>
+    <p><span class="pill size-m">M</span>
+       Edit form embeds the file's current sha; the POST handler
+       rejects with a conflict UI if the sha changed under the
+       editor's feet. Standard CAS pattern on top of the existing
+       PutFile flow.</p>
   </li>
 </ol>
 
