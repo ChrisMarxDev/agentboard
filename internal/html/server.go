@@ -300,6 +300,28 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, urlPath
 		"Title":   strings.TrimSuffix(urlPath, "/"),
 		"Entries": visible,
 	})
+	// Signed-in users get a tiny "new file" form below the listing.
+	// The form fires a GET that lands on /<dir>/<name>?edit=1 which
+	// the editor handler turns into a create-on-save.
+	if s.userIsSignedIn(r) {
+		dirPrefix := strings.TrimSuffix(urlPath, "/")
+		if dirPrefix == "" {
+			dirPrefix = ""
+		}
+		fmt.Fprintf(&body, `<form class="new-file" action="" method="get" onsubmit="
+  var name=this.elements['name'].value.trim();
+  if(!name){return false}
+  if(name.startsWith('/')){name=name.slice(1)}
+  window.location='%s/'+name+'?edit=1';return false">
+<style>
+  .new-file{margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;gap:.5rem;align-items:center;font-size:.85rem;color:var(--text-secondary)}
+  .new-file input{flex:1;max-width:320px;padding:.4rem .65rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-family:var(--ab-mono,monospace);font-size:.85rem}
+  .new-file button{padding:.4rem .85rem;background:var(--accent);color:#fff;border:0;border-radius:6px;cursor:pointer;font-size:.85rem}
+</style>
++ <input name="name" placeholder="new-file.html, notes/today.md, …" autocomplete="off">
+<button type="submit">Create</button>
+</form>`, template.HTMLEscapeString(dirPrefix))
+	}
 	s.renderShell(w, r, urlPath, "", template.HTML(body.String()), nil, false)
 }
 
