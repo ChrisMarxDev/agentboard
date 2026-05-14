@@ -137,6 +137,29 @@ func runServe(cmd *cobra.Command, args []string) error {
 		"Add bootstrap examples"); err != nil {
 		log.Printf("Warning: could not seed examples: %v", err)
 	}
+	// Demo content — gives a freshly-claimed board something to look at
+	// beyond the bootstrap chain. Each EnsureFile is idempotent on
+	// presence, so existing boards keep their authored content.
+	if err := gitStore.EnsureFile(context.Background(), "dogfood",
+		"index.md", project.SeededIndexMd, "system",
+		"Add home page"); err != nil {
+		log.Printf("Warning: could not seed index.md: %v", err)
+	}
+	if err := gitStore.EnsureFile(context.Background(), "dogfood",
+		"pages/getting-started.md", project.SeededGettingStartedMd, "system",
+		"Add getting-started demo page"); err != nil {
+		log.Printf("Warning: could not seed getting-started: %v", err)
+	}
+	if err := gitStore.EnsureFile(context.Background(), "dogfood",
+		"pages/changelog.md", project.SeededChangelogMd, "system",
+		"Add changelog page"); err != nil {
+		log.Printf("Warning: could not seed changelog: %v", err)
+	}
+	if err := gitStore.EnsureFile(context.Background(), "dogfood",
+		"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "system",
+		"Add sprint taskboard example"); err != nil {
+		log.Printf("Warning: could not seed sprint taskboard: %v", err)
+	}
 	wtPath, err := gitStore.EnsureWorktree(context.Background(), "dogfood")
 	if err != nil {
 		log.Printf("Warning: could not materialize dogfood working tree: %v", err)

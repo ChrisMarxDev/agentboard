@@ -401,6 +401,230 @@ agentboard_fire_event({
 Webhook subscribers receive ` + "`{name: \"ship.v2.ready\", at, data: …}`" + `.
 `
 
+// SeededIndexMd is the home page seeded at index.md. Replaces the
+// dir-listing the user would otherwise land on; gives the dashboard
+// a friendly first impression on a freshly-claimed board.
+var SeededIndexMd = seededIndexMd
+
+const seededIndexMd = `---
+title: AgentBoard
+wide: true
+---
+
+# AgentBoard
+
+You are looking at a **shared workspace** — a git repo a small team of
+humans and AI agents collaborate inside. Every file in this tree is
+served as-is by the dashboard: markdown renders to HTML, JSON renders
+as a kanban (when it has ` + "`columns`" + ` + ` + "`cards`" + `), the rest of the
+extensions render with their natural content-type.
+
+## Explore
+
+- [README](/README.md) — how this workspace is wired and how to connect.
+- [Getting started](/pages/getting-started.md) — a richer demo page
+  showing what the renderer does with markdown.
+- [Sprint board](/taskboards/sprint.json) — the Taskboard typed view
+  in action: a JSON file rendered as a live kanban.
+- [Changelog](/pages/changelog.md) — short, glance-friendly activity log.
+- [Agent skill](/skills/agentboard/SKILL.md) — the protocol agents read
+  on a cold boot.
+
+## Connect
+
+Authenticate via the invitation URL printed at boot, then either:
+
+` + "```bash" + `
+# git, in the directory you want to bind to this workspace
+git init -q
+git remote add origin http://<user>:$AGENTBOARD_TOKEN@<host>/git/dogfood.git
+git fetch -q origin
+git checkout -B main origin/main
+` + "```" + `
+
+or, over MCP:
+
+` + "```" + `
+claude mcp add agentboard https://<host>/mcp
+` + "```" + `
+
+Edits via ` + "`git push`" + ` or ` + "`agentboard_propose`" + ` show up here
+immediately.
+`
+
+// SeededGettingStartedMd is a richer demo page seeded at
+// pages/getting-started.md. Exercises every markdown construct
+// goldmark + the design-system stylesheet handles, so visitors can
+// see what authoring on this board looks like.
+var SeededGettingStartedMd = seededGettingStartedMd
+
+const seededGettingStartedMd = `---
+title: Getting started
+---
+
+# Getting started
+
+This page is a real ` + "`.md`" + ` file in the workspace. It renders through
+goldmark (GitHub-flavored markdown) and inherits the dashboard's
+typography from ` + "`/_static/design-system.css`" + `.
+
+## Writing a doc
+
+Every doc is one file. Frontmatter (the ` + "`---`" + ` block at the top)
+configures the page; everything below is markdown.
+
+` + "```yaml" + `
+---
+title: Title shown in the tab + heading
+wide: true        # opt out of the 1100px max-width when content needs room
+---
+` + "```" + `
+
+## Lists, tables, code
+
+Standard markdown works without ceremony.
+
+### Roadmap (table)
+
+| Item               | Status      | Owner   |
+|--------------------|-------------|---------|
+| Git substrate      | Shipped     | core    |
+| Taskboard view     | Shipped     | core    |
+| Typed views (more) | Considering | ~       |
+| Search             | Backlog     | ~       |
+
+### Quick commands
+
+` + "```bash" + `
+# push a doc
+git add pages/notes.md && git commit -m "Add notes" && git push
+
+# push a taskboard
+git add taskboards/sprint.json && git commit -m "Update sprint" && git push
+` + "```" + `
+
+### Quote
+
+> The workspace teaches the agent. Files are the teaching surface.
+
+## How edits land
+
+Either ` + "`git push`" + ` (the preferred path) or the MCP
+` + "`agentboard_propose`" + ` tool. The server makes a real commit, updates
+the worktree mirror, and the dashboard re-renders on the next request.
+
+Need to react to a teammate's push? Use ` + "`agentboard_subscribe`" + ` (long-poll)
+or ` + "`git fetch`" + ` on a timer.
+`
+
+// SeededChangelogMd is a small activity-log style page. Demonstrates
+// that a flat markdown file works fine for log-style content —
+// there's no separate "stream" concept in the new substrate.
+var SeededChangelogMd = seededChangelogMd
+
+const seededChangelogMd = `---
+title: Changelog
+---
+
+# Changelog
+
+Short, glance-friendly. One line per shipping moment.
+
+## 2026-05-14
+
+- Mobile-responsive shell: hamburger toggle + drawer-style sidebar overlay.
+- Seeded richer example content (home page, getting-started, sprint
+  taskboard, changelog) on every fresh board.
+
+## 2026-05-13
+
+- Substrate cut E shipped: **Taskboard typed view** — JSON files with
+  ` + "`columns`" + ` + ` + "`cards`" + ` render as kanban boards.
+- Wholesale rewrite landed (cuts C–H): React SPA + v0.13 file store
+  retired; everything is git + server-rendered HTML now.
+
+## 2026-04-30
+
+- Cuts 1–10 retired the v0.13 substrate. Workspace = git repo;
+  dashboard reads the working-tree mirror.
+`
+
+// SeededSprintTaskboardJSON is a working Taskboard example. Shape
+// matches what the renderer recognizes: top-level ` + "`columns`" + ` and
+// ` + "`cards`" + ` arrays. Cards span all three lanes so a visitor lands on
+// a realistic board, not an empty one.
+var SeededSprintTaskboardJSON = seededSprintTaskboardJSON
+
+const seededSprintTaskboardJSON = `{
+  "kind": "taskboard",
+  "title": "Sprint 14",
+  "columns": [
+    {"id": "todo",  "label": "To do"},
+    {"id": "doing", "label": "In progress"},
+    {"id": "done",  "label": "Done"}
+  ],
+  "cards": [
+    {
+      "id": "c1",
+      "title": "Mobile-responsive dashboard shell",
+      "column": "done",
+      "body": "Collapsible sidebar, overlay drawer, larger tap targets.",
+      "labels": ["ux", "mobile"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 1.0
+    },
+    {
+      "id": "c2",
+      "title": "Seed richer example content",
+      "column": "done",
+      "body": "Home page, getting-started, sprint board, changelog.",
+      "labels": ["content"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 2.0
+    },
+    {
+      "id": "c3",
+      "title": "Restart prod board on hextorical.com",
+      "column": "done",
+      "body": "Tunnel was healthy; binary had been killed.",
+      "labels": ["ops"],
+      "priority": 1,
+      "order": 0.5
+    },
+    {
+      "id": "c4",
+      "title": "Dogfood §15 self-test on new shape",
+      "column": "doing",
+      "body": "Bootstrap chain README → SKILL passed first run.",
+      "labels": ["dogfood", "substrate"],
+      "assignees": ["claude"],
+      "priority": 1,
+      "order": 1.0
+    },
+    {
+      "id": "c5",
+      "title": "Push-to-PR mode polish",
+      "column": "todo",
+      "body": "Server-side branch + status tracking for always-PR workspaces.",
+      "labels": ["substrate"],
+      "priority": 2,
+      "order": 1.0
+    },
+    {
+      "id": "c6",
+      "title": "Add Mention typed view",
+      "column": "todo",
+      "body": "Materialize @mentions across the worktree into a per-user inbox view.",
+      "labels": ["typed-view"],
+      "priority": 3,
+      "order": 2.0
+    }
+  ]
+}
+`
+
 // InitProject creates a new project from the welcome template.
 func InitProject(projectPath string) (*Project, error) {
 	if err := os.MkdirAll(projectPath, 0o755); err != nil {
