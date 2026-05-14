@@ -575,6 +575,67 @@ func (s *Store) History(ctx context.Context, workspaceID, path string, limit int
 	return commits, nil
 }
 
+// Diff returns the textual diff of `path` between two revisions on
+// the workspace's default branch. `from` may be empty — defaults to
+// `to^` (the parent of `to`), giving a single-commit diff. `to` is
+// required.
+//
+// Output is plain `git diff` text (no color codes); the HTML layer
+// applies syntax highlighting in its own renderer.
+func (s *Store) Diff(ctx context.Context, workspaceID, from, to, path string) (string, error) {
+	ws, err := s.Get(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if ws == nil {
+		return "", fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	if to == "" {
+		return "", fmt.Errorf("diff: `to` revision required")
+	}
+	// Light validation: every revision must look like a sha or branch.
+	for _, rev := range []string{from, to} {
+		if rev == "" {
+			continue
+		}
+		for _, r := range rev {
+			ok := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') ||
+				(r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+				r == '-' || r == '_' || r == '.' || r == '/'
+			if !ok {
+				return "", fmt.Errorf("diff: invalid revision %q", rev)
+			}
+		}
+	}
+	bare := s.BarePath(workspaceID)
+	args := []string{"--git-dir", bare, "diff", "--no-color"}
+	if from == "" {
+		args = append(args, to+"^.."+to)
+	} else {
+		args = append(args, from+".."+to)
+	}
+	if path != "" {
+		args = append(args, "--", path)
+	}
+	out, err := runGit("", args...)
+	if err != nil {
+		// `to^` against a root commit fails — fall back to showing the
+		// commit's tree against the empty tree.
+		if from == "" {
+			args2 := []string{"--git-dir", bare, "show", "--no-color", "--format=", to}
+			if path != "" {
+				args2 = append(args2, "--", path)
+			}
+			alt, err2 := runGit("", args2...)
+			if err2 == nil {
+				return alt, nil
+			}
+		}
+		return "", fmt.Errorf("git diff: %w (output: %s)", err, out)
+	}
+	return out, nil
+}
+
 // runGit invokes `git` with the given args. dir, when non-empty, is
 // passed as -C; otherwise git runs in the current working directory.
 // Returns combined stdout+stderr.

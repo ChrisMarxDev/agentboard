@@ -82,6 +82,11 @@ type Server struct {
 	// ?history=1 view falls back to a "not available" message.
 	HistoryFn func(path string, limit int) ([]CommitInfo, error)
 
+	// DiffFn returns the textual diff of `path` between `from` and `to`
+	// revisions. `from` empty means "the parent of to". Used by the
+	// ?diff=<from>..<to> view.
+	DiffFn func(path, from, to string) (string, error)
+
 	once     sync.Once
 	tmpl     *template.Template
 	md       goldmark.Markdown
@@ -144,6 +149,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ?history=1 — render git log for this path instead of the file.
 	if r.URL.Query().Get("history") != "" {
 		s.renderHistory(w, r, urlPath)
+		return
+	}
+	// ?diff=<from>..<to> or ?diff=<sha> (parent-of-sha implicit) — render
+	// the diff for this path between the two revisions.
+	if d := r.URL.Query().Get("diff"); d != "" {
+		s.renderDiff(w, r, urlPath, d)
 		return
 	}
 
@@ -504,8 +515,10 @@ func (s *Server) renderHistory(w http.ResponseWriter, r *http.Request, urlPath s
 </style>`)
 	body.WriteString(`<ol class="history">`)
 	for _, c := range commits {
-		fmt.Fprintf(&body, `<li><span class="sha">%s</span><span class="subject">%s</span>`+
+		fmt.Fprintf(&body, `<li><a class="sha" href="?diff=%s">%s</a>`+
+			`<span class="subject">%s</span>`+
 			`<span class="meta">%s · %s</span></li>`,
+			template.HTMLEscapeString(c.SHA),
 			template.HTMLEscapeString(c.Short),
 			template.HTMLEscapeString(c.Subject),
 			template.HTMLEscapeString(c.Author),
@@ -513,6 +526,90 @@ func (s *Server) renderHistory(w http.ResponseWriter, r *http.Request, urlPath s
 	}
 	body.WriteString(`</ol>`)
 	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// renderDiff serves ?diff=<sha> or ?diff=<from>..<to>.
+func (s *Server) renderDiff(w http.ResponseWriter, r *http.Request, urlPath, diffSpec string) {
+	rel := strings.Trim(strings.TrimPrefix(urlPath, "/"), "/")
+	from, to := parseDiffSpec(diffSpec)
+	title := "Diff — " + pathLabel(urlPath)
+
+	var body bytes.Buffer
+	fmt.Fprintf(&body, `<h1>%s</h1>`, template.HTMLEscapeString(title))
+	fmt.Fprintf(&body, `<p class="ab-muted">Showing <code>%s..%s</code> for <code>%s</code>. `+
+		`<a href="?history=1">Back to history</a> · <a href="%s">view file</a>.</p>`,
+		template.HTMLEscapeString(shortRev(from, "parent")),
+		template.HTMLEscapeString(shortRev(to, "")),
+		template.HTMLEscapeString("/"+rel),
+		template.HTMLEscapeString("/"+rel))
+
+	if s.DiffFn == nil {
+		body.WriteString(`<p class="ab-muted">Diff is not available on this instance.</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	raw, err := s.DiffFn(rel, from, to)
+	if err != nil {
+		fmt.Fprintf(&body, `<p class="ab-muted">Could not load diff: %s</p>`, template.HTMLEscapeString(err.Error()))
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	if strings.TrimSpace(raw) == "" {
+		body.WriteString(`<p class="ab-muted">No textual diff (same content or empty change).</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	body.WriteString(`<style>
+  .diff { font-family: var(--ab-mono, monospace); font-size: .8rem;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--ab-radius); padding: .75rem 1rem; overflow-x: auto;
+    line-height: 1.4; }
+  .diff .line { display: block; padding: 0 .25rem; white-space: pre; }
+  .diff .add { background: rgba(34,197,94,.12); color: var(--success); }
+  .diff .del { background: rgba(220,38,38,.12); color: var(--error); }
+  .diff .hunk { color: var(--accent); font-weight: 500; }
+  .diff .meta { color: var(--text-secondary); }
+</style>`)
+	body.WriteString(`<div class="diff">`)
+	for _, line := range strings.Split(strings.TrimRight(raw, "\n"), "\n") {
+		cls := ""
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") ||
+			strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index "):
+			cls = "meta"
+		case strings.HasPrefix(line, "@@"):
+			cls = "hunk"
+		case strings.HasPrefix(line, "+"):
+			cls = "add"
+		case strings.HasPrefix(line, "-"):
+			cls = "del"
+		}
+		fmt.Fprintf(&body, `<span class="line %s">%s</span>`, cls,
+			template.HTMLEscapeString(line))
+	}
+	body.WriteString(`</div>`)
+	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// parseDiffSpec splits `<from>..<to>` or `<sha>` (implicit parent) into
+// (from, to). Validation lives in the gitserver layer.
+func parseDiffSpec(spec string) (from, to string) {
+	if i := strings.Index(spec, ".."); i >= 0 {
+		return spec[:i], spec[i+2:]
+	}
+	return "", spec
+}
+
+// shortRev shortens a revision identifier for display. Falls back to
+// `def` for the empty string (used in ?diff=<sha> implicit-parent case).
+func shortRev(rev, def string) string {
+	if rev == "" {
+		return def
+	}
+	if len(rev) > 10 {
+		return rev[:10]
+	}
+	return rev
 }
 
 // formatWhen makes ISO-8601 timestamps a bit friendlier. Falls back

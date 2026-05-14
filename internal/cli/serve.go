@@ -258,6 +258,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 			return out, nil
 		},
+		DiffFn: func(path, from, to string) (string, error) {
+			return gitStore.Diff(context.Background(), "dogfood", from, to, path)
+		},
 	}
 
 	srv := server.New(server.ServerConfig{
