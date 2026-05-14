@@ -53,6 +53,18 @@ var templateFS embed.FS
 //go:embed assets/*
 var assetsFS embed.FS
 
+// CommitInfo mirrors gitserver.CommitInfo so this package doesn't
+// take a hard dep on gitserver — keeps the renderer testable in
+// isolation. The shape is identical; cli/serve.go bridges the two
+// when wiring HistoryFn.
+type CommitInfo struct {
+	SHA     string
+	Short   string
+	Author  string
+	When    string
+	Subject string
+}
+
 // Server renders the workspace's working tree as HTML. Construct one
 // per workspace via New(); cli/serve.go mounts it as the catch-all
 // after /_api/ and /git/ are registered.
@@ -64,6 +76,11 @@ type Server struct {
 	// UserResolver returns the current user's name for the request, or
 	// empty string for anonymous. Optional — defaults to anonymous.
 	UserResolver func(r *http.Request) string
+
+	// HistoryFn returns commits that touched `path` on the workspace's
+	// default branch, newest first. Set by cli/serve.go; if nil the
+	// ?history=1 view falls back to a "not available" message.
+	HistoryFn func(path string, limit int) ([]CommitInfo, error)
 
 	once     sync.Once
 	tmpl     *template.Template
@@ -121,6 +138,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	urlPath := r.URL.Path
 	if strings.HasPrefix(urlPath, "/_static/") {
 		s.serveStatic(w, r, strings.TrimPrefix(urlPath, "/_static/"))
+		return
+	}
+
+	// ?history=1 — render git log for this path instead of the file.
+	if r.URL.Query().Get("history") != "" {
+		s.renderHistory(w, r, urlPath)
 		return
 	}
 
@@ -436,6 +459,75 @@ func (s *Server) renderJSON(w http.ResponseWriter, r *http.Request, urlPath stri
 	s.renderShell(w, r, urlPath, pathLabel(urlPath), template.HTML(body), nil, false)
 }
 
+func (s *Server) renderHistory(w http.ResponseWriter, r *http.Request, urlPath string) {
+	rel := strings.Trim(strings.TrimPrefix(urlPath, "/"), "/")
+	title := pathLabel(urlPath)
+	if title == "" || title == "Home" {
+		title = "Workspace history"
+	} else {
+		title = "History — " + title
+	}
+
+	var body bytes.Buffer
+	fmt.Fprintf(&body, `<h1>%s</h1>`, template.HTMLEscapeString(title))
+	fmt.Fprintf(&body, `<p class="ab-muted">Commits that touched <code>%s</code>, newest first. `+
+		`<a href="%s">Back to the file</a>.</p>`,
+		template.HTMLEscapeString("/"+rel),
+		template.HTMLEscapeString("/"+rel))
+
+	if s.HistoryFn == nil {
+		body.WriteString(`<p class="ab-muted">History is not available on this instance.</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	commits, err := s.HistoryFn(rel, 100)
+	if err != nil {
+		fmt.Fprintf(&body, `<p class="ab-muted">Could not load history: %s</p>`, template.HTMLEscapeString(err.Error()))
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	if len(commits) == 0 {
+		body.WriteString(`<p class="ab-muted">No commits yet for this path.</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	body.WriteString(`<style>
+  .history { list-style: none; padding: 0; margin: 1.5rem 0; }
+  .history > li { padding: .75rem 0; border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 1rem;
+    align-items: baseline; font-size: .9rem; }
+  .history .sha { font-family: var(--ab-mono, monospace);
+    color: var(--accent); font-size: .85rem; }
+  .history .subject { color: var(--text); }
+  .history .meta { color: var(--text-secondary); font-size: .75rem;
+    text-align: right; font-variant-numeric: tabular-nums; }
+</style>`)
+	body.WriteString(`<ol class="history">`)
+	for _, c := range commits {
+		fmt.Fprintf(&body, `<li><span class="sha">%s</span><span class="subject">%s</span>`+
+			`<span class="meta">%s · %s</span></li>`,
+			template.HTMLEscapeString(c.Short),
+			template.HTMLEscapeString(c.Subject),
+			template.HTMLEscapeString(c.Author),
+			template.HTMLEscapeString(formatWhen(c.When)))
+	}
+	body.WriteString(`</ol>`)
+	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// formatWhen makes ISO-8601 timestamps a bit friendlier. Falls back
+// to the raw value for inputs we don't understand.
+func formatWhen(iso string) string {
+	if iso == "" {
+		return ""
+	}
+	// 2026-05-14T01:23:45+02:00 → "2026-05-14 01:23"
+	if len(iso) >= 16 {
+		return iso[:10] + " " + iso[11:16]
+	}
+	return iso
+}
+
 func (s *Server) renderText(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(raw)
@@ -493,17 +585,25 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 	if s.UserResolver != nil {
 		user = s.UserResolver(r)
 	}
+	// Show the (history) link on real file pages, not on directory
+	// listings, 404 surfaces, or the history view itself.
+	showHistory := s.HistoryFn != nil &&
+		urlPath != "" && urlPath != "/" &&
+		!strings.HasSuffix(urlPath, "/") &&
+		!strings.HasPrefix(title, "History — ") &&
+		title != "Not found"
 	data := map[string]any{
-		"Title":         title,
-		"WorkspaceName": s.Workspace,
-		"Branch":        s.Branch,
-		"User":          user,
-		"Path":          urlPath,
-		"Tree":          s.buildTree(urlPath),
-		"Breadcrumbs":   breadcrumbsFor(urlPath),
-		"Content":       content,
-		"MetaBar":       mb,
-		"Wide":          wide,
+		"Title":           title,
+		"WorkspaceName":   s.Workspace,
+		"Branch":          s.Branch,
+		"User":            user,
+		"Path":            urlPath,
+		"Tree":            s.buildTree(urlPath),
+		"Breadcrumbs":     breadcrumbsFor(urlPath),
+		"Content":         content,
+		"MetaBar":         mb,
+		"Wide":            wide,
+		"ShowHistoryLink": showHistory,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "shell", data); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)

@@ -501,6 +501,80 @@ func copyFile(src, dst string, mode os.FileMode) error {
 // pull `io` for one constant.
 var errEOF = errors.New("EOF")
 
+// CommitInfo is a single entry returned by Store.History. Author /
+// date / sha / summary line — enough for a UI list and for click-
+// through to a diff in a later cut.
+type CommitInfo struct {
+	SHA     string `json:"sha"`
+	Short   string `json:"short"`
+	Author  string `json:"author"`
+	When    string `json:"when"`    // ISO-8601, UTC
+	Subject string `json:"subject"` // one-line commit message
+}
+
+// History returns the commits that touched `path` on the workspace's
+// default branch, newest first. Capped at `limit` rows (0 = default
+// 50). Uses --follow so renamed files surface their full lineage.
+//
+// `path` is interpreted relative to the worktree root. An empty path
+// returns the workspace-wide history.
+func (s *Store) History(ctx context.Context, workspaceID, path string, limit int) ([]CommitInfo, error) {
+	ws, err := s.Get(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if ws == nil {
+		return nil, fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	bare := s.BarePath(workspaceID)
+	// Custom format: NUL-separated fields, ASCII RS between commits.
+	// `%H` sha, `%h` short, `%an` author name, `%aI` ISO-8601, `%s`
+	// subject. Chose NUL/RS because subjects can contain anything.
+	const fmtStr = "%H%x00%h%x00%an%x00%aI%x00%s%x1e"
+	args := []string{
+		"--git-dir", bare,
+		"log",
+		"--format=" + fmtStr,
+		"-n", fmt.Sprintf("%d", limit),
+		ws.DefaultBranch,
+	}
+	if path != "" {
+		args = append(args, "--follow", "--", path)
+	}
+	out, err := runGit("", args...)
+	if err != nil {
+		// Empty repo or path-never-existed → empty list, not an error.
+		return nil, nil
+	}
+	out = strings.TrimSpace(strings.Trim(out, "\x1e\n"))
+	if out == "" {
+		return nil, nil
+	}
+	rows := strings.Split(out, "\x1e\n")
+	commits := make([]CommitInfo, 0, len(rows))
+	for _, row := range rows {
+		row = strings.TrimSpace(row)
+		if row == "" {
+			continue
+		}
+		parts := strings.SplitN(row, "\x00", 5)
+		if len(parts) < 5 {
+			continue
+		}
+		commits = append(commits, CommitInfo{
+			SHA:     parts[0],
+			Short:   parts[1],
+			Author:  parts[2],
+			When:    parts[3],
+			Subject: parts[4],
+		})
+	}
+	return commits, nil
+}
+
 // runGit invokes `git` with the given args. dir, when non-empty, is
 // passed as -C; otherwise git runs in the current working directory.
 // Returns combined stdout+stderr.

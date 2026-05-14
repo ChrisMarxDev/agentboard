@@ -101,6 +101,9 @@
     {{if .MetaBar.Version}}<span style="margin-left:auto">v <code>{{.MetaBar.ShortVersion}}</code></span>{{end}}
   </div>
   {{end}}
+  {{if .ShowHistoryLink}}
+  <div class="page-actions" style="font-size:.8rem;color:var(--text-secondary);margin:-.5rem 0 1.25rem"><a href="?history=1">history</a></div>
+  {{end}}
   {{.Content}}
 </main>
 </body>

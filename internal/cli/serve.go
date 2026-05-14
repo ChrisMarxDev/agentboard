@@ -244,6 +244,20 @@ func runServe(cmd *cobra.Command, args []string) error {
 			}
 			return ""
 		},
+		HistoryFn: func(path string, limit int) ([]htmlserver.CommitInfo, error) {
+			commits, err := gitStore.History(context.Background(), "dogfood", path, limit)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]htmlserver.CommitInfo, 0, len(commits))
+			for _, c := range commits {
+				out = append(out, htmlserver.CommitInfo{
+					SHA: c.SHA, Short: c.Short, Author: c.Author,
+					When: c.When, Subject: c.Subject,
+				})
+			}
+			return out, nil
+		},
 	}
 
 	srv := server.New(server.ServerConfig{
