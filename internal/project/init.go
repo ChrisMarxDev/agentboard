@@ -637,6 +637,24 @@ const seededChangelogHTML = `<!doctype html>
 <ol class="timeline">
   <li>
     <time>2026-05-14</time>
+    <h3>Full-text search + header search box</h3>
+    <p><span class="pill">qol</span>
+       SQLite FTS5 index over the working tree, rebuilt on every push.
+       <code>/?q=needle</code> renders <code>&lt;mark&gt;</code>-highlighted
+       hits with click-through to the source file. Header gets a search
+       input on tablet+ viewports. Snippet HTML safely escaped before
+       sentinel-swapping for marks.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
+    <h3>Unclaimed-board → /invite redirect</h3>
+    <p><span class="pill">auth</span>
+       Visiting <code>/login</code> on a board with zero users now
+       short-circuits to the active bootstrap invitation. Cleaner
+       first-touch UX for fresh deploys.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
     <h3>Live page-changed toast (SSE)</h3>
     <p><span class="pill">qol</span>
        Push events broadcast over <code>/_api/events</code>; the
@@ -1040,6 +1058,26 @@ const seededSprintTaskboardJSON = `{
       "order": 7.0
     },
     {
+      "id": "c-done-search",
+      "title": "Full-text search",
+      "column": "done",
+      "body": "SQLite FTS5 over the working tree; rebuilt on push. /?q=needle renders hits.",
+      "labels": ["discovery", "qol"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 8.0
+    },
+    {
+      "id": "c-done-unclaimed-redirect",
+      "title": "Unclaimed-board → /invite redirect",
+      "column": "done",
+      "body": "/login short-circuits to the bootstrap invitation on fresh deploys.",
+      "labels": ["auth", "ux"],
+      "assignees": ["claude"],
+      "priority": 3,
+      "order": 9.0
+    },
+    {
       "id": "c-doing-self-loop",
       "title": "Self-checking dev loop",
       "column": "doing",
@@ -1048,15 +1086,6 @@ const seededSprintTaskboardJSON = `{
       "assignees": ["claude"],
       "priority": 1,
       "order": 0.5
-    },
-    {
-      "id": "c-todo-search",
-      "title": "Full-text search",
-      "column": "todo",
-      "body": "SQLite FTS5 over the working tree, rebuilt on post-receive.",
-      "labels": ["discovery", "qol"],
-      "priority": 2,
-      "order": 1.0
     },
     {
       "id": "c-backlog-mention",
