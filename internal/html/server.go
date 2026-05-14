@@ -35,6 +35,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -171,6 +172,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// "/foo?q=bar" still pulls the file at /foo.
 	if q := r.URL.Query().Get("q"); q != "" && (urlPath == "/" || urlPath == "") {
 		s.renderSearch(w, r, q)
+		return
+	}
+	// ?edit=1 — render an edit form for the file (cookie-auth required).
+	// The companion POST handler lives at /_api/edit so non-GET traffic
+	// goes through the normal gated stack.
+	if r.URL.Query().Get("edit") != "" {
+		s.renderEdit(w, r, urlPath)
 		return
 	}
 
@@ -607,6 +615,96 @@ func (s *Server) renderDiff(w http.ResponseWriter, r *http.Request, urlPath, dif
 	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
 }
 
+// renderEdit serves /<path>?edit=1 as an HTML editor form. The form
+// POSTs to /_api/edit (a real, CSRF-gated endpoint in the server
+// package). Anonymous visitors get bounced to /login?next=...
+func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, urlPath string) {
+	rel := strings.Trim(strings.TrimPrefix(urlPath, "/"), "/")
+	if rel == "" {
+		http.Error(w, "edit requires a file path", http.StatusBadRequest)
+		return
+	}
+	// Sign-in gate. The HistoryFn-style soft auth attaches the user
+	// to the request context; if there's no user, bounce to /login.
+	if !s.userIsSignedIn(r) {
+		http.Redirect(w, r,
+			"/login?next="+url.QueryEscape(urlPath+"?edit=1"),
+			http.StatusFound)
+		return
+	}
+	// Pull the CSRF cookie value so we can echo it into the form.
+	csrf := ""
+	if c, err := r.Cookie("agentboard_csrf"); err == nil {
+		csrf = c.Value
+	}
+
+	abs, ok := s.resolvePath(rel)
+	if !ok {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	body := ""
+	if data, err := os.ReadFile(abs); err == nil {
+		body = string(data)
+	}
+
+	title := "Edit — " + pathLabel(urlPath)
+	var buf bytes.Buffer
+	buf.WriteString(`<style>
+  form.editor { display: flex; flex-direction: column; gap: .85rem; }
+  form.editor label { font-size: .85rem; color: var(--text-secondary); font-weight: 500; }
+  form.editor textarea { width: 100%; min-height: 60vh; padding: .85rem;
+    font-family: var(--ab-mono, monospace); font-size: .85rem; line-height: 1.5;
+    border: 1px solid var(--border); border-radius: var(--ab-radius);
+    background: var(--bg-secondary); color: var(--text); resize: vertical; }
+  form.editor textarea:focus { outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-light); }
+  form.editor input[type=text] { padding: .55rem .75rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: .9rem; }
+  form.editor .actions { display: flex; gap: .5rem; justify-content: flex-end; }
+  form.editor button { padding: .55rem 1.25rem; background: var(--accent);
+    color: #fff; border: 0; border-radius: 6px; font-weight: 500;
+    cursor: pointer; }
+  form.editor a.cancel { padding: .55rem 1.25rem; color: var(--text-secondary);
+    text-decoration: none; align-self: center; }
+</style>`)
+	fmt.Fprintf(&buf, `<h1>Edit /%s</h1>
+<p class="ab-muted">Changes commit as <strong>@%s</strong>. The dashboard
+re-renders on save.</p>
+<form class="editor" method="post" action="/_api/edit">
+  <input type="hidden" name="path" value="%s">
+  <input type="hidden" name="csrf" value="%s">
+  <label for="ab-edit-body">File body</label>
+  <textarea id="ab-edit-body" name="body" spellcheck="false">%s</textarea>
+  <label for="ab-edit-msg">Commit message</label>
+  <input type="text" id="ab-edit-msg" name="message" value="Edit %s">
+  <div class="actions">
+    <a class="cancel" href="%s">Cancel</a>
+    <button type="submit">Save</button>
+  </div>
+</form>`,
+		template.HTMLEscapeString(rel),
+		template.HTMLEscapeString(s.UserResolver(r)),
+		template.HTMLEscapeString(rel),
+		template.HTMLEscapeString(csrf),
+		template.HTMLEscapeString(body),
+		template.HTMLEscapeString(rel),
+		template.HTMLEscapeString(urlPath),
+	)
+	s.renderShell(w, r, urlPath, title, template.HTML(buf.String()), nil, true)
+}
+
+// userIsSignedIn reports whether the request has an authenticated
+// user attached to context. Wraps UserResolver to keep the edit-form
+// gate concise.
+func (s *Server) userIsSignedIn(r *http.Request) bool {
+	if s.UserResolver == nil {
+		return false
+	}
+	return s.UserResolver(r) != ""
+}
+
 // renderSearch serves /?q=needle as server-rendered results.
 func (s *Server) renderSearch(w http.ResponseWriter, r *http.Request, q string) {
 	title := "Search — " + q
@@ -760,7 +858,11 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		urlPath != "" && urlPath != "/" &&
 		!strings.HasSuffix(urlPath, "/") &&
 		!strings.HasPrefix(title, "History — ") &&
+		!strings.HasPrefix(title, "Diff — ") &&
+		!strings.HasPrefix(title, "Edit — ") &&
 		title != "Not found"
+	// Show the (edit) link to signed-in users on file pages.
+	showEdit := showHistory && user != ""
 	data := map[string]any{
 		"Title":           title,
 		"WorkspaceName":   s.Workspace,
@@ -773,6 +875,7 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		"MetaBar":         mb,
 		"Wide":            wide,
 		"ShowHistoryLink": showHistory,
+		"ShowEditLink":    showEdit,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "shell", data); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)

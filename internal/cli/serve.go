@@ -302,6 +302,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		SkillFile:   embedpkg.SkillFile(),
 		GitServer:   gitSrv,
 		HTML:        htmlSrv,
+		EditFn: func(ctx context.Context, workspace, path, body, actor, message string) error {
+			return gitStore.PutFile(ctx, workspace, path, body, actor, message)
+		},
 	})
 	// SSE fan-out: any push (HTTP smart-protocol or server-internal)
 	// now broadcasts a "workspace-changed" event over /_api/events so

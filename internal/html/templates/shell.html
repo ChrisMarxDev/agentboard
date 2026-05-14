@@ -119,8 +119,12 @@
     {{if .MetaBar.Version}}<span style="margin-left:auto">v <code>{{.MetaBar.ShortVersion}}</code></span>{{end}}
   </div>
   {{end}}
-  {{if .ShowHistoryLink}}
-  <div class="page-actions" style="font-size:.8rem;color:var(--text-secondary);margin:-.5rem 0 1.25rem"><a href="?history=1">history</a></div>
+  {{if or .ShowHistoryLink .ShowEditLink}}
+  <div class="page-actions" style="font-size:.8rem;color:var(--text-secondary);margin:-.5rem 0 1.25rem">
+    {{if .ShowHistoryLink}}<a href="?history=1">history</a>{{end}}
+    {{if and .ShowHistoryLink .ShowEditLink}} · {{end}}
+    {{if .ShowEditLink}}<a href="?edit=1">edit</a>{{end}}
+  </div>
   {{end}}
   {{.Content}}
 </main>
