@@ -44,7 +44,8 @@ type Server struct {
 	Webhooks          *webhooks.Store
 	WebhookDispatcher *webhooks.Dispatcher
 	Invitations       *invitations.Store
-	EditFn            EditFn // POST /_api/edit committer
+	EditFn            EditFn    // POST /_api/edit committer
+	RestoreFn         RestoreFn // POST /_api/restore committer
 	Router            chi.Router
 	SkillFile         string
 	webhookSecrets    sync.Map // subscription id → plaintext secret (set at Create)
@@ -76,7 +77,8 @@ type ServerConfig struct {
 	SkillFile   string
 	GitServer   http.Handler
 	HTML        http.Handler
-	EditFn      EditFn // POST /_api/edit handler; cli/serve.go bridges to gitserver.PutFile
+	EditFn      EditFn    // POST /_api/edit handler; cli/serve.go bridges to gitserver.PutFile
+	RestoreFn   RestoreFn // POST /_api/restore handler; bridges to FileAt + PutFile
 }
 
 // New constructs a Server. Subsystems are wired internally; the caller
@@ -115,6 +117,7 @@ func New(cfg ServerConfig) *Server {
 		GitServer:         cfg.GitServer,
 		HTML:              cfg.HTML,
 		EditFn:            cfg.EditFn,
+		RestoreFn:         cfg.RestoreFn,
 	}
 	s.Router = s.buildRouter()
 	return s
@@ -227,6 +230,7 @@ func (s *Server) buildRouter() chi.Router {
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
 		r.Post("/_api/edit", s.handleEditSubmit)
+		r.Post("/_api/restore", s.handleRestoreSubmit)
 		if s.GitServer != nil {
 			r.Handle("/git/*", s.GitServer)
 		}

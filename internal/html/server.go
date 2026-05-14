@@ -547,19 +547,66 @@ func (s *Server) renderHistory(w http.ResponseWriter, r *http.Request, urlPath s
   .history .meta { color: var(--text-secondary); font-size: .75rem;
     text-align: right; font-variant-numeric: tabular-nums; }
 </style>`)
+	// Signed-in users get a one-click restore button per row. Looks
+	// like a small grey link; submits a tiny inline form that POSTs
+	// to /_api/restore with the file's CSRF token.
+	canRestore := s.userIsSignedIn(r)
+	csrf := ""
+	if canRestore {
+		if c, err := r.Cookie("agentboard_csrf"); err == nil {
+			csrf = c.Value
+		}
+	}
 	body.WriteString(`<ol class="history">`)
-	for _, c := range commits {
+	for i, c := range commits {
 		fmt.Fprintf(&body, `<li><a class="sha" href="?diff=%s">%s</a>`+
 			`<span class="subject">%s</span>`+
-			`<span class="meta">%s · %s</span></li>`,
+			`<span class="meta">%s · %s%s</span></li>`,
 			template.HTMLEscapeString(c.SHA),
 			template.HTMLEscapeString(c.Short),
 			template.HTMLEscapeString(c.Subject),
 			template.HTMLEscapeString(c.Author),
-			template.HTMLEscapeString(formatWhen(c.When)))
+			template.HTMLEscapeString(formatWhen(c.When)),
+			restoreButtonHTML(canRestore, csrf, rel, c.SHA, i == 0),
+		)
 	}
 	body.WriteString(`</ol>`)
 	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// restoreButtonHTML renders an inline form for "(restore)" alongside
+// a history row. Empty string when the visitor isn't signed in, or
+// for the most-recent commit (no point restoring to current state).
+func restoreButtonHTML(canRestore bool, csrf, path, sha string, isCurrent bool) string {
+	if !canRestore || isCurrent {
+		return ""
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, ` · <form method="post" action="/_api/restore" `+
+		`style="display:inline" `+
+		`onsubmit="return confirm('Restore /%s to %s?')">`+
+		`<input type="hidden" name="path" value="%s">`+
+		`<input type="hidden" name="sha" value="%s">`+
+		`<input type="hidden" name="csrf" value="%s">`+
+		`<button type="submit" `+
+		`style="background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;padding:0">restore</button>`+
+		`</form>`,
+		template.HTMLEscapeString(path),
+		template.HTMLEscapeString(sha[:min(10, len(sha))]),
+		template.HTMLEscapeString(path),
+		template.HTMLEscapeString(sha),
+		template.HTMLEscapeString(csrf),
+	)
+	return b.String()
+}
+
+// min is the smaller of two ints; Go 1.21+ has it as a builtin but
+// we keep a local definition to stay compatible with older toolchains.
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // renderDiff serves ?diff=<sha> or ?diff=<from>..<to>.

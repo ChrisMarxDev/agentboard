@@ -575,6 +575,38 @@ func (s *Store) History(ctx context.Context, workspaceID, path string, limit int
 	return commits, nil
 }
 
+// FileAt returns the body of `path` at revision `rev` on the
+// workspace's default branch. Used by the restore-from-history flow
+// to re-commit a historical version. Returns empty string + nil
+// error when the path doesn't exist at that revision (rare; the
+// caller decides whether to error).
+func (s *Store) FileAt(ctx context.Context, workspaceID, rev, path string) (string, error) {
+	ws, err := s.Get(ctx, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if ws == nil {
+		return "", fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	if rev == "" || path == "" {
+		return "", fmt.Errorf("FileAt: rev and path required")
+	}
+	for _, r := range rev {
+		ok := (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') ||
+			(r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') ||
+			r == '-' || r == '_' || r == '.' || r == '/'
+		if !ok {
+			return "", fmt.Errorf("FileAt: invalid rev %q", rev)
+		}
+	}
+	bare := s.BarePath(workspaceID)
+	out, err := runGit("", "--git-dir", bare, "show", rev+":"+path)
+	if err != nil {
+		return "", fmt.Errorf("git show: %w (output: %s)", err, out)
+	}
+	return out, nil
+}
+
 // Diff returns the textual diff of `path` between two revisions on
 // the workspace's default branch. `from` may be empty — defaults to
 // `to^` (the parent of `to`), giving a single-commit diff. `to` is

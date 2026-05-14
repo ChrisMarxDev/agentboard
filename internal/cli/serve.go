@@ -319,6 +319,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 		EditFn: func(ctx context.Context, workspace, path, body, actor, message string) error {
 			return gitStore.PutFile(ctx, workspace, path, body, actor, message)
 		},
+		RestoreFn: func(ctx context.Context, workspace, path, sha, actor string) error {
+			body, err := gitStore.FileAt(ctx, workspace, sha, path)
+			if err != nil {
+				return err
+			}
+			short := sha
+			if len(short) > 10 {
+				short = short[:10]
+			}
+			return gitStore.PutFile(ctx, workspace, path, body, actor,
+				"Restore "+path+" to "+short)
+		},
 	})
 	// SSE fan-out: any push (HTTP smart-protocol or server-internal)
 	// now broadcasts a "workspace-changed" event over /_api/events so

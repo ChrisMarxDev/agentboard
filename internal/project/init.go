@@ -655,6 +655,15 @@ const seededChangelogHTML = `<!doctype html>
 <ol class="timeline">
   <li>
     <time>2026-05-14</time>
+    <h3>Restore-from-history (one-click)</h3>
+    <p><span class="pill">qol</span>
+       Each history row gains a <code>(restore)</code> button for
+       signed-in users. POSTs to <code>/_api/restore</code> with the
+       sha; server re-commits the file's content at that sha as a new
+       commit. Closes the history → diff → restore triad.</p>
+  </li>
+  <li>
+    <time>2026-05-14</time>
     <h3>One canonical SKILL.md at the workspace root</h3>
     <p><span class="pill">substrate</span>
        Retired the <code>skills/agentboard/{SKILL.md, examples.md}</code>
@@ -1135,6 +1144,16 @@ const seededSprintTaskboardJSON = `{
       "assignees": ["claude"],
       "priority": 1,
       "order": 11.0
+    },
+    {
+      "id": "c-done-restore",
+      "title": "Restore-from-history one-click",
+      "column": "done",
+      "body": "(restore) button on every history row for signed-in users.",
+      "labels": ["history", "qol"],
+      "assignees": ["claude"],
+      "priority": 2,
+      "order": 12.0
     },
     {
       "id": "c-doing-self-loop",
