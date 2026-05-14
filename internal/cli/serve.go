@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/christophermarx/agentboard/internal/auth"
@@ -20,9 +22,15 @@ import (
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/project"
+	"github.com/christophermarx/agentboard/internal/search"
 	"github.com/christophermarx/agentboard/internal/server"
 	"github.com/spf13/cobra"
 )
+
+// htmlEscape is a tiny alias around html.EscapeString — used in
+// search snippet rendering. Pulled into a local name to keep the
+// inline call sites short.
+var htmlEscape = html.EscapeString
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -117,6 +125,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	gitStore, err := gitserver.NewStore(dbConn.Conn(), gitRoot)
 	if err != nil {
 		return fmt.Errorf("open git workspace store: %w", err)
+	}
+	// FTS5 search index — rebuilt on each push.
+	searchStore, err := search.NewStore(dbConn.Conn())
+	if err != nil {
+		return fmt.Errorf("open search store: %w", err)
 	}
 	// Seed the default workspace. Empty seed → empty workspace.
 	if _, err := gitStore.Create(context.Background(), "dogfood", "system", ""); err != nil {
@@ -262,6 +275,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 		DiffFn: func(path, from, to string) (string, error) {
 			return gitStore.Diff(context.Background(), "dogfood", from, to, path)
 		},
+		SearchFn: func(q string, limit int) ([]htmlserver.SearchHit, error) {
+			hits, err := searchStore.Query(context.Background(), "dogfood", q, limit)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]htmlserver.SearchHit, 0, len(hits))
+			for _, h := range hits {
+				escaped := htmlEscape(h.Snippet)
+				escaped = strings.ReplaceAll(escaped, htmlEscape(search.SnippetSentinelOpen), "<mark>")
+				escaped = strings.ReplaceAll(escaped, htmlEscape(search.SnippetSentinelClose), "</mark>")
+				out = append(out, htmlserver.SearchHit{
+					Path:        h.Path,
+					SnippetHTML: escaped,
+				})
+			}
+			return out, nil
+		},
 	}
 
 	srv := server.New(server.ServerConfig{
@@ -276,6 +306,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// SSE fan-out: any push (HTTP smart-protocol or server-internal)
 	// now broadcasts a "workspace-changed" event over /_api/events so
 	// open dashboard tabs can offer a non-modal "reload" toast.
+	// Same hook also drives the FTS5 re-index.
 	wireSSE := func(workspace string) {
 		payload, _ := json.Marshal(map[string]string{"workspace": workspace})
 		srv.Broadcaster.Broadcast(server.SSEEvent{
@@ -283,12 +314,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 			Data: payload,
 		})
 	}
+	reindex := func(ctx context.Context, workspace string) {
+		wt, err := gitStore.EnsureWorktree(ctx, workspace)
+		if err != nil {
+			log.Printf("Warning: search reindex worktree resolve: %v", err)
+			return
+		}
+		if err := searchStore.ReindexWorktree(ctx, workspace, wt); err != nil {
+			log.Printf("Warning: search reindex %s: %v", workspace, err)
+		}
+	}
 	prevInternal := gitStore.OnInternalPush
 	gitStore.OnInternalPush = func(ctx context.Context, workspace string) {
 		if prevInternal != nil {
 			prevInternal(ctx, workspace)
 		}
 		wireSSE(workspace)
+		reindex(ctx, workspace)
 	}
 	prevHook := gitHooks.OnPush
 	gitHooks.OnPush = func(ctx context.Context, workspace string, refs []gitserver.PushedRef) {
@@ -296,7 +338,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 			prevHook(ctx, workspace, refs)
 		}
 		wireSSE(workspace)
+		reindex(ctx, workspace)
 	}
+	// Build the initial index synchronously so the dashboard's
+	// search box works on first request after a fresh boot.
+	reindex(context.Background(), "dogfood")
 
 	srv.MCP.GitStore = gitStore
 	srv.MCP.ProposeFn = proposeFn

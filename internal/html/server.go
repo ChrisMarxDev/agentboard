@@ -65,6 +65,12 @@ type CommitInfo struct {
 	Subject string
 }
 
+// SearchHit mirrors search.Hit; same isolation reasoning as CommitInfo.
+type SearchHit struct {
+	Path        string
+	SnippetHTML string // already-escaped HTML with <mark> markers
+}
+
 // Server renders the workspace's working tree as HTML. Construct one
 // per workspace via New(); cli/serve.go mounts it as the catch-all
 // after /_api/ and /git/ are registered.
@@ -86,6 +92,10 @@ type Server struct {
 	// revisions. `from` empty means "the parent of to". Used by the
 	// ?diff=<from>..<to> view.
 	DiffFn func(path, from, to string) (string, error)
+
+	// SearchFn queries the full-text index. Set by cli/serve.go; if
+	// nil the search input + ?q=… view fall back to "not available".
+	SearchFn func(q string, limit int) ([]SearchHit, error)
 
 	once     sync.Once
 	tmpl     *template.Template
@@ -155,6 +165,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the diff for this path between the two revisions.
 	if d := r.URL.Query().Get("diff"); d != "" {
 		s.renderDiff(w, r, urlPath, d)
+		return
+	}
+	// ?q=needle — full-text search results page. Top-level only, so
+	// "/foo?q=bar" still pulls the file at /foo.
+	if q := r.URL.Query().Get("q"); q != "" && (urlPath == "/" || urlPath == "") {
+		s.renderSearch(w, r, q)
 		return
 	}
 
@@ -589,6 +605,62 @@ func (s *Server) renderDiff(w http.ResponseWriter, r *http.Request, urlPath, dif
 	}
 	body.WriteString(`</div>`)
 	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// renderSearch serves /?q=needle as server-rendered results.
+func (s *Server) renderSearch(w http.ResponseWriter, r *http.Request, q string) {
+	title := "Search — " + q
+
+	var body bytes.Buffer
+	body.WriteString(`<style>
+  .search-form { display: flex; gap: .5rem; margin: 1rem 0 1.5rem; }
+  .search-form input { flex: 1; padding: .55rem .75rem;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font-size: 1rem; }
+  .search-form button { padding: .55rem 1.25rem; background: var(--accent);
+    color: #fff; border: 0; border-radius: 6px; font-weight: 500;
+    cursor: pointer; }
+  .hits { list-style: none; padding: 0; margin: 0; }
+  .hits > li { padding: .85rem 0; border-bottom: 1px solid var(--border); }
+  .hits .path { font-family: var(--ab-mono, monospace);
+    color: var(--accent); text-decoration: none; font-size: .9rem; }
+  .hits .path:hover { text-decoration: underline; }
+  .hits .snip { margin: .35rem 0 0; color: var(--text-secondary);
+    font-size: .9rem; line-height: 1.5; }
+  .hits .snip mark { background: var(--accent-light); color: var(--text);
+    padding: 0 .15rem; border-radius: 2px; }
+</style>`)
+	fmt.Fprintf(&body, `<h1>Search</h1>
+<form class="search-form" method="get" action="/">
+  <input name="q" value="%s" placeholder="Search the workspace…" autofocus>
+  <button type="submit">Search</button>
+</form>`, template.HTMLEscapeString(q))
+
+	if s.SearchFn == nil {
+		body.WriteString(`<p class="ab-muted">Search is not available on this instance.</p>`)
+		s.renderShell(w, r, "/", title, template.HTML(body.String()), nil, false)
+		return
+	}
+	hits, err := s.SearchFn(q, 50)
+	if err != nil {
+		fmt.Fprintf(&body, `<p class="ab-muted">Search failed: %s</p>`, template.HTMLEscapeString(err.Error()))
+		s.renderShell(w, r, "/", title, template.HTML(body.String()), nil, false)
+		return
+	}
+	if len(hits) == 0 {
+		fmt.Fprintf(&body, `<p class="ab-muted">No matches for <code>%s</code>.</p>`, template.HTMLEscapeString(q))
+		s.renderShell(w, r, "/", title, template.HTML(body.String()), nil, false)
+		return
+	}
+	fmt.Fprintf(&body, `<p class="ab-muted">%d matches.</p><ol class="hits">`, len(hits))
+	for _, h := range hits {
+		fmt.Fprintf(&body, `<li><a class="path" href="/%s">/%s</a><p class="snip">%s</p></li>`,
+			template.HTMLEscapeString(h.Path),
+			template.HTMLEscapeString(h.Path),
+			h.SnippetHTML)
+	}
+	body.WriteString(`</ol>`)
+	s.renderShell(w, r, "/", title, template.HTML(body.String()), nil, false)
 }
 
 // parseDiffSpec splits `<from>..<to>` or `<sha>` (implicit parent) into

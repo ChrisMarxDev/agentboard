@@ -20,6 +20,10 @@
   header .branch{font-size:.75rem;color:var(--text-secondary);padding:.15rem .5rem;border-radius:9999px;background:var(--bg);border:1px solid var(--border)}
   header .spacer{flex:1}
   header .user{font-size:.8rem;color:var(--text-secondary)}
+  header .header-search{display:none;flex:0 1 320px;margin:0}
+  header .header-search input{width:100%;padding:.35rem .65rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:.85rem;outline:none}
+  header .header-search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
+  @media (min-width: 768px){ header .header-search{display:flex} }
 
   .backdrop{position:fixed;inset:48px 0 0 0;background:rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .15s ease;z-index:15}
   body.nav-open .backdrop{opacity:1;pointer-events:auto}
@@ -90,6 +94,9 @@
   </button>
   <span class="brand"><a href="/">{{.WorkspaceName}}</a></span>
   <span class="branch">{{.Branch}}</span>
+  <form class="header-search" method="get" action="/">
+    <input name="q" placeholder="Search…" aria-label="Search the workspace" autocomplete="off">
+  </form>
   <span class="spacer"></span>
   <span class="user">{{if .User}}@{{.User}} · <a href="/logout">sign out</a>{{else}}<a href="/login">sign in</a>{{end}}</span>
 </header>
