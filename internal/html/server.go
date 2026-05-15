@@ -373,11 +373,17 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 
 	wantRaw := r.URL.Query().Get("raw") != ""
 	wantDownload := r.URL.Query().Get("download") != ""
-	// Resource-fetch shortcut: browsers asking for <img>, <link>,
-	// <script> don't send Accept: text/html. curl defaults to */*
-	// and is treated the same way — give it bytes.
-	acceptHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
-	if wantRaw || wantDownload || !acceptHTML {
+	// Resource-fetch detection. Modern browsers (Chrome, Firefox,
+	// Safari) set Sec-Fetch-Dest on every fetch — "document" or
+	// "iframe" for top-level nav, "image"/"style"/"script"/"font"/etc.
+	// for resource fetches like <img>, <link>, <script>. We use this
+	// as the primary signal so `<img src="/photo.jpg">` works without
+	// needing `?raw=1`. The default at the bare URL stays "preview
+	// shell" — so clicking an image link in the sidebar shows the
+	// framed view (GitHub-style), not raw bytes.
+	dest := r.Header.Get("Sec-Fetch-Dest")
+	isResourceFetch := dest != "" && dest != "document" && dest != "iframe" && dest != "empty"
+	if wantRaw || wantDownload || isResourceFetch {
 		ct := contentTypeFor(ext)
 		w.Header().Set("Content-Type", ct)
 		if wantDownload {

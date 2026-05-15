@@ -142,22 +142,57 @@
 <div id="ab-toast" role="status" aria-live="polite" style="position:fixed;bottom:1rem;left:50%;transform:translateX(-50%) translateY(2rem);opacity:0;pointer-events:none;background:var(--text);color:var(--bg);padding:.6rem 1rem;border-radius:9999px;font-size:.85rem;box-shadow:0 4px 12px rgba(0,0,0,.2);transition:opacity .2s, transform .2s;z-index:60;display:flex;align-items:center;gap:.75rem"></div>
 <script>
 (function(){
-  // Folder toggles: click the chevron to expand/collapse; clicking
-  // the folder name navigates to the folder index. Without JS the
-  // chevrons do nothing and only the active path is pre-expanded
-  // server-side, which is acceptable: users can still click the
-  // folder name to navigate.
+  // Sidebar folder state, persisted across navigation.
+  // sessionStorage keeps a set of folder URLs the user has expanded;
+  // we rehydrate on page load so clicking around the workspace
+  // doesn't collapse the tree on every reload. Server still pre-
+  // expands the active path's ancestors — this layer is purely
+  // additive.
+  var KEY = 'ab-tree-open';
+  function readSet(){
+    try { return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]')); }
+    catch(e){ return new Set(); }
+  }
+  function saveSet(s){
+    try { sessionStorage.setItem(KEY, JSON.stringify(Array.from(s))); } catch(e){}
+  }
+  function chevronKey(btn){
+    var link = btn.parentElement && btn.parentElement.querySelector('a');
+    return link && link.getAttribute('href') || null;
+  }
+  var opened = readSet();
   document.querySelectorAll('aside .tree .chevron').forEach(function(btn){
+    // Restore previously-opened folders.
+    var key = chevronKey(btn);
+    if (key && opened.has(key)) {
+      var c = btn.parentElement.nextElementSibling;
+      if (c && c.classList.contains('tree-children')) {
+        c.classList.remove('collapsed');
+        btn.classList.add('open');
+      }
+    }
+    // Also seed the saved-state with server-rendered open folders
+    // so a click → collapse → navigate gives the expected feel.
+    if (btn.classList.contains('open') && key) {
+      opened.add(key);
+    }
     btn.addEventListener('click', function(e){
       e.preventDefault();
       e.stopPropagation();
-      var children = btn.parentElement.nextElementSibling;
-      if (children && children.classList.contains('tree-children')) {
-        children.classList.toggle('collapsed');
-        btn.classList.toggle('open');
+      var c = btn.parentElement.nextElementSibling;
+      if (!c || !c.classList.contains('tree-children')) return;
+      c.classList.toggle('collapsed');
+      btn.classList.toggle('open');
+      var nowOpen = !c.classList.contains('collapsed');
+      var k = chevronKey(btn);
+      var s = readSet();
+      if (k) {
+        if (nowOpen) s.add(k); else s.delete(k);
+        saveSet(s);
       }
     });
   });
+  saveSet(opened);
 
   // Keyboard nav: j/k cycle through visible sidebar links in tree
   // order; n jumps to the next folder header; / focuses search.
