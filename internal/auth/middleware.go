@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -390,6 +391,61 @@ func passThrough(r *http.Request, openSet map[string]struct{}) bool {
 		return true
 	}
 	return false
+}
+
+// RequireUserMiddleware is the human-facing companion to TokenMiddleware:
+// it resolves a session cookie or bearer token, attaches user-context
+// when valid, and **redirects to /login** when neither is present or
+// valid. Used by the HTML dashboard catch-all so an anonymous browser
+// gets a friendly login page instead of either a 401 JSON envelope or
+// the rendered dashboard content.
+//
+// OPTIONS preflights and HEAD requests pass through so CORS and
+// link-prefetchers don't bounce.
+//
+// API callers that prefer the 401 response (bearer-token agents
+// integrating against /_api/*) keep using TokenMiddleware on their
+// route group; this middleware is opt-in per-group.
+func RequireUserMiddleware(store *Store) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Bearer first — bearer-authenticated agents (e.g. ops
+			// curl) get straight through.
+			if token := extractToken(r); token != "" && !strings.HasPrefix(token, OAuthAccessPrefix) {
+				if user, tok, err := store.ResolveToken(HashToken(token)); err == nil {
+					ctx := context.WithValue(r.Context(), ctxUser, user)
+					ctx = context.WithValue(ctx, ctxToken, tok)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			// Cookie path.
+			if cookie, err := r.Cookie(SessionCookieName); err == nil && cookie.Value != "" {
+				if user, sess, err := store.ResolveSession(cookie.Value); err == nil {
+					ctx := context.WithValue(r.Context(), ctxUser, user)
+					ctx = context.WithValue(ctx, ctxSession, sess)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
+			}
+			// No valid credential. Redirect humans to /login with a
+			// next= so they land back where they were. HEAD requests
+			// get a bare 401 since they have no body.
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			target := r.URL.Path
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, "/login?next="+url.QueryEscape(target), http.StatusFound)
+		})
+	}
 }
 
 // SoftAuthMiddleware resolves session cookies and bearer tokens when

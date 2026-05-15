@@ -248,12 +248,13 @@ func (s *Server) buildRouter() chi.Router {
 	})
 
 	// ----- HTML catch-all -----
-	// Anonymous reads are intentional, but we still want session
-	// cookies to resolve so the renderer can show "@username" + a
-	// logout link. SoftAuthMiddleware never 401s — perfect for the
-	// public dashboard.
+	// Auth-gated: anonymous browsers redirect to /login?next=… so
+	// they get a friendly sign-in page instead of either a 401 JSON
+	// envelope or rendered dashboard content. Bearer-token callers
+	// (ops curl, agents debugging via HTML) also pass through.
+	requireUserMW := auth.RequireUserMiddleware(s.Auth)
 	r.Group(func(r chi.Router) {
-		r.Use(softMW)
+		r.Use(requireUserMW)
 		if s.HTML != nil {
 			r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 				switch r.Method {

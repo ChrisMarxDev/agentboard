@@ -89,6 +89,17 @@ func (s *Store) BootstrapFirstAdmin(
 		return existing, nil
 	}
 
+	// No active bootstrap invite — but the partial-unique index on
+	// (created_by='bootstrap', not redeemed, not revoked) also matches
+	// EXPIRED rows. If a previous boot's invite has aged past its TTL
+	// without being claimed or revoked, a fresh INSERT collides with
+	// it. Sweep any such row to RevokedAt=now so the next Create can
+	// land. Idempotent on workspaces that already claimed the first
+	// admin (HasAnyUser short-circuits earlier in this function).
+	if err := invStore.RevokeExpiredBootstrap(); err != nil {
+		return nil, fmt.Errorf("sweep expired bootstrap invite: %w", err)
+	}
+
 	// Mint a fresh one.
 	inv, err := invStore.Create(invitations.CreateParams{
 		Role:      invitations.RoleAdmin,

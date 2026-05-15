@@ -255,6 +255,23 @@ func (s *Store) Redeem(id, username string) (*Invitation, error) {
 	return nil, ErrExpired
 }
 
+// RevokeExpiredBootstrap marks any expired-but-not-yet-redeemed-or-
+// revoked bootstrap invitation as revoked. Used by the boot path to
+// free up the partial-unique-index slot so a fresh bootstrap invite
+// can be minted. Idempotent: no-op when no qualifying row exists.
+func (s *Store) RevokeExpiredBootstrap() error {
+	now := time.Now().UTC().Unix()
+	_, err := s.db.Exec(
+		`UPDATE invitations
+		   SET revoked_at = ?
+		 WHERE created_by = ?
+		   AND redeemed_at IS NULL
+		   AND revoked_at IS NULL
+		   AND expires_at <= ?`,
+		now, BootstrapCreator, now)
+	return err
+}
+
 // BootstrapActive returns the currently-active bootstrap invitation
 // (role=admin, created_by=BootstrapCreator, not redeemed/revoked, not
 // expired), if one exists. Nil + nil on miss. Used by the serve-path

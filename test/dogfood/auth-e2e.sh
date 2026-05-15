@@ -78,8 +78,8 @@ check "GET /_api/health is 200" \
   "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/_api/health') = 200 ]"
 check "GET /_api/me is 401 (no creds)" \
   "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/_api/me') = 401 ]"
-check "GET / returns 200 (anonymous dashboard read)" \
-  "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/') = 200 ]"
+check "GET / redirects to /login (anonymous dashboard is gated)" \
+  "[ \$(curl -sS -o /dev/null -w '%{http_code}' '$REMOTE_BASE/') = 302 ]"
 
 # ----- 2. Login UI -----
 echo "▸ Login UI"
@@ -129,6 +129,11 @@ if [[ "$MODE" == "local" ]]; then
   check "GET / shows @username after login" \
     "curl -sS -b '$JAR' '$REMOTE_BASE/' | grep -qE '@e2eadmin'"
 
+  # GET / with a valid cookie returns 200 (verifies the gate honors
+  # sessions, not just unconditional redirect).
+  check "GET / with cookie returns 200 (signed-in user sees dashboard)" \
+    "[ \$(curl -sS -b '$JAR' -o /dev/null -w '%{http_code}' '$REMOTE_BASE/') = 200 ]"
+
   # /logout drops the cookie and redirects.
   rm -f "$JAR.new"
   LOGOUT_HTTP="$(curl -sS -b "$JAR" -c "$JAR.new" -o /dev/null -w '%{http_code}' \
@@ -137,6 +142,8 @@ if [[ "$MODE" == "local" ]]; then
   mv "$JAR.new" "$JAR"
   check "session cookie cleared (or invalid) after logout" \
     "[ \$(curl -sS -b '$JAR' -o /dev/null -w '%{http_code}' '$REMOTE_BASE/_api/me') = 401 ]"
+  check "GET / after logout redirects to /login" \
+    "[ \$(curl -sS -b '$JAR' -o /dev/null -w '%{http_code}' '$REMOTE_BASE/') = 302 ]"
 
   echo "▸ Re-login as the claimed account"
   rm -f "$JAR" && touch "$JAR"
