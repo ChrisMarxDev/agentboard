@@ -331,6 +331,25 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, urlPath
 }
 
 // renderFile picks a renderer based on extension and serves the file.
+//
+// Rich types (.md, .html, .json) render inline with their own
+// formatters. Everything else routes through a preview wrapper that
+// shows the file with metadata + a download button:
+//   - images embedded via <img>
+//   - text-ish files in a <pre>
+//   - everything else as a metadata-only "Download" page
+//
+// Three escape hatches let the wrapper get out of the way:
+//   - ?raw=1                — write the raw bytes with the proper
+//                             content-type. Used by <img src> embeds.
+//   - ?download=1           — same, plus Content-Disposition:
+//                             attachment. Used by the Download button.
+//   - Accept header missing "text/html" — the caller is a curl-style
+//                             tool or a resource fetcher (<img>,
+//                             <link>, <script>). Send raw bytes.
+//
+// .md/.html/.json always render rich; the Accept-based escape doesn't
+// apply to them because those are meant for browser consumption.
 func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs string, info os.FileInfo) {
 	data, err := os.ReadFile(abs)
 	if err != nil {
@@ -338,41 +357,102 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(abs))
+
+	// Rich-render paths short-circuit. They never use ?raw=1.
 	switch ext {
 	case ".md", ".mdx":
 		s.renderMarkdown(w, r, urlPath, data)
+		return
 	case ".html", ".htm":
 		s.renderHTML(w, r, urlPath, data)
+		return
 	case ".json":
 		s.renderJSON(w, r, urlPath, data)
-	case ".txt":
-		s.renderText(w, r, urlPath, data, "text/plain")
-	case ".css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		_, _ = w.Write(data)
-	case ".js":
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		_, _ = w.Write(data)
-	case ".png":
-		w.Header().Set("Content-Type", "image/png")
-		_, _ = w.Write(data)
-	case ".jpg", ".jpeg":
-		w.Header().Set("Content-Type", "image/jpeg")
-		_, _ = w.Write(data)
-	case ".svg":
-		w.Header().Set("Content-Type", "image/svg+xml")
-		_, _ = w.Write(data)
-	case ".ndjson":
-		w.Header().Set("Content-Type", "application/x-ndjson")
-		_, _ = w.Write(data)
-	case ".csv":
-		// Serve CSV as text/csv with the filename so browsers can both
-		// preview it inline and offer "save as".
-		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		_, _ = w.Write(data)
-	default:
-		s.renderText(w, r, urlPath, data, "text/plain; charset=utf-8")
+		return
 	}
+
+	wantRaw := r.URL.Query().Get("raw") != ""
+	wantDownload := r.URL.Query().Get("download") != ""
+	// Resource-fetch shortcut: browsers asking for <img>, <link>,
+	// <script> don't send Accept: text/html. curl defaults to */*
+	// and is treated the same way — give it bytes.
+	acceptHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
+	if wantRaw || wantDownload || !acceptHTML {
+		ct := contentTypeFor(ext)
+		w.Header().Set("Content-Type", ct)
+		if wantDownload {
+			w.Header().Set("Content-Disposition",
+				`attachment; filename="`+filepath.Base(abs)+`"`)
+		}
+		_, _ = w.Write(data)
+		return
+	}
+
+	// Preview-shell paths.
+	switch {
+	case isImageExt(ext):
+		s.renderImagePreview(w, r, urlPath, abs, info, ext)
+	case isTextishExt(ext):
+		s.renderTextPreview(w, r, urlPath, abs, info, string(data))
+	default:
+		s.renderBinaryPreview(w, r, urlPath, abs, info, ext)
+	}
+}
+
+// contentTypeFor maps an extension to its served-as content-type.
+// Used by the raw / download path; the preview wrappers don't need it.
+func contentTypeFor(ext string) string {
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".bmp":
+		return "image/bmp"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".ndjson":
+		return "application/x-ndjson"
+	case ".csv":
+		return "text/csv; charset=utf-8"
+	case ".tsv":
+		return "text/tab-separated-values; charset=utf-8"
+	case ".pdf":
+		return "application/pdf"
+	case ".zip":
+		return "application/zip"
+	case ".txt", ".log", ".yaml", ".yml", ".toml", ".ini":
+		return "text/plain; charset=utf-8"
+	}
+	return "application/octet-stream"
+}
+
+func isImageExt(ext string) bool {
+	switch ext {
+	case ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp":
+		return true
+	}
+	return false
+}
+
+func isTextishExt(ext string) bool {
+	switch ext {
+	case ".txt", ".log", ".csv", ".tsv", ".ndjson",
+		".yaml", ".yml", ".toml", ".ini",
+		".css", ".js", ".sh", ".env":
+		return true
+	}
+	return false
 }
 
 // splitFrontmatter pulls a YAML frontmatter block off a markdown / HTML
@@ -884,6 +964,175 @@ func formatWhen(iso string) string {
 	return iso
 }
 
+// previewMeta is the data passed to the preview header partial.
+type previewMeta struct {
+	Path        string
+	Filename    string
+	Size        string
+	ContentType string
+	LastAuthor  string
+	LastWhen    string
+	DownloadURL string
+	RawURL      string
+}
+
+// metaFor builds the metadata strip shown above every preview shell.
+// Last-edit comes from the workspace's git history (one-row lookup);
+// nil-safe if HistoryFn isn't wired.
+func (s *Server) metaFor(urlPath string, info os.FileInfo, ext string) previewMeta {
+	rel := strings.Trim(strings.TrimPrefix(urlPath, "/"), "/")
+	m := previewMeta{
+		Path:        urlPath,
+		Filename:    filepath.Base(urlPath),
+		Size:        humanSize(info.Size()),
+		ContentType: contentTypeFor(ext),
+		DownloadURL: urlPath + "?download=1",
+		RawURL:      urlPath + "?raw=1",
+	}
+	if s.HistoryFn != nil {
+		if commits, err := s.HistoryFn(rel, 1); err == nil && len(commits) > 0 {
+			m.LastAuthor = commits[0].Author
+			m.LastWhen = formatWhen(commits[0].When)
+		}
+	}
+	return m
+}
+
+// humanSize formats a byte count as B / KB / MB.
+func humanSize(n int64) string {
+	const k = 1024
+	if n < k {
+		return fmt.Sprintf("%d B", n)
+	}
+	if n < k*k {
+		return fmt.Sprintf("%.1f KB", float64(n)/k)
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(k*k))
+}
+
+// previewHeader writes the shared metadata strip into buf.
+func previewHeader(buf *bytes.Buffer, m previewMeta) {
+	fmt.Fprintf(buf, `<style>
+  .preview-meta { display: grid; grid-template-columns: 1fr auto; gap: .5rem 1rem;
+    align-items: center; margin: 0 0 1.5rem; padding-bottom: .85rem;
+    border-bottom: 1px solid var(--border); font-size: .85rem;
+    color: var(--text-secondary); }
+  .preview-meta h1 { margin: 0; font-size: 1.25rem; font-family: var(--ab-mono,monospace);
+    color: var(--text); word-break: break-all; }
+  .preview-meta dl { margin: 0; display: flex; flex-wrap: wrap; gap: .25rem 1.25rem;
+    font-size: .8rem; }
+  .preview-meta dl div { display: flex; gap: .35rem; }
+  .preview-meta dt { color: var(--text-secondary); }
+  .preview-meta dd { margin: 0; color: var(--text); }
+  .preview-actions { display: flex; gap: .5rem; }
+  .preview-actions a { padding: .4rem .85rem; background: var(--accent); color: #fff;
+    border-radius: 6px; text-decoration: none; font-size: .85rem; font-weight: 500; }
+  .preview-actions a.secondary { background: var(--bg-secondary); color: var(--text);
+    border: 1px solid var(--border); }
+  .preview-actions a:hover { filter: brightness(1.05); }
+  @media (max-width: 600px) {
+    .preview-meta { grid-template-columns: 1fr; }
+    .preview-actions { justify-content: flex-start; }
+  }
+</style>
+<div class="preview-meta">
+  <div>
+    <h1>%s</h1>
+    <dl>
+      <div><dt>size</dt><dd>%s</dd></div>
+      <div><dt>type</dt><dd>%s</dd></div>`,
+		template.HTMLEscapeString(m.Filename),
+		template.HTMLEscapeString(m.Size),
+		template.HTMLEscapeString(m.ContentType))
+	if m.LastAuthor != "" {
+		fmt.Fprintf(buf, `<div><dt>last edit</dt><dd>@%s · %s</dd></div>`,
+			template.HTMLEscapeString(m.LastAuthor),
+			template.HTMLEscapeString(m.LastWhen))
+	}
+	fmt.Fprintf(buf, `</dl>
+  </div>
+  <div class="preview-actions">
+    <a class="secondary" href="%s">View raw</a>
+    <a href="%s">Download</a>
+  </div>
+</div>`,
+		template.HTMLEscapeString(m.RawURL),
+		template.HTMLEscapeString(m.DownloadURL))
+}
+
+func (s *Server) renderImagePreview(w http.ResponseWriter, r *http.Request, urlPath, abs string, info os.FileInfo, ext string) {
+	m := s.metaFor(urlPath, info, ext)
+	var buf bytes.Buffer
+	previewHeader(&buf, m)
+	fmt.Fprintf(&buf, `<style>
+  .img-preview { background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--ab-radius, 8px); padding: 2rem; text-align: center;
+    margin: 1rem 0; }
+  .img-preview img { max-width: 100%%; max-height: 70vh; height: auto;
+    background:
+      linear-gradient(45deg, var(--bg) 25%%, transparent 25%%),
+      linear-gradient(-45deg, var(--bg) 25%%, transparent 25%%),
+      linear-gradient(45deg, transparent 75%%, var(--bg) 75%%),
+      linear-gradient(-45deg, transparent 75%%, var(--bg) 75%%);
+    background-size: 16px 16px;
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0; }
+</style>
+<div class="img-preview"><img src="%s" alt="%s"></div>`,
+		template.HTMLEscapeString(m.RawURL),
+		template.HTMLEscapeString(m.Filename))
+	s.renderShell(w, r, urlPath, m.Filename, template.HTML(buf.String()), nil, true)
+}
+
+func (s *Server) renderTextPreview(w http.ResponseWriter, r *http.Request, urlPath, abs string, info os.FileInfo, body string) {
+	ext := strings.ToLower(filepath.Ext(abs))
+	m := s.metaFor(urlPath, info, ext)
+	var buf bytes.Buffer
+	previewHeader(&buf, m)
+	// Cap inline body at 256 KB. Anything larger gets a notice + the
+	// download button is the way to see it.
+	const maxInline = 256 * 1024
+	truncated := false
+	if len(body) > maxInline {
+		body = body[:maxInline]
+		truncated = true
+	}
+	fmt.Fprintf(&buf, `<style>
+  .text-preview { background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--ab-radius, 8px); padding: 1rem; margin: 1rem 0; overflow: auto; }
+  .text-preview pre { margin: 0; font-family: var(--ab-mono, monospace);
+    font-size: .85rem; line-height: 1.5; white-space: pre; word-break: normal; }
+  .text-truncated { margin: .75rem 0 0; padding: .75rem 1rem;
+    background: rgba(245,158,11,.12); color: var(--warning);
+    border-radius: 6px; font-size: .85rem; }
+</style>
+<div class="text-preview"><pre>%s</pre></div>`,
+		template.HTMLEscapeString(body))
+	if truncated {
+		fmt.Fprintf(&buf, `<p class="text-truncated">Preview truncated at 256 KB.
+       <a href="%s">Download</a> to see the full file.</p>`,
+			template.HTMLEscapeString(m.DownloadURL))
+	}
+	s.renderShell(w, r, urlPath, m.Filename, template.HTML(buf.String()), nil, true)
+}
+
+func (s *Server) renderBinaryPreview(w http.ResponseWriter, r *http.Request, urlPath, abs string, info os.FileInfo, ext string) {
+	m := s.metaFor(urlPath, info, ext)
+	var buf bytes.Buffer
+	previewHeader(&buf, m)
+	buf.WriteString(`<style>
+  .binary-notice { background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: var(--ab-radius, 8px); padding: 2rem; text-align: center;
+    margin: 1rem 0; color: var(--text-secondary); }
+</style>
+<div class="binary-notice">
+  <p>No inline preview available for this file type.</p>
+  <p style="margin-top:.5rem;font-size:.85rem">
+    Use the Download button above to grab a copy, or <a href="?history=1">view its history</a>.
+  </p>
+</div>`)
+	s.renderShell(w, r, urlPath, m.Filename, template.HTML(buf.String()), nil, true)
+}
+
 func (s *Server) renderText(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte, contentType string) {
 	w.Header().Set("Content-Type", contentType)
 	_, _ = w.Write(raw)
@@ -1033,28 +1282,34 @@ func (s *Server) walkTreeDir(absDir, urlPrefix, currentPath string, depth int) [
 		if !isDir {
 			label = strings.TrimSuffix(name, filepath.Ext(name))
 		}
-		active := strings.HasPrefix(currentPath, urlPrefix+"/"+name) &&
-			(len(currentPath) == len(urlPrefix+"/"+name) ||
-				currentPath[len(urlPrefix+"/"+name)] == '/' ||
-				currentPath[len(urlPrefix+"/"+name)] == '?')
+		nodeBase := urlPrefix + "/" + name
+		// "Open" — current request path goes through this folder. Used
+		// to auto-expand ancestors of the active file.
+		open := isDir && strings.HasPrefix(currentPath, nodeBase+"/")
+		// "Active" — exact match on the URL of this entry. Trailing
+		// slash optional for folder index navigation.
+		exact := currentPath == nodeBase
+		if isDir {
+			exact = exact || currentPath == nodeBase+"/"
+		}
+		// A directory index landing also counts the folder as active
+		// (e.g. currentPath="/pages/" highlights pages/).
+		active := exact
 		node := treeNode{
 			Label:  label,
 			Href:   nodeURL,
 			IsDir:  isDir,
 			Depth:  depth,
 			Active: active,
+			Open:   open,
 		}
 		if isDir && depth+1 < maxTreeDepth {
 			node.Children = s.walkTreeDir(
 				filepath.Join(absDir, name),
-				urlPrefix+"/"+name,
+				nodeBase,
 				currentPath,
 				depth+1,
 			)
-			// Auto-expand when the active path goes through this folder.
-			if active {
-				node.Open = true
-			}
 		}
 		out = append(out, node)
 	}
