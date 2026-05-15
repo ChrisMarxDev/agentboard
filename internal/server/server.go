@@ -227,6 +227,7 @@ func (s *Server) buildRouter() chi.Router {
 			api.Post("/webhooks/{id}/test", s.handleTestWebhook)
 		})
 
+
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
 		r.Post("/_api/edit", s.handleEditSubmit)
@@ -247,12 +248,22 @@ func (s *Server) buildRouter() chi.Router {
 		s.registerAuthUIRoutes(r)
 	})
 
+	// ----- admin HTML UI -----
+	// Server-rendered admin pages. Gated by RequireUserMiddleware so
+	// anonymous visitors get redirected to /login (not a 401 JSON
+	// envelope), then AdminRequired narrows to admin-kind users.
+	requireUserMW := auth.RequireUserMiddleware(s.Auth)
+	r.Group(func(adm chi.Router) {
+		adm.Use(requireUserMW)
+		adm.Use(auth.AdminRequired())
+		s.registerAdminUIRoutes(adm)
+	})
+
 	// ----- HTML catch-all -----
 	// Auth-gated: anonymous browsers redirect to /login?next=… so
 	// they get a friendly sign-in page instead of either a 401 JSON
 	// envelope or rendered dashboard content. Bearer-token callers
 	// (ops curl, agents debugging via HTML) also pass through.
-	requireUserMW := auth.RequireUserMiddleware(s.Auth)
 	r.Group(func(r chi.Router) {
 		r.Use(requireUserMW)
 		if s.HTML != nil {

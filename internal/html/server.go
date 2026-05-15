@@ -94,6 +94,11 @@ type Server struct {
 	// empty string for anonymous. Optional — defaults to anonymous.
 	UserResolver func(r *http.Request) string
 
+	// IsAdminFn reports whether the current request's user is an
+	// admin. Optional; defaults to false. Used to gate the /admin
+	// link in the header.
+	IsAdminFn func(r *http.Request) bool
+
 	// HistoryFn returns commits that touched `path` on the workspace's
 	// default branch, newest first. Set by cli/serve.go; if nil the
 	// ?history=1 view falls back to a "not available" message.
@@ -359,6 +364,11 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 		_, _ = w.Write(data)
 	case ".ndjson":
 		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write(data)
+	case ".csv":
+		// Serve CSV as text/csv with the filename so browsers can both
+		// preview it inline and offer "save as".
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 		_, _ = w.Write(data)
 	default:
 		s.renderText(w, r, urlPath, data, "text/plain; charset=utf-8")
@@ -942,6 +952,8 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		title != "Not found"
 	// Show the (edit) link to signed-in users on file pages.
 	showEdit := showHistory && user != ""
+	// Show the admin link in the header for admin-kind users.
+	isAdmin := s.IsAdminFn != nil && s.IsAdminFn(r)
 	data := map[string]any{
 		"Title":           title,
 		"WorkspaceName":   s.Workspace,
@@ -955,6 +967,7 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		"Wide":            wide,
 		"ShowHistoryLink": showHistory,
 		"ShowEditLink":    showEdit,
+		"IsAdmin":         isAdmin,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "shell", data); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)

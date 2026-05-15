@@ -177,7 +177,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		{"pages/getting-started.html", project.SeededGettingStartedHTML, "Update getting-started"},
 		{"pages/changelog.html", project.SeededChangelogHTML, "Update changelog"},
 		{"pages/roadmap.html", project.SeededRoadmapHTML, "Update roadmap"},
+		{"pages/file-types.html", project.SeededFilesDemoHTML, "Demo: file types"},
 		{"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "Update sprint board"},
+		{"assets/logo.svg", project.SeededLogoSVG, "Add demo logo (SVG)"},
+		{"data/sprint-14.csv", project.SeededSampleCSV, "Add sample CSV"},
+		{"data/scratch.txt", project.SeededSampleTXT, "Add sample plain-text note"},
 	} {
 		if err := gitStore.PutFile(context.Background(), "dogfood",
 			seed.path, seed.body, "system", seed.msg); err != nil {
@@ -271,6 +275,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 				return u.Username
 			}
 			return ""
+		},
+		IsAdminFn: func(r *http.Request) bool {
+			u := auth.UserFromContext(r.Context())
+			return u != nil && u.Kind == auth.KindAdmin
 		},
 		HistoryFn: func(path string, limit int) ([]htmlserver.CommitInfo, error) {
 			commits, err := gitStore.History(context.Background(), "dogfood", path, limit)

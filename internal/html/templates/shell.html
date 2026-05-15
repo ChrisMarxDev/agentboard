@@ -98,7 +98,7 @@
     <input name="q" placeholder="Search…" aria-label="Search the workspace" autocomplete="off">
   </form>
   <span class="spacer"></span>
-  <span class="user">{{if .User}}@{{.User}} · <a href="/logout">sign out</a>{{else}}<a href="/login">sign in</a>{{end}}</span>
+  <span class="user">{{if .User}}@{{.User}}{{if .IsAdmin}} · <a href="/admin">admin</a>{{end}} · <a href="/logout">sign out</a>{{else}}<a href="/login">sign in</a>{{end}}</span>
 </header>
 <div class="backdrop" onclick="document.body.classList.remove('nav-open');document.querySelector('.menu-btn').setAttribute('aria-expanded','false')"></div>
 <aside id="ab-nav">

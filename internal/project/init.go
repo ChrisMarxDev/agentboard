@@ -494,6 +494,11 @@ const seededIndexHTML = `<!doctype html>
     <div class="label">Roadmap</div>
     <div class="desc">Quality-of-life features the board could grow into next.</div>
   </a>
+  <a class="card-link" href="/pages/file-types.html">
+    <div class="eyebrow">Reference</div>
+    <div class="label">File types</div>
+    <div class="desc">What renders how: markdown, HTML, JSON, images, CSV, text.</div>
+  </a>
   <a class="card-link" href="/README.md">
     <div class="eyebrow">Convention</div>
     <div class="label">README</div>
@@ -1008,6 +1013,185 @@ const seededRoadmapHTML = `<!doctype html>
   Ideas welcome — propose new entries via
   <code>git push</code> to <code>pages/roadmap.html</code> or via
   <code>agentboard_propose</code>.
+</p>
+`
+
+// SeededLogoSVG is a tiny demo logo committed at /assets/logo.svg.
+// Demonstrates how the dashboard serves binary-ish files (SVG is text
+// underneath but renders as an image): the renderer sets the right
+// content-type and the page embeds it via <img src="/assets/logo.svg">.
+// Authored as inline SVG so the seed stays text-only — no binary
+// blobs in the constants table.
+var SeededLogoSVG = seededLogoSVG
+
+const seededLogoSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" role="img" aria-label="AgentBoard logo">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#a855f7"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="52" height="52" rx="10" fill="url(#g)"/>
+  <text x="14" y="38" font-family="ui-monospace,monospace" font-size="22" font-weight="700" fill="white">ab</text>
+  <text x="70" y="38" font-family="system-ui,sans-serif" font-size="20" font-weight="600" fill="#1a1d24">AgentBoard</text>
+</svg>
+`
+
+// SeededSampleCSV is a small CSV demonstrating how the dashboard
+// serves data files: rendered as preformatted text inline. Agents
+// authoring CSV reports can drop them in alongside their docs.
+var SeededSampleCSV = seededSampleCSV
+
+const seededSampleCSV = `# Sprint 14 — outcome by category (illustrative data)
+category,planned,shipped
+auth,3,3
+qol,7,7
+substrate,4,4
+docs,2,2
+`
+
+// SeededSampleTXT is a plain-text README-style note showing that
+// arbitrary .txt files render as preformatted text. Useful for log
+// excerpts, paste-from-terminal output, etc.
+var SeededSampleTXT = seededSampleTXT
+
+const seededSampleTXT = `AgentBoard files-as-files demo
+==============================
+
+Plain .txt files render as preformatted text inside the shell.
+Useful for:
+
+  - terminal output pasted from a script
+  - tab-separated tables you don't want HTML-formatted
+  - log excerpts you want preserved verbatim
+  - quick notes-to-self that don't deserve a markdown file
+
+No syntax highlighting — that's the trade-off. For code samples or
+prose, prefer .md or .html.
+`
+
+// SeededFilesDemoHTML walks visitors through the file-type matrix:
+// markdown, HTML, JSON (taskboard), JSON (generic), images, CSV,
+// plain text, history/diff/restore on any of them. Linked from the
+// home page as "what files render how".
+var SeededFilesDemoHTML = seededFilesDemoHTML
+
+const seededFilesDemoHTML = `<!doctype html>
+<title>File types</title>
+<style>
+  .matrix { width: 100%; border-collapse: collapse; margin: 1.5rem 0;
+    font-size: .9rem; }
+  .matrix th { text-align: left; font-size: .75rem;
+    text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text-secondary); padding: .5rem .65rem;
+    border-bottom: 1px solid var(--border); }
+  .matrix td { padding: .65rem; vertical-align: top;
+    border-bottom: 1px solid var(--border); }
+  .matrix td:first-child { font-family: var(--ab-mono, monospace);
+    color: var(--accent); white-space: nowrap; }
+  .matrix tr:last-child td { border-bottom: 0; }
+  .demo-img { background: var(--bg-secondary);
+    border: 1px solid var(--border); border-radius: var(--ab-radius);
+    padding: 1rem; text-align: center; margin: 1rem 0; }
+  .demo-img img { max-width: 240px; height: auto; }
+</style>
+
+<h1>File types</h1>
+<p class="ab-muted">Every file in the workspace is served as-is — the
+renderer picks behavior from the extension. Authors drop bytes; the
+dashboard surfaces them with the right content-type and the right
+chrome.</p>
+
+<h2>Rendered demo</h2>
+
+<div class="demo-img">
+  <img src="/assets/logo.svg" alt="AgentBoard logo">
+  <div class="ab-muted" style="margin-top:.5rem;font-size:.8rem">
+    Embedded from <code>/assets/logo.svg</code> — SVG served with
+    <code>image/svg+xml</code>.
+  </div>
+</div>
+
+<h2>What renders how</h2>
+
+<table class="matrix">
+  <thead>
+    <tr><th>Extension</th><th>Rendered as</th><th>Try it</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>.md</td>
+      <td>Markdown → HTML via goldmark, wrapped in the shell.
+          Headings, tables, code blocks, GFM.</td>
+      <td><a href="/README.md">/README.md</a></td>
+    </tr>
+    <tr>
+      <td>.html</td>
+      <td>Authored HTML — body inlined into the shell. <code>&lt;title&gt;</code>
+          extracted; <code>&lt;style&gt;</code> blocks honored; design-system
+          tokens available.</td>
+      <td><a href="/pages/getting-started.html">/pages/getting-started.html</a></td>
+    </tr>
+    <tr>
+      <td>.json (taskboard)</td>
+      <td>If the top-level shape has <code>columns</code>+<code>cards</code>,
+          renders as a kanban (Taskboard typed view).</td>
+      <td><a href="/taskboards/sprint.json">/taskboards/sprint.json</a></td>
+    </tr>
+    <tr>
+      <td>.json (generic)</td>
+      <td>Other JSON renders as pretty-printed text inside a
+          <code>&lt;pre&gt;</code>.</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td>.svg / .png / .jpg</td>
+      <td>Image content-type. Embed via
+          <code>&lt;img src="/assets/logo.svg"&gt;</code> or link
+          directly.</td>
+      <td><a href="/assets/logo.svg">/assets/logo.svg</a></td>
+    </tr>
+    <tr>
+      <td>.csv</td>
+      <td>Served as <code>text/plain</code>; preformatted inside the
+          shell. Drop spreadsheet-style data here for at-a-glance
+          inspection.</td>
+      <td><a href="/data/sprint-14.csv">/data/sprint-14.csv</a></td>
+    </tr>
+    <tr>
+      <td>.txt / .ndjson</td>
+      <td>Plain text or NDJSON, served verbatim. Useful for log
+          excerpts and tab-separated tables.</td>
+      <td><a href="/data/scratch.txt">/data/scratch.txt</a></td>
+    </tr>
+    <tr>
+      <td>(directory)</td>
+      <td>Directory listing with files + subfolders. If
+          <code>index.html</code> or <code>index.md</code> exists,
+          serves that instead.</td>
+      <td><a href="/pages/">/pages/</a></td>
+    </tr>
+    <tr>
+      <td>anything else</td>
+      <td><code>text/plain</code> fallback. Download to inspect.</td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>History + edit on every file</h2>
+
+<p>Every file gains <code>(history)</code> and <code>(edit)</code>
+links in the page-actions strip (signed-in users only). The history
+view links into diffs and offers one-click restore. Editing commits
+through <code>git push</code> under the hood — full provenance, no
+ceremony.</p>
+
+<p class="ab-muted" style="margin-top:2rem;font-size:.85rem">
+  To add a new file type to the renderer, edit
+  <code>internal/html/server.go</code> — the <code>renderFile</code>
+  switch is the contract.
 </p>
 `
 
