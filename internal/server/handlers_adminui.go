@@ -148,6 +148,9 @@ const adminUIPage = `<!doctype html>
     <button type="submit">Create group</button>
   </form>
 </div>
+<p class="ab-muted" style="margin-top:.5rem">
+  Use <a href="/admin/permissions">Permissions</a> to write rules that restrict specific paths to specific groups.
+</p>
 {{if .Groups}}
 <div class="panel" style="padding:.25rem 0">
   <table>
@@ -266,6 +269,8 @@ func (s *Server) registerAdminUIRoutes(r chi.Router) {
 	r.Post("/admin/groups/{name}/delete", s.handleAdminDeleteGroup)
 	r.Post("/admin/groups/{name}/members/new", s.handleAdminAddGroupMember)
 	r.Post("/admin/groups/{name}/members/{username}/remove", s.handleAdminRemoveGroupMember)
+	r.Get("/admin/permissions", s.handleAdminPermissionsPage)
+	r.Post("/admin/permissions/save", s.handleAdminPermissionsSave)
 }
 
 func (s *Server) handleAdminHome(w http.ResponseWriter, r *http.Request) {
