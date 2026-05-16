@@ -6,7 +6,6 @@
 //
 //   - Auth (sessions + tokens) at /_api/auth/*
 //   - Admin user / token / invitation management at /_api/admin/*
-//   - Webhook subscriber management at /_api/admin/webhooks
 //   - MCP at /mcp
 //   - Git smart-HTTPS at /git/*
 //   - The HTML dashboard at every other path
@@ -19,36 +18,29 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
-	"sync"
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/project"
-	"github.com/christophermarx/agentboard/internal/webhooks"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 // Server is the HTTP front.
 type Server struct {
-	Project           *project.Project
-	Conn              *sql.DB
-	Auth              *auth.Store
-	Broadcaster       *Broadcaster
-	MCP               *mcp.Server
-	Webhooks          *webhooks.Store
-	WebhookDispatcher *webhooks.Dispatcher
-	Invitations       *invitations.Store
-	EditFn            EditFn    // POST /_api/edit committer
-	RestoreFn         RestoreFn // POST /_api/restore committer
-	Router            chi.Router
-	SkillFile         string
-	webhookSecrets    sync.Map // subscription id → plaintext secret (set at Create)
+	Project     *project.Project
+	Conn        *sql.DB
+	Auth        *auth.Store
+	Broadcaster *Broadcaster
+	MCP         *mcp.Server
+	Invitations *invitations.Store
+	EditFn      EditFn    // POST /_api/edit committer
+	RestoreFn   RestoreFn // POST /_api/restore committer
+	Router      chi.Router
+	SkillFile   string
 
 	// GitServer mounts at /git/<workspace>.git (smart-HTTPS).
 	GitServer http.Handler
@@ -60,7 +52,7 @@ type Server struct {
 
 // resolveActor pulls the authenticated user off the request context,
 // or returns "agent" when nothing is attached. Used by handlers that
-// need to attribute writes (webhooks, tokens, etc.).
+// need to attribute writes (tokens, edits, etc.).
 func resolveActor(r *http.Request) string {
 	if u := auth.UserFromContext(r.Context()); u != nil && u.Username != "" {
 		return u.Username
@@ -92,32 +84,18 @@ func New(cfg ServerConfig) *Server {
 		Auth: cfg.Auth,
 	}
 
-	webhookStore, err := webhooks.NewStore(cfg.Conn)
-	if err != nil {
-		// Webhooks are optional; log and continue. The MCP fire_event
-		// tool will just be a no-op when the dispatcher is nil.
-		fmt.Fprintln(os.Stderr, "warning: webhooks unavailable:", err)
-	}
-	var dispatcher *webhooks.Dispatcher
-	if webhookStore != nil {
-		dispatcher = webhooks.NewDispatcher(webhookStore, webhooks.DispatcherOptions{})
-		mcpServer.WebhookDispatcher = dispatcher
-	}
-
 	s := &Server{
-		Project:           cfg.Project,
-		Conn:              cfg.Conn,
-		Auth:              cfg.Auth,
-		Broadcaster:       broadcaster,
-		MCP:               mcpServer,
-		Webhooks:          webhookStore,
-		WebhookDispatcher: dispatcher,
-		Invitations:       cfg.Invitations,
-		SkillFile:         cfg.SkillFile,
-		GitServer:         cfg.GitServer,
-		HTML:              cfg.HTML,
-		EditFn:            cfg.EditFn,
-		RestoreFn:         cfg.RestoreFn,
+		Project:     cfg.Project,
+		Conn:        cfg.Conn,
+		Auth:        cfg.Auth,
+		Broadcaster: broadcaster,
+		MCP:         mcpServer,
+		Invitations: cfg.Invitations,
+		SkillFile:   cfg.SkillFile,
+		GitServer:   cfg.GitServer,
+		HTML:        cfg.HTML,
+		EditFn:      cfg.EditFn,
+		RestoreFn:   cfg.RestoreFn,
 	}
 	s.Router = s.buildRouter()
 	return s
@@ -211,12 +189,6 @@ func (s *Server) buildRouter() chi.Router {
 			api.Get("/invitations", s.handleListInvitations)
 			api.Post("/invitations", s.handleCreateInvitation)
 			api.Delete("/invitations/{id}", s.handleRevokeInvitation)
-			api.Post("/webhooks", s.handleCreateWebhook)
-			api.Get("/webhooks", s.handleAdminListWebhooks)
-			api.Get("/webhooks/{id}", s.handleGetWebhook)
-			api.Patch("/webhooks/{id}", s.handleUpdateWebhook)
-			api.Delete("/webhooks/{id}", s.handleRevokeWebhook)
-			api.Post("/webhooks/{id}/test", s.handleTestWebhook)
 		})
 
 		r.Post("/mcp", s.MCP.ServeHTTP)

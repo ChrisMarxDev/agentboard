@@ -8,16 +8,14 @@ import (
 
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/gitserver"
-	"github.com/christophermarx/agentboard/internal/webhooks"
 )
 
 // Server implements the MCP Streamable HTTP transport.
 //
-// Cut 6 collapsed the surface from 38 tools across 10 domains down
-// to the spec §6 ten: 8 generic batch CRUD + agentboard_grab +
-// agentboard_fire_event. Admin domains (teams, locks, webhook
-// subscriptions) moved to REST + CLI per the AUTH.md MCP invariant
-// (admin operations never expose through MCP).
+// Post-pivot the surface is four tools that cover the core agent
+// loop: agentboard_workspaces, _pull, _propose, _resolve_conflict.
+// Admin domains never expose through MCP — token / group / permission
+// management is REST + CLI only (per AUTH.md MCP invariant).
 type Server struct {
 	// GitStore is the workspace registry — agentboard_workspaces and
 	// agentboard_pull read from it directly. Required for those tools
@@ -34,18 +32,10 @@ type Server struct {
 	// retries the push when the conflict set empties.
 	ResolveConflictFn ResolveConflictFunc
 
-	// SubscribeFn — server-side impl of agentboard_subscribe. Polling
-	// transport: returns events newer than `since` from the gitserver
-	// events table.
-	SubscribeFn SubscribeFunc
-
 	// PublicBaseURL is what agentboard_workspaces uses to build
 	// `clone_url`. Empty falls back to the inbound request's scheme +
 	// host.
 	PublicBaseURL string
-
-	// WebhookDispatcher backs agentboard_fire_event.
-	WebhookDispatcher *webhooks.Dispatcher
 
 	// Auth: tool-side bearer-to-user resolution for commit attribution.
 	Auth *auth.Store

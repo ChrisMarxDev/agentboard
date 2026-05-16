@@ -20,7 +20,7 @@ When the user asks you to track something or contribute to a board:
    markers (git) or call `agentboard_resolve_conflict` once per
    conflicted file (MCP).
 
-## MCP surface — six tools
+## MCP surface — four tools
 
 ```
 agentboard_workspaces             list workspaces visible to this caller
@@ -29,11 +29,6 @@ agentboard_propose(ws, files,
                    message, ...)  server-side branch + commit + push
 agentboard_resolve_conflict(
   proposal, file, resolution)     resolve one file in a contested proposal
-agentboard_subscribe(events,
-                     workspace?,
-                     cursor?)     long-poll push/conflict events
-agentboard_fire_event(event,
-                      payload?)   emit on the webhook bus
 ```
 
 There is no key-value store, no MDX components, no /_api/data/

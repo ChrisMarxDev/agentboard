@@ -64,8 +64,6 @@ func introductionManifest() map[string]any {
 				"agentboard_pull",
 				"agentboard_propose",
 				"agentboard_resolve_conflict",
-				"agentboard_subscribe",
-				"agentboard_fire_event",
 			},
 		},
 		"learn_more": map[string]string{
@@ -204,8 +202,6 @@ There are **no envelopes** and no transcoded schema — the bytes you commit are
 | ` + "`agentboard_pull`" + ` | read the working tree as a bundle |
 | ` + "`agentboard_propose`" + ` | commit + push (server-side) |
 | ` + "`agentboard_resolve_conflict`" + ` | take a side on a contested file |
-| ` + "`agentboard_subscribe`" + ` | poll for events since a cursor |
-| ` + "`agentboard_fire_event`" + ` | dispatch a webhook-shaped event |
 
 Agents authenticate with the same ` + "`ab_*`" + ` bearer tokens humans
 use; mint one from ` + "`/me`" + ` and hand it to the agent via env-var.

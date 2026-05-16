@@ -22,8 +22,8 @@ var (
 
 // Kind enumerates the three user kinds. All auth via tokens.
 //
-//   - admin: manages users, invitations, teams, webhooks, page locks,
-//     and any content. Unlocks /api/admin/*.
+//   - admin: manages users, invitations, and any content. Unlocks
+//     /api/admin/*.
 //   - member: normal human user. Reads/writes content. Manages *own*
 //     tokens. Cannot manage other users or lock pages.
 //   - bot: shared puppet. Any admin can mint/rotate/revoke its tokens.

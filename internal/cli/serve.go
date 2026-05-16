@@ -405,25 +405,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 			Message:    r.Message,
 		}, nil
 	}
-	srv.MCP.SubscribeFn = func(ctx context.Context, workspace string, since int64, types []string, limit int) (*mcp.SubscribeResult, error) {
-		events, err := gitStore.ListEvents(ctx, workspace, since, types, limit)
-		if err != nil {
-			return nil, err
-		}
-		cursor := since
-		out := make([]any, 0, len(events))
-		for _, e := range events {
-			out = append(out, e)
-			if e.ID > cursor {
-				cursor = e.ID
-			}
-		}
-		if cursor == 0 {
-			cursor, _ = gitStore.CurrentEventCursor(ctx)
-		}
-		return &mcp.SubscribeResult{Events: out, Cursor: cursor}, nil
-	}
-
 	addr := fmt.Sprintf(":%d", port)
 	url := fmt.Sprintf("http://localhost:%d", port)
 

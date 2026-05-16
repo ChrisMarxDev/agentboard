@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/christophermarx/agentboard/internal/webhooks"
 	"gopkg.in/yaml.v3"
 )
 
@@ -296,76 +295,13 @@ func (s *Server) toolResolveConflict(r *http.Request, args map[string]json.RawMe
 // gitserver.Store.ResolveConflict.
 type ResolveConflictFunc func(ctx context.Context, proposalID, file, resolution string) (*ProposeResult, error)
 
-// ---------- agentboard_subscribe ----------
-
-func (s *Server) toolSubscribe(r *http.Request, args map[string]json.RawMessage) (any, *RPCError) {
-	if s.SubscribeFn == nil {
-		return nil, &RPCError{Code: -32000, Message: "subscribe not wired (git substrate offline?)"}
-	}
-	workspace := getString(args, "workspace")
-	events := getStringList(args, "events")
-	// `since` is an opaque cursor returned by a previous call. First
-	// call: pass 0 to start from the current tip (skip historical
-	// noise). Pass "" or omit to get a snapshot of the latest
-	// `limit` events.
-	var since int64
-	if raw, ok := args["since"]; ok && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &since)
-	}
-	limit := 50
-	if raw, ok := args["limit"]; ok && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &limit)
-	}
-	res, err := s.SubscribeFn(r.Context(), workspace, since, events, limit)
-	if err != nil {
-		return nil, &RPCError{Code: -32000, Message: "subscribe: " + err.Error()}
-	}
-	return mcpJSON(res), nil
-}
-
-// SubscribeResult is the polling shape. `cursor` is the highest event
-// id in the response — callers persist it and pass it back as `since`
-// on the next call to get only newer events.
-type SubscribeResult struct {
-	Events []any `json:"events"`
-	Cursor int64 `json:"cursor"`
-}
-
-// SubscribeFunc is the server-side implementation of
-// agentboard_subscribe. cli/serve.go wires it to
-// gitserver.Store.ListEvents.
-type SubscribeFunc func(ctx context.Context, workspace string, since int64, types []string, limit int) (*SubscribeResult, error)
-
+// (agentboard_subscribe + agentboard_fire_event are gone post-pivot.
+// The event-bus surface they exposed was over-built for a wiki where
+// humans and agents collaborate on shared pages. Agents poll or
+// re-pull to discover peer changes; SSE on /_api/events handles the
+// browser-side reload toast.)
+//
 // (agentboard_grab is gone in the substrate pivot. The materializer
 // it backed walked a page-manager index that doesn't exist anymore.
 // Agents pull whatever paths they need via agentboard_pull(workspace)
 // — that's the bundle equivalent.)
-
-// ---------- agentboard_fire_event ----------
-
-func (s *Server) toolFireEvent(r *http.Request, args map[string]json.RawMessage) (any, *RPCError) {
-	event := getString(args, "event")
-	if event == "" {
-		return nil, &RPCError{Code: -32602, Message: "event required"}
-	}
-	if s.WebhookDispatcher == nil {
-		return mcpJSON(map[string]any{"delivered": 0, "message": "no webhook dispatcher configured"}), nil
-	}
-	var payload map[string]any
-	if raw, ok := args["payload"]; ok && len(raw) > 0 {
-		_ = json.Unmarshal(raw, &payload)
-	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	actor := s.resolveActor(r)
-	payload["actor"] = actor
-	s.WebhookDispatcher.Emit(webhooks.Event{
-		Name: event,
-		Data: payload,
-	})
-	return mcpJSON(map[string]any{
-		"queued": true,
-		"event":  event,
-	}), nil
-}

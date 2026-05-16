@@ -224,11 +224,6 @@ agentboard_propose(ws, files,
 agentboard_resolve_conflict(
   proposal, file, resolution)     — submit a resolved file body when a
                                     propose returned conflicts
-agentboard_subscribe(events,
-                     workspace?,
-                     cursor?)     — long-poll push / merge / conflict events
-agentboard_fire_event(event,
-                      payload?)   — emit on the webhook bus
 ` + "```" + `
 
 ` + "`pull`" + ` is the read primitive; partial reads filter the bundle
@@ -434,30 +429,10 @@ Reference it from any markdown file:
 
 ## Reply to a teammate's push
 
-Poll for events on the workspace:
+` + "`git fetch`" + ` periodically and look for new commits on the default
+branch — that's the discover-changes primitive. Browser tabs get a
+non-modal "reload" toast via SSE on ` + "`/_api/events`" + ` when a push lands.
 
-` + "```" + `
-agentboard_subscribe({
-  workspace: "<ws>",
-  events: ["push", "conflict"],
-  cursor: "<last-cursor>"     // omit on first call
-})
-` + "```" + `
-
-The response carries any events since the cursor plus a fresh cursor
-to use next time. For git-capable runtimes, ` + "`git fetch`" + ` periodically
-and look for new commits on main.
-
-## Notify downstream subscribers
-
-` + "```" + `
-agentboard_fire_event({
-  event: "ship.v2.ready",
-  payload: { branch: "main", commit: "abc1234" }
-})
-` + "```" + `
-
-Webhook subscribers receive ` + "`{name: \"ship.v2.ready\", at, data: …}`" + `.
 `
 
 // Seeded demo content is now HTML, not markdown. The substrate pivot
@@ -681,9 +656,8 @@ git push</code></pre>
 </table>
 
 <p style="margin-top:2rem;color:var(--text-secondary);font-size:.85rem">
-  Need to react to a teammate's push? Use
-  <code>agentboard_subscribe</code> (long-poll) or <code>git fetch</code>
-  on a timer.
+  Need to react to a teammate's push? Run <code>git fetch</code> on a
+  timer; the browser tab refreshes via SSE on its own.
 </p>
 `
 

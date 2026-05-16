@@ -1,8 +1,8 @@
 package mcp
 
-// MCP surface for the AgentBoard substrate. Six tools. The whole
-// surface is git operations + notifications; no virtual types, no
-// custom CRUD verbs.
+// MCP surface for the AgentBoard substrate. Four tools. The whole
+// surface is git operations; no virtual types, no custom CRUD verbs,
+// no event bus.
 //
 //   agentboard_workspaces            — list workspaces visible to this caller
 //   agentboard_pull(ws, ref?)        — return the working tree as a bundle
@@ -11,14 +11,11 @@ package mcp
 //                      message)      — server-side branch + commit + push
 //   agentboard_resolve_conflict(
 //       proposal, file, resolution)  — submit a resolved file body
-//   agentboard_subscribe(events)     — events newer than a cursor
-//   agentboard_fire_event(event, …)  — emit on the webhook bus
 //
 // Agents that can shell out use `git` directly; those that can't
 // (some sandboxed runtimes) use pull / propose / resolve_conflict.
-// The agentboard_grab materializer is gone with the substrate pivot
-// — it walked a v0.13 page index that doesn't exist anymore; agents
-// pull whatever paths they need via agentboard_pull.
+// To react to peer pushes, agents re-pull on a cadence — the wiki
+// audience doesn't need an event-bus protocol.
 
 import (
 	"encoding/json"
@@ -88,36 +85,6 @@ func (s *Server) toolDefinitions() []ToolDef {
 				"required": []string{"proposal", "file", "resolution"},
 			},
 		},
-		{
-			Name:        "agentboard_subscribe",
-			Description: "Open a long-lived event stream of push / merge / conflict / mention events for workspaces this caller can read. The transport is MCP streaming. Useful for agents that want to react to pushes from peers in real time. (v1 returns a snapshot of recent activity; live streaming arrives in a later cut.)",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"events": map[string]any{
-						"type":        "array",
-						"description": "Event types to subscribe to. Empty = all.",
-						"items":       map[string]string{"type": "string"},
-					},
-					"workspace": map[string]string{"type": "string", "description": "Optional filter to a single workspace."},
-				},
-			},
-		},
-		{
-			Name:        "agentboard_fire_event",
-			Description: "Emit a user-defined event on the webhook bus. Any subscriber registered for this event name receives it. Useful for 'I finished step X; downstream agents, you can start now.' Management of subscribers (subscribe / list) lives on REST + CLI; this tool only dispatches.",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"event": map[string]string{"type": "string"},
-					"payload": map[string]any{
-						"type":        "object",
-						"description": "Arbitrary JSON delivered to subscribers.",
-					},
-				},
-				"required": []string{"event"},
-			},
-		},
 	}
 }
 
@@ -146,10 +113,6 @@ func (s *Server) handleToolCall(r *http.Request, raw json.RawMessage) (any, *RPC
 		return s.toolPropose(r, args)
 	case "agentboard_resolve_conflict":
 		return s.toolResolveConflict(r, args)
-	case "agentboard_subscribe":
-		return s.toolSubscribe(r, args)
-	case "agentboard_fire_event":
-		return s.toolFireEvent(r, args)
 	}
 	return nil, &RPCError{Code: -32601, Message: fmt.Sprintf("tool not found: %s", p.Name)}
 }

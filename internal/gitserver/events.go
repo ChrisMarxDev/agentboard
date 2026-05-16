@@ -7,12 +7,11 @@ import (
 	"fmt"
 )
 
-// Event is what `agentboard_subscribe` returns.
-//
-// Cursor-based polling is the v1 transport: callers pass a cursor (an
-// opaque integer they got from the previous call) and get every event
-// strictly newer than that. Real streaming over MCP arrives when the
-// MCP transport in this codebase grows long-lived connections.
+// Event is a record on the in-process event hub. Post-pivot it feeds
+// the SSE broadcaster (so browser tabs show a non-modal "reload" toast
+// after a push) and the FTS5 re-index hook. The MCP event-bus tools
+// that previously consumed these were cut with the pivot — agents
+// re-pull on a cadence instead.
 type Event struct {
 	ID        int64           `json:"id"`
 	Workspace string          `json:"workspace"`

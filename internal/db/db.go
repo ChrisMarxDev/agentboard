@@ -1,6 +1,5 @@
-// Package db opens the project's SQLite connection for the auth /
-// teams / locks / invitations / mdx-meta / view-sessions / share /
-// inbox / webhooks subsystems. The KV-data store has moved to files
+// Package db opens the project's SQLite connection for the auth +
+// invitations subsystems. The KV-data store has moved to files
 // (internal/store), so SQLite is reduced to operational metadata.
 //
 // One connection pool per process. Auth + co-stores share it so we
