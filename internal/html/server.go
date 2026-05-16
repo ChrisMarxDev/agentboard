@@ -863,6 +863,8 @@ func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, urlPath stri
 	}
 
 	title := "Edit — " + pathLabel(urlPath)
+	isMarkdown := strings.HasSuffix(strings.ToLower(rel), ".md") || strings.HasSuffix(strings.ToLower(rel), ".mdx")
+
 	var buf bytes.Buffer
 	buf.WriteString(`<style>
   form.editor { display: flex; flex-direction: column; gap: .85rem; }
@@ -882,6 +884,17 @@ func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, urlPath stri
     cursor: pointer; }
   form.editor a.cancel { padding: .55rem 1.25rem; color: var(--text-secondary);
     text-decoration: none; align-self: center; }
+  .ab-edit-panes { display: grid; gap: 1rem; grid-template-columns: 1fr 1fr; align-items: stretch; }
+  .ab-edit-panes > * { min-width: 0; }
+  .ab-preview { padding: .85rem 1rem; min-height: 60vh;
+    border: 1px solid var(--border); border-radius: var(--ab-radius);
+    background: var(--bg-secondary); overflow: auto; }
+  .ab-preview-label { font-size: .75rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--text-secondary); margin-bottom: .35rem; }
+  @media (max-width: 900px) {
+    .ab-edit-panes { grid-template-columns: 1fr; }
+    .ab-preview { min-height: 25vh; }
+  }
 </style>`)
 	fmt.Fprintf(&buf, `<h1>Edit /%s</h1>
 <p class="ab-muted">Changes commit as <strong>@%s</strong>. The dashboard
@@ -889,9 +902,28 @@ re-renders on save.</p>
 <form class="editor" method="post" action="/_api/edit">
   <input type="hidden" name="path" value="%s">
   <input type="hidden" name="csrf" value="%s">
-  <label for="ab-edit-body">File body</label>
+`,
+		template.HTMLEscapeString(rel),
+		template.HTMLEscapeString(s.UserResolver(r)),
+		template.HTMLEscapeString(rel),
+		template.HTMLEscapeString(csrf),
+	)
+	if isMarkdown {
+		fmt.Fprintf(&buf, `  <label>Body — type Markdown on the left, live preview on the right</label>
+  <div class="ab-edit-panes">
+    <textarea id="ab-edit-body" name="body" spellcheck="false">%s</textarea>
+    <div>
+      <div class="ab-preview-label">Preview</div>
+      <div class="ab-preview" id="ab-edit-preview"></div>
+    </div>
+  </div>
+`, template.HTMLEscapeString(body))
+	} else {
+		fmt.Fprintf(&buf, `  <label for="ab-edit-body">File body</label>
   <textarea id="ab-edit-body" name="body" spellcheck="false">%s</textarea>
-  <label for="ab-edit-msg">Commit message</label>
+`, template.HTMLEscapeString(body))
+	}
+	fmt.Fprintf(&buf, `  <label for="ab-edit-msg">Commit message</label>
   <input type="text" id="ab-edit-msg" name="message" value="Edit %s">
   <div class="actions">
     <a class="cancel" href="%s">Cancel</a>
@@ -899,14 +931,51 @@ re-renders on save.</p>
   </div>
 </form>`,
 		template.HTMLEscapeString(rel),
-		template.HTMLEscapeString(s.UserResolver(r)),
-		template.HTMLEscapeString(rel),
-		template.HTMLEscapeString(csrf),
-		template.HTMLEscapeString(body),
-		template.HTMLEscapeString(rel),
 		template.HTMLEscapeString(urlPath),
 	)
+	if isMarkdown {
+		// Debounced server-side preview. POSTs the body to /_api/preview
+		// and dumps the rendered HTML into the right pane. The endpoint
+		// is CSRF-gated (same cookie + hidden field as /_api/edit).
+		fmt.Fprintf(&buf, `<script>
+(function(){
+  var ta = document.getElementById('ab-edit-body');
+  var pv = document.getElementById('ab-edit-preview');
+  var csrf = %q;
+  var timer = null;
+  function render() {
+    var body = ta.value;
+    fetch('/_api/preview', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded','X-CSRF-Token':csrf},
+      body: 'csrf=' + encodeURIComponent(csrf) + '&body=' + encodeURIComponent(body),
+      credentials: 'same-origin'
+    }).then(function(r){ return r.text(); }).then(function(html){ pv.innerHTML = html; })
+      .catch(function(){ pv.textContent = '(preview unavailable)'; });
+  }
+  ta.addEventListener('input', function(){
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(render, 250);
+  });
+  render();
+})();
+</script>`, csrf)
+	}
 	s.renderShell(w, r, urlPath, title, template.HTML(buf.String()), nil, true)
+}
+
+// RenderMarkdownPreview is the public hook the server package's
+// /_api/preview handler calls to turn raw Markdown into the same HTML
+// the dashboard renders inline. Returns the rendered body without
+// the page shell — the preview pane in renderEdit drops it into a
+// container directly.
+func (s *Server) RenderMarkdownPreview(body []byte) (string, error) {
+	s.lazyInit()
+	var out bytes.Buffer
+	if err := s.md.Convert(body, &out); err != nil {
+		return "", err
+	}
+	return out.String(), nil
 }
 
 // userIsSignedIn reports whether the request has an authenticated

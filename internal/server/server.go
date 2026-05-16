@@ -41,6 +41,7 @@ type Server struct {
 	Groups      *groups.Store
 	EditFn      EditFn       // POST /_api/edit committer
 	RestoreFn   RestoreFn    // POST /_api/restore committer
+	PreviewFn   PreviewFn    // POST /_api/preview renderer
 	WriteCheck  WriteCheckFn // permissions gate (handlers_edit, handlers_restore)
 	Router      chi.Router
 	SkillFile   string
@@ -75,8 +76,14 @@ type ServerConfig struct {
 	HTML        http.Handler
 	EditFn      EditFn       // POST /_api/edit handler; cli/serve.go bridges to gitserver.PutFile
 	RestoreFn   RestoreFn    // POST /_api/restore handler; bridges to FileAt + PutFile
+	PreviewFn   PreviewFn    // POST /_api/preview handler; renders Markdown via the html package's goldmark
 	WriteCheck  WriteCheckFn // permissions gate; cli/serve.go composes auth + groups + permissions
 }
+
+// PreviewFn renders a Markdown body to HTML using the same goldmark
+// pipeline the dashboard uses for rendered pages. Returns the body
+// (no shell). cli/serve.go wires this to html.Server.RenderMarkdownPreview.
+type PreviewFn func(body []byte) (string, error)
 
 // WriteCheckFn gates a pending write. Returns nil if the actor may
 // write every path; *permissions.DenyError when one or more paths are
@@ -109,6 +116,7 @@ func New(cfg ServerConfig) *Server {
 		HTML:        cfg.HTML,
 		EditFn:      cfg.EditFn,
 		RestoreFn:   cfg.RestoreFn,
+		PreviewFn:   cfg.PreviewFn,
 		WriteCheck:  cfg.WriteCheck,
 	}
 	s.Router = s.buildRouter()
@@ -210,6 +218,7 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/mcp", s.MCP.ServeHTTP)
 		r.Post("/_api/edit", s.handleEditSubmit)
 		r.Post("/_api/restore", s.handleRestoreSubmit)
+		r.Post("/_api/preview", s.handlePreview)
 		if s.GitServer != nil {
 			r.Handle("/git/*", s.GitServer)
 		}

@@ -373,6 +373,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		SkillFile:   embedpkg.SkillFile(),
 		GitServer:   gitSrv,
 		HTML:        htmlSrv,
+		PreviewFn:   server.PreviewFn(htmlSrv.RenderMarkdownPreview),
 		WriteCheck:  server.WriteCheckFn(writeCheck),
 		EditFn: func(ctx context.Context, workspace, path, body, actor, message string) error {
 			return gitStore.PutFile(ctx, workspace, path, body, actor, message)
