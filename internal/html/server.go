@@ -169,6 +169,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// /_activity — paginated workspace-wide activity feed (§5.4).
+	// Mounted as a regular path here so it shares the dashboard
+	// chrome (sidebar, breadcrumbs, theme) instead of requiring a
+	// separate top-level route.
+	if urlPath == "/_activity" {
+		s.renderActivity(w, r)
+		return
+	}
 	// ?history=1 — render git log for this path instead of the file.
 	if r.URL.Query().Get("history") != "" {
 		s.renderHistory(w, r, urlPath)
@@ -728,6 +736,86 @@ func (s *Server) renderHistory(w http.ResponseWriter, r *http.Request, urlPath s
 		)
 	}
 	body.WriteString(`</ol>`)
+	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+}
+
+// renderActivity is the §5.4 workspace-wide activity feed at
+// /_activity. Returns the latest N commits across every path on the
+// default branch, newest first. Empty workspace renders as a friendly
+// placeholder. ?limit= clamps to [10, 200] for crude pagination —
+// proper offset-based paging is a §5.5 follow-up.
+func (s *Server) renderActivity(w http.ResponseWriter, r *http.Request) {
+	urlPath := "/_activity"
+	title := "Activity"
+
+	var body bytes.Buffer
+	fmt.Fprintf(&body, `<h1>%s</h1>`, template.HTMLEscapeString(title))
+	body.WriteString(`<p class="ab-muted">Recent commits on the default branch, newest first.</p>`)
+
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		var n int
+		_, _ = fmt.Sscanf(v, "%d", &n)
+		if n >= 10 && n <= 200 {
+			limit = n
+		}
+	}
+
+	if s.HistoryFn == nil {
+		body.WriteString(`<p class="ab-muted">History is not available on this instance.</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	// Empty path = workspace-wide log.
+	commits, err := s.HistoryFn("", limit)
+	if err != nil {
+		fmt.Fprintf(&body, `<p class="ab-muted">Could not load activity: %s</p>`,
+			template.HTMLEscapeString(err.Error()))
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	if len(commits) == 0 {
+		body.WriteString(`<p class="ab-muted">No commits yet. Push a file to start the feed.</p>`)
+		s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
+		return
+	}
+	body.WriteString(`<style>
+  .activity { list-style: none; padding: 0; margin: 1.5rem 0; }
+  .activity > li { padding: .85rem 0; border-bottom: 1px solid var(--border);
+    display: grid; grid-template-columns: auto 1fr auto; gap: 1rem;
+    align-items: baseline; font-size: .9rem; }
+  .activity .sha { font-family: var(--ab-mono, monospace);
+    color: var(--accent); font-size: .85rem; text-decoration: none; }
+  .activity .sha:hover { text-decoration: underline; }
+  .activity .subject { color: var(--text); }
+  .activity .meta { color: var(--text-secondary); font-size: .75rem;
+    text-align: right; font-variant-numeric: tabular-nums; }
+  .activity .meta strong { color: var(--text); font-weight: 500; }
+  .activity-more { margin-top: 1rem; }
+  .activity-more a { color: var(--text-secondary); font-size: .85rem; }
+</style>`)
+	body.WriteString(`<ol class="activity">`)
+	for _, c := range commits {
+		fmt.Fprintf(&body, `<li><a class="sha" href="/?diff=%s">%s</a>`+
+			`<span class="subject">%s</span>`+
+			`<span class="meta"><strong>@%s</strong> · %s</span></li>`,
+			template.HTMLEscapeString(c.SHA),
+			template.HTMLEscapeString(c.Short),
+			template.HTMLEscapeString(c.Subject),
+			template.HTMLEscapeString(c.Author),
+			template.HTMLEscapeString(formatWhen(c.When)),
+		)
+	}
+	body.WriteString(`</ol>`)
+	// Crude "load more" until proper paging lands in §5.5.
+	if len(commits) >= limit && limit < 200 {
+		next := limit * 2
+		if next > 200 {
+			next = 200
+		}
+		fmt.Fprintf(&body, `<p class="activity-more"><a href="/_activity?limit=%d">Load more (showing %d)</a></p>`,
+			next, limit)
+	}
 	s.renderShell(w, r, urlPath, title, template.HTML(body.String()), nil, false)
 }
 
