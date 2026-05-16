@@ -168,10 +168,10 @@ fine; running on a shared box for an organisation that doesn't already
 trust each other isn't yet the right shape. Specifically:
 
 - Within a board, AgentBoard has real per-user accounts (admin / member /
-  bot kinds, individually rotatable tokens, browser sessions with CSRF,
-  audience-scoped OAuth tokens for MCP). Lockout recovery is filesystem-
-  level via `agentboard admin set-password`, `admin rotate`, or
-  `admin invite`. See `AUTH.md` for the full design.
+  bot kinds, individually rotatable `ab_*` tokens, browser sessions with
+  CSRF). Lockout recovery is filesystem-level via
+  `agentboard admin set-password`, `admin rotate`, or `admin invite`.
+  See `AUTH.md` for the full design.
 - Board-to-board isolation comes from Docker containers + separate
   volumes. A kernel or Docker escape would cross that boundary; don't put
   anything truly sensitive on a shared box.
@@ -206,6 +206,6 @@ None of these are committed. Public repo is safe.
 - `scripts/list-boards.sh` — list all boards running on the Coolify host
 - `scripts/redeploy-boards.sh` — redeploy one or every Coolify board via API
 - `scripts/deploy-vps.sh` — single-board install on a raw Debian/Ubuntu VPS (no Coolify)
-- `internal/auth/` — the per-user token + password + session + OAuth surface (see `AUTH.md`)
+- `internal/auth/` — the per-user token + password + session surface (see `AUTH.md`)
 - `bruno/tests/` — contract test suite (run `task test:bruno`)
 - `seams_to_watch.md` — what the auth model does and doesn't protect against

@@ -28,7 +28,7 @@ conflicts.
 The web UI is **a viewer on the working tree**. The server keeps a
 working-tree mirror of `HEAD` of the default branch on disk; the dashboard
 renders files straight from that tree — `.html` as expressive pages,
-`.md` through goldmark, JSON as kanban or syntax-highlighted source,
+`.md` through goldmark, JSON as syntax-highlighted source,
 binaries with the right content-type. When `HEAD` moves, the working
 tree updates and SSE notifies open browsers. The renderer doesn't know
 there's a git repo underneath — it just reads files.
@@ -134,7 +134,7 @@ One Go process. Listens on a port. Three things share that port:
    out to `git`. The same git operations (clone-as-bundle, branch, propose,
    resolve-conflict) exposed as JSON-RPC tools. See §6.
 
-Auth (bearer tokens, OAuth, browser sessions) sits in front of all three.
+Auth (bearer tokens, browser sessions) sits in front of all three.
 See [`AUTH.md`](./AUTH.md).
 
 ---
@@ -166,8 +166,9 @@ Everything the user composes:
 - `.html` pages — full layout control, design-system tokens, no build step.
   The expressive primary primitive.
 - `.md` pages — short prose, READMEs, briefs. Rendered via goldmark.
-- `.json` typed views — taskboards with `columns` + `cards` render as
-  live kanban. Other JSON renders as syntax-highlighted text.
+- `.json` — pretty-printed inside a code block. For a kanban, author
+  an HTML page with CSS grid; structured renderers were retired in
+  the wiki pivot to keep the rule set tight.
 - `.ndjson` streams — append-only logs. Activity feeds, telemetry.
 - Binaries — images, PDFs, fonts, exports. Served with the right
   content-type or a preview affordance.
@@ -180,7 +181,7 @@ and updated via `git push` or in-browser edit form.
 
 The carve-out from CORE_GUIDELINES §13 carries over without changes:
 
-- Users, tokens, sessions, OAuth clients.
+- Users, tokens, sessions, groups.
 - Workspace registry (name, owner, default branch, public/private,
   per-path ACL rules).
 - Webhook subscriptions.
@@ -243,9 +244,12 @@ where review ceremony is overhead.
 
 ## 6. MCP surface
 
-Six tools. Most operations are now git itself, not a custom API; MCP
-exists for agents whose runtime cannot shell out to `git` (see §7) and
-for *notifications* that are inherently server-side.
+Four tools. Most operations are now git itself, not a custom API; MCP
+exists for agents whose runtime cannot shell out to `git` (see §7).
+Post-pivot the surface is git operations only — no event bus, no
+outbound notifications. Agents that want to react to peer changes
+poll or re-pull; browser tabs see push events via the SSE broadcaster
+on `/_api/events`.
 
 ```
 agentboard_workspaces       → list workspaces visible to this token
@@ -262,7 +266,9 @@ agentboard_propose(ws,
                    message)  → server-side branch+commit+push from the
                               given files. For agents that can't write
                               git locally. Returns the proposal id and
-                              any conflicts.
+                              any conflicts. Path-level permission
+                              rules from .agentboard/permissions.yaml
+                              gate the call before the commit runs.
 
 agentboard_resolve_conflict(
   proposal,
@@ -270,24 +276,19 @@ agentboard_resolve_conflict(
   resolution)              → submit a resolved file body. Server replays
                               the merge with the resolution applied. For
                               git-less agents.
-
-agentboard_subscribe(events)→ open an SSE-shaped MCP stream of
-                              push, merge, conflict, mention events
-                              for workspaces this token can read.
-
-agentboard_fire_event(...)  → emit a user-triggered event onto the
-                              outbound webhook bus.
 ```
 
-Agents who use the git CLI directly need only `agentboard_workspaces`,
-`agentboard_subscribe`, and `agentboard_fire_event` — the other three
-are the git-less fallback path.
+Agents who use the git CLI directly need only `agentboard_workspaces`
+to discover the clone URL — the other three are the git-less fallback
+path. Permission denials at push time surface through the standard
+git smart-HTTP error channel (a `hooks/pre-receive` script installed
+in every bare repo runs the same permission resolver).
 
 ---
 
 ## 7. Auth — bearer tokens carry through git
 
-The git smart-HTTPS protocol uses HTTP Basic auth. Same `ab_*` / `oat_*`
+The git smart-HTTPS protocol uses HTTP Basic auth. Same `ab_*`
 tokens we already mint:
 
 ```

@@ -58,15 +58,17 @@ Allowlisted in `.claude/settings.json` so they run without prompts. Read-only.
 ## Key directories
 
 - `cmd/agentboard/` — CLI entry point.
-- `internal/auth/` — users, tokens, passwords, sessions, OAuth, middleware.
-- `internal/gitserver/` — bare-repo + worktree management, smart-HTTP git endpoint, post-receive event hub.
-- `internal/html/` — server-rendered HTML dashboard. `renderFile`, `renderDirectory`, `renderMarkdown`, kanban renderer, embedded design-system assets at `/_static/*`.
-- `internal/server/` — HTTP handlers for the `/_api/*` surface (auth, admin UI, invitations, setup, edit form, restore, OAuth) + SSE broadcaster.
-- `internal/mcp/` — JSON-RPC protocol + the six git-aware MCP tools (`agentboard_workspaces`, `_pull`, `_propose`, `_resolve_conflict`, `_subscribe`, `_fire_event`).
-- `internal/cli/` — Cobra commands (`serve`, `admin`, `deploy`, etc.).
+- `internal/auth/` — users, tokens, passwords, sessions, middleware.
+- `internal/gitserver/` — bare-repo + worktree management, smart-HTTP git endpoint, post-receive event hub, pre-receive permission hook installer.
+- `internal/html/` — server-rendered HTML dashboard. `renderFile`, `renderDirectory`, `renderMarkdown`, `renderActivity`, split-pane Markdown editor, embedded design-system assets at `/_static/*`.
+- `internal/server/` — HTTP handlers for the `/_api/*` surface (auth, admin UI, invitations, setup, edit form, restore, preview, groups CRUD, permissions editor) + SSE broadcaster.
+- `internal/mcp/` — JSON-RPC protocol + the four git-aware MCP tools (`agentboard_workspaces`, `_pull`, `_propose`, `_resolve_conflict`).
+- `internal/groups/` — named user groups referenced by permission rules. Store + REST/CLI/UI surfaces.
+- `internal/permissions/` — parser + evaluator for `.agentboard/permissions.yaml`. Open-by-default; `.agentboard/*` writes are structurally admin-only.
+- `internal/cli/` — Cobra commands (`serve`, `admin`, `deploy`, hidden `internal-pre-receive` hook target).
 - `internal/project/` — project lifecycle: first-run init, default workspace seeding, paths.
 - `internal/search/` — SQLite FTS5 index over the worktree, rebuilt on push.
-- `internal/db/`, `internal/embed/`, `internal/invitations/`, `internal/webhooks/` — supporting infrastructure.
+- `internal/db/`, `internal/embed/`, `internal/invitations/` — supporting infrastructure.
 - `landing/` — Astro marketing site at `agentboard.dev` (separate CDN deploy, **not** embedded in the Go binary).
 - `scripts/` — VPS deploy + smoke tests.
 - `test/dogfood/` — end-to-end "agent bootstrap from cold start" self-test.
@@ -77,7 +79,7 @@ Full deploy guide in [`HOSTING.md`](./HOSTING.md). Short version:
 
 - Production runs on a Hetzner CAX11 behind a Cloudflare Tunnel. The `Dockerfile` is a single-stage pure-Go build; Coolify redeploys each board on push to `main`.
 - Auth: three user kinds (`admin`, `member`, `bot`), each carrying zero-or-more bearer tokens **and** an optional password. Full design in [`AUTH.md`](./AUTH.md).
-  - **Bearer tokens** (`ab_*`, `oat_*`) authenticate non-human callers — agents, CLI, MCP, git smart-HTTP. Members manage their own via `/me`, admins manage anyone's via `/_admin`. Every gated route accepts `Authorization: Bearer …`, HTTP Basic with password=token, or `?token=…`.
+  - **Bearer tokens** (`ab_*`) authenticate non-human callers — agents, CLI, MCP, git smart-HTTP. Members manage their own via `/me`, admins manage anyone's via `/_admin`. Every gated route accepts `Authorization: Bearer …`, HTTP Basic with password=token, or `?token=…`.
   - **Browser sessions** (`agentboard_session` HttpOnly cookie + `agentboard_csrf` companion cookie) authenticate humans. `POST /_api/auth/login` mints them; `POST /_api/auth/logout` revokes. Cookie-authenticated state-changing requests carry `X-CSRF-Token` (double-submit cookie pattern). The Secure flag follows `X-Forwarded-Proto: https` so cookies survive proxy hops like Cloudflare Tunnel.
   - **Admin-kind credentials** additionally unlock `/_admin/*`. Member and bot don't.
   - **Bootstrap order matters.** A fresh instance has zero users; first boot prints `/invite/<id>` to stdout and writes it to `<project>/.agentboard/first-admin-invite.url`. Open it, pick a username + password, you're in.
@@ -86,6 +88,7 @@ Full deploy guide in [`HOSTING.md`](./HOSTING.md). Short version:
     - `agentboard admin set-password <user>` — reset the browser password.
     - `agentboard admin revoke-sessions <user>` — kill every active cookie session.
     - `agentboard admin invite [--role …]` — print a fresh `/invite/<id>` URL.
+    - `agentboard admin groups [list|create|delete|rename|add|remove|members]` — manage named user groups referenced by permission rules.
 
 ## Quick wire test
 

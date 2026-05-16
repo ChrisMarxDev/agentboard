@@ -2,7 +2,7 @@
 
 ## Goals
 
-1. **Two credentials by audience.** Bearer tokens (`ab_*`, `oat_*`) for
+1. **Two credentials by audience.** Bearer tokens (`ab_*`) for
    non-human callers (CLI, MCP clients, agents); a session cookie for
    humans in a browser. Same identity behind both — the choice is purely
    ergonomic: cookies get auto-attached + need CSRF, tokens are explicit +
@@ -97,13 +97,12 @@ Non-open requests present **either** a bearer token or a session
 cookie. Tried in priority order:
 
 1. `Authorization: Bearer <token>` — agents, curl, MCP clients,
-   anything not running in a browser. Both PATs (`ab_*`) and OAuth
-   access tokens (`oat_*`) ride this path; the audience rule below
-   distinguishes them.
+   anything not running in a browser. Tokens are PATs (`ab_*`) from
+   the `user_tokens` table.
 2. HTTP Basic with `password=<token>` — browser prompt fallback for
    directly-typed URLs.
 3. `?token=<token>` — EventSource bootstrap, one-click share links.
-4. `agentboard_session` cookie — the SPA + the OAuth consent page.
+4. `agentboard_session` cookie — the SPA / human-facing pages.
    Triggered when no Authorization header is present and the cookie
    resolves to a valid `user_sessions` row.
 
@@ -119,17 +118,10 @@ through `CSRFMiddleware`: an `X-CSRF-Token` header MUST equal the
 mismatched → 403 with `code=CSRF_REQUIRED` / `CSRF_MISMATCH`. Bearer
 requests skip — they're CSRF-immune by design.
 
-Every 401 carries an MCP-spec-compliant Bearer challenge so OAuth-aware
-clients (Claude.ai Custom Connectors, anything following the MCP
-authorization spec) can discover the authorization server:
-
-```
-WWW-Authenticate: Bearer realm="AgentBoard",
-                  resource_metadata="https://<host>/.well-known/oauth-protected-resource"
-```
-
-Browser top-level navigations also receive `WWW-Authenticate: Basic` so
-the native auth prompt fires — paste the token as the password.
+Every 401 carries a plain `WWW-Authenticate: Bearer realm="AgentBoard"`
+challenge. Browser top-level navigations also receive
+`WWW-Authenticate: Basic` so the native auth prompt fires — paste the
+token as the password.
 
 The admin realm has one additional middleware:
 
@@ -139,89 +131,6 @@ TokenMiddleware → AuthorizeMiddleware → AdminRequired → /api/admin/*
 
 `AdminRequired` checks that the resolved user's kind is `admin` and rejects
 everything else with 403.
-
-## OAuth-issued tokens (Claude.ai Custom Connectors)
-
-A second token shape exists for browser-driven MCP clients that can't
-have a PAT pasted into them — Claude.ai Custom Connectors are the
-motivating case. AgentBoard hosts an in-process OAuth 2.1 authorization
-server alongside the MCP resource server, conformant to the MCP
-authorization spec (RFC 9728 + RFC 8414 + RFC 7591 + OAuth 2.1 with
-PKCE + RFC 8707 audience binding).
-
-**The HTTP auth shape is unchanged**: presented credentials still arrive
-as `Authorization: Bearer <token>`. What changes is the second token
-*kind* the resolver recognizes, and the validation rules that apply to
-those tokens.
-
-### Token kinds, side by side
-
-| Property | PAT (`ab_*`) | OAuth access (`oat_*`) |
-|---|---|---|
-| Minted by | `/api/admin/users/:u/tokens` or `agentboard admin rotate` | `/oauth/token` after authorize → consent |
-| Lifetime | until revoked | 1 hour, refreshable for 30 days |
-| Audience | none — accepted on every gated route | `<base>/mcp` only — rejected elsewhere with 401 |
-| Stored in | `user_tokens` | `oauth_tokens` |
-| Bound to | a user | a `(user, registered_client)` pair |
-| Revocation | per token | per token, or implicit when the issuing user is deactivated |
-
-OAuth tokens are deliberately scoped: the spec mandates audience
-validation, and AgentBoard enforces it strictly. An `oat_*` token
-presented at `/api/me` returns 401 — that's correct, not a bug.
-Connectors don't need any other route.
-
-### Endpoints
-
-```
-GET  /.well-known/oauth-protected-resource     # RFC 9728 metadata
-GET  /.well-known/oauth-authorization-server   # RFC 8414 metadata
-POST /oauth/register                           # RFC 7591 dynamic client registration
-GET  /oauth/authorize                          # consent page (HTML)
-POST /oauth/authorize/decide                   # form target — issues authorization code
-POST /oauth/token                              # code → access token, or refresh rotation
-```
-
-All six are anonymous-readable / writable: the whole point is to
-acquire a credential, so requiring one would deadlock.
-
-### Flow
-
-1. User pastes `https://<host>/mcp` into Claude.ai → Settings → Connectors → Add Custom.
-2. Claude.ai fetches `/.well-known/oauth-protected-resource`, learns
-   the authorization server URL, fetches its metadata.
-3. Claude.ai POSTs to `/oauth/register` with redirect URIs and grant
-   types → receives `client_id` (DCR — no manual setup).
-4. Claude.ai opens the user's browser to `/oauth/authorize?...&code_challenge=...`.
-5. AgentBoard renders an HTML consent page. The user pastes their
-   AgentBoard PAT to authenticate the *consent decision* (the PAT is
-   never shared with the client; it just proves the user owns this
-   instance) and clicks Allow.
-6. Browser is redirected to Claude.ai's callback with `code=oac_...`.
-7. Claude.ai POSTs to `/oauth/token` with `code` + `code_verifier` →
-   receives `access_token=oat_...` + `refresh_token=ort_...`,
-   audience-bound to `<base>/mcp`.
-8. Claude.ai uses `Authorization: Bearer oat_...` on every MCP call.
-   Refresh rotates per OAuth 2.1 §4.3.1 — single-use, replays rejected.
-
-### Spec conformance, item by item
-
-- **OAuth 2.1 with PKCE S256** — required for all clients (`code_challenge_method=S256` enforced at `/oauth/authorize`).
-- **RFC 7591 DCR** — `/oauth/register` accepts JSON metadata, returns `client_id` (and `client_secret` only for confidential clients).
-- **RFC 9728 Protected Resource Metadata** — served at `/.well-known/oauth-protected-resource`, referenced from every 401's `WWW-Authenticate: Bearer ... resource_metadata="..."`.
-- **RFC 8414 Authorization Server Metadata** — served at `/.well-known/oauth-authorization-server`, listing `code_challenge_methods_supported: ["S256"]`.
-- **RFC 8707 Resource Indicators** — `resource` parameter accepted at `/authorize` and `/token`; defaults to canonical MCP URL when omitted; mismatches return `invalid_target`.
-- **Audience binding** — every `oat_*` token carries an `audience` column. Middleware validates it equals `CanonicalMCPResourceURL(r)` on every MCP request and rejects mismatches.
-- **Refresh token rotation** — `/oauth/token` with `grant_type=refresh_token` revokes the presented refresh and mints a new pair atomically. Replays of the old refresh return `invalid_grant`.
-
-### Bootstrap quirks
-
-The OAuth flow has one prerequisite: the user must already have a way
-to authenticate the consent step — either an `ab_*` PAT to paste, or
-a username + password (the new browser-friendly path). Fresh instances
-bootstrap admin via the first-admin invitation URL; the redeem flow
-also accepts an optional password and emits a session cookie, so a
-freshly-claimed admin can drive the connector flow without ever
-copying a token. There's no chicken-and-egg.
 
 ## Browser sessions (passwords + cookies)
 
@@ -252,9 +161,8 @@ of the token model, not in place of it — fixes that:
   clearing on the response.
 
 Where humans currently land: `/login` (username + password form) and
-`/oauth/authorize` (the consent page now branches on session — when
-present, "Logged in as @user · Allow / Deny"; when absent, password
-+ token paste, in that order). Both unify the same lookup table.
+the invite redeem flow at `/invite/<id>`. Both unify the same lookup
+table.
 
 Setting + clearing passwords:
 
@@ -372,9 +280,7 @@ git endpoint `/git/<workspace>.git`, the MCP endpoint `/mcp`, and the
 workspace-content surface at `/` (the dashboard renderer). Rules narrow
 access per-user.
 
-PATs (`ab_*`) accepted everywhere; OAuth access tokens (`oat_*`)
-accepted on `/mcp` only — see "OAuth-issued tokens" above for the
-audience-scoping rule.
+PATs (`ab_*`) accepted everywhere; there is no second token shape.
 
 ### Admin realm (admin-token-gated)
 
@@ -490,10 +396,7 @@ internal/auth/
   store_test.go
   sessions_test.go
   passwords_test.go
-  middleware.go     — TokenMiddleware (PAT + OAuth + session cookie), CSRFMiddleware, AuthorizeMiddleware, AdminRequired, ScopeSelfOrAdmin
-  oauth.go          — RFC 9728/8414 discovery handlers + WWW-Authenticate helper
-  oauth_schema.go   — oauth_clients, oauth_codes, oauth_tokens
-  oauth_store.go    — DCR, code lifecycle, access-token + refresh rotation, PKCE verifier
+  middleware.go     — TokenMiddleware (PAT + session cookie), CSRFMiddleware, AuthorizeMiddleware, AdminRequired, ScopeSelfOrAdmin
   migrate.go        — BootstrapFirstAdmin
 
 internal/invitations/
@@ -510,8 +413,8 @@ internal/server/
   handlers_invitations.go  — /api/admin/invitations + public /api/invitations/{id}[/redeem] (accepts an optional password)
   handlers_locks.go        — /api/locks CRUD + enforcePageLock helper
   handlers_users.go        — /api/users + /api/users/resolve (authed-read directory)
-  handlers_oauth.go        — /oauth/{register,authorize,authorize/decide,token} (consent accepts session cookie OR username+password OR pasted token)
-  handlers_oauth_test.go   — discovery + full PKCE flow + audience-scoping + session-consent coverage
+  handlers_groups.go       — /_api/admin/groups CRUD + members surface
+  handlers_permissions_ui.go — /admin/permissions YAML editor
 
 internal/cli/
   admin.go        — list / list-invitations / rotate / set-password / revoke-sessions / rename-user / invite

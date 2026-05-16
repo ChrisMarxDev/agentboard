@@ -108,7 +108,7 @@ The binary is designed to run anywhere — see [`HOSTING.md`](./HOSTING.md) for 
 
 Auth has two credential paths, both per-user (no shared admin token):
 
-- **Bearer tokens** (`ab_…`, plus `oat_…` audience-scoped tokens minted via OAuth 2.1 + DCR for browser-driven MCP clients) — used by agents, CLI, MCP, and git smart-HTTP.
+- **Bearer tokens** (`ab_…`) — used by agents, CLI, MCP, and git smart-HTTP.
 - **Browser sessions** (`agentboard_session` HttpOnly cookie + `agentboard_csrf` companion, double-submit CSRF) — used by humans.
 
 Full design in [`AUTH.md`](./AUTH.md). Trust-boundary deferrals in [`seams_to_watch.md`](./seams_to_watch.md).
@@ -121,7 +121,7 @@ Full design in [`AUTH.md`](./AUTH.md). Trust-boundary deferrals in [`seams_to_wa
 
 - A self-hostable single binary for shared human/agent workspaces that users own end-to-end.
 - Git as the only substrate. No bespoke storage layer, no custom protocol.
-- A minimal MCP surface (six tools) for agents whose runtime can't shell out to git, plus full git smart-HTTP for the ones that can.
+- A minimal MCP surface (four tools) for agents whose runtime can't shell out to git, plus full git smart-HTTP for the ones that can.
 - Composability through files: pages, boards, decks, briefs are artifacts in the repo, not configuration in a database.
 
 **Non-goals (today)**
@@ -136,17 +136,19 @@ A managed cloud service is a possible future direction but explicitly undecided.
 
 ## Architecture (one paragraph)
 
-A Go binary mounts a chi router. Three layers above it: an HTTP gateway (`/_api/*` for REST + auth, `/git/<workspace>.git` for smart-HTTP git, `/mcp` for the agent tool surface), an HTML renderer (`internal/html/`) that serves the workspace's working tree as a browsable dashboard, and `internal/gitserver/` which manages the bare repos + worktrees on disk. Pure-Go SQLite (modernc.org/sqlite) holds auth/sessions/invitations only — content lives in git. Pushes fire the post-receive event bus; subscribers re-render and the dashboard sends a Reload toast over SSE. Six MCP tools cover the agent surface for runtimes without shell access. The binary is fully static — no Node, no React, no MDX compiler, no separate frontend build.
+A Go binary mounts a chi router. Three layers above it: an HTTP gateway (`/_api/*` for REST + auth, `/git/<workspace>.git` for smart-HTTP git, `/mcp` for the agent tool surface), an HTML renderer (`internal/html/`) that serves the workspace's working tree as a browsable dashboard, and `internal/gitserver/` which manages the bare repos + worktrees on disk. Pure-Go SQLite (modernc.org/sqlite) holds auth/sessions/invitations/groups only — content lives in git. Pushes fire the post-receive event bus; subscribers re-render and the dashboard sends a Reload toast over SSE. Four MCP tools cover the agent surface for runtimes without shell access. The binary is fully static — no Node, no React, no MDX compiler, no separate frontend build.
 
 Full design: [`spec.md`](./spec.md). Key directories:
 
 ```
 cmd/agentboard/        CLI entry point
-internal/auth/         users, tokens, passwords, sessions, OAuth, middleware
-internal/gitserver/    bare-repo + worktree manager, smart-HTTP, post-receive hub
+internal/auth/         users, tokens, passwords, sessions, middleware
+internal/gitserver/    bare-repo + worktree manager, smart-HTTP, post-receive hub, pre-receive permission hook
+internal/groups/       named user groups (for permission rules)
+internal/permissions/  parser + evaluator for .agentboard/permissions.yaml
 internal/html/         server-rendered HTML dashboard + embedded design-system
 internal/server/       /_api/* handlers, admin UI, SSE broadcaster
-internal/mcp/          JSON-RPC protocol + six agentboard_* tools
+internal/mcp/          JSON-RPC protocol + four agentboard_* tools
 internal/search/       SQLite FTS5 index over the worktree
 internal/cli/          Cobra commands (serve, admin, deploy, ...)
 ```

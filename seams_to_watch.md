@@ -88,9 +88,16 @@ Each entry follows the same shape:
 ### MCP tool surface is effectively public API
 
 - **What.** Every MCP tool name + argument shape is a promise to every Claude skill file already deployed. Renaming or reordering breaks Claude sessions silently.
-- **Why it's OK today.** `CORE_GUIDELINES.md` §2.3 names the 13 (soon 16, with files) core tools as stable. Code review catches additions.
+- **Why it's OK today.** Post-pivot the surface is four tools (`agentboard_workspaces`, `_pull`, `_propose`, `_resolve_conflict`). Code review catches additions.
 - **Breaks when.** We rename a tool, remove an arg, or split one tool into two without an alias.
 - **Mitigation options.** Version the MCP server (`/mcp/v1`, `/mcp/v2`), or maintain a deprecation log. Not urgent while the surface is small.
+
+### Agent-authored HTML runs in the same origin as the dashboard
+
+- **What.** `.html` files in a workspace are served as live HTML at the workspace's URL. The wiki pivot kept HTML as the primary expressive primitive, and every workspace member can write `.html` files unless a permission rule narrows them. A malicious or compromised member can author a page that reads cookies, redirects, exfiltrates, etc. — same-origin to the dashboard, so `agentboard_session` is in scope.
+- **Why it's OK today.** Workspace membership is invite-only, and the customer profile is a 5–50 person team where members trust each other. The dashboard is private (Cloudflare Tunnel, single VM per customer); not public.
+- **Breaks when.** Workspaces grow to include weakly-trusted members (contractors, low-trust automation), or when the dashboard is exposed to a wider audience than the invited members, or when a single member's token is compromised.
+- **Mitigation options.** Sandboxed `<iframe sandbox="allow-scripts">` rendering for `.html`, separate origin (subdomain) for user content (`user-content.<board>.example.com`), CSP `default-src 'self'` on the dashboard chrome with allow-list for user pages. Pivot doc §6 deliberately defers all three.
 
 ### Built-in component data shapes
 

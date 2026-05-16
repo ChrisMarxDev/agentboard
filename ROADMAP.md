@@ -19,7 +19,6 @@
 
 ## Agent quality-of-life
 
-- **Long-poll `agentboard_subscribe`** — the tool exists; the SSE shape works through the dashboard. Wire it through MCP so agents can wait on `conflict.push_rejected` instead of polling.
 - **`agentboard_propose` bundle responses** — return the full working-tree bundle on conflict, not just the file list, so the agent can resolve in one round-trip.
 - **Skill registry** — a workspace can ship `SKILL.md` files in well-known paths; the dashboard surfaces them in a Skills tab so new agents can browse them.
 
@@ -45,6 +44,10 @@
 ## Deliberately not on this roadmap
 
 - A hosted SaaS plan. AgentBoard is self-host-first. We don't operate boards for paying customers; we ship the software they run.
-- A general-purpose data store. Files are the artifacts. There is no `/api/data` plane; data shapes are file conventions (taskboard JSON, CSV, frontmatter on Markdown), and the renderers handle them.
+- A general-purpose data store. Files are the artifacts. There is no `/api/data` plane; data shapes are file conventions (CSV, NDJSON, JSON, frontmatter on Markdown), and the renderers handle them.
+- **Read-restrictions per path.** Substantially harder than write restrictions (filter sidebar, search, every render path). Confidential content goes in a separate workspace until a customer's compliance team requires otherwise.
+- **OAuth / SSO.** Password + magic-link invites cover the v1 audience. Re-add as a single sign-in provider integration when a paying customer asks.
+- **Outbound webhooks / event subscriptions.** Cut with the pivot; re-add as a focused feature when a real workflow needs them.
+- **Taskboard / kanban-from-JSON renderer.** Authored HTML covers the same visual outcome with fewer rules to teach.
 - A native desktop app. The web UI is the only UI. Agents use git or MCP; humans use the browser.
 - Real-time collaborative editing of prose. Two agents disagreeing about a file is git-merge territory, not CRDT territory.

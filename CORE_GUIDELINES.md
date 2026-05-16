@@ -120,11 +120,11 @@ The test: *if an agent calls this wrong, does the response tell it how to succee
 
 ## 13. Content is files; operational state stays in the database
 
-The surface that humans and agents directly compose — pages, dashboards, taskboards, briefs, decks, skills, binary uploads — lives as files in a git repo. Files come in shapes the renderer recognizes: `.html` for expressive pages, `.md` for prose, `.json` for typed views like kanban boards, `.ndjson` for streams, binaries for everything else. Folders are folders.
+The surface that humans and agents directly compose — pages, dashboards, briefs, decks, skills, binary uploads — lives as files in a git repo. Files come in shapes the renderer recognizes: `.html` for expressive pages (including kanban / dashboards / anything with custom layout), `.md` for prose, `.json` / `.ndjson` / `.csv` for structured data, binaries for everything else. Folders are folders.
 
 Backup is `tar` the project root. Migration is `mv`. Audit is `grep`. A new content type is a path convention, not a new product feature.
 
-**Operational state stays in SQLite.** Users, tokens, sessions, invitations, webhook subscriptions, OAuth clients, the rate-limit bucket — none of these are composed by hand. They're machine-managed indexes that an admin reads through dedicated UIs, never as raw text. Putting them in files would buy nothing and cost concurrent-write safety, indexed lookups, and the atomicity guarantees SQLite gives us. (Per-doc history and the activity log live in git, not SQLite — `git log` is the audit trail.)
+**Operational state stays in SQLite.** Users, tokens, sessions, invitations, groups, the rate-limit bucket — none of these are composed by hand. They're machine-managed indexes that an admin reads through dedicated UIs, never as raw text. Putting them in files would buy nothing and cost concurrent-write safety, indexed lookups, and the atomicity guarantees SQLite gives us. (Per-doc history and the activity log live in git, not SQLite — `git log` is the audit trail. Permission rules are the one exception: `.agentboard/permissions.yaml` is version-controlled inside the workspace because rule changes are themselves auditable as commits.)
 
 The line: *do agents and humans compose this directly?* If yes, it's a file. If no, it's a row.
 
