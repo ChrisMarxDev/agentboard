@@ -265,6 +265,15 @@ func (s *Server) buildRouter() chi.Router {
 		s.registerAdminUIRoutes(adm)
 	})
 
+	// ----- /me HTML UI -----
+	// "Your account" page for any signed-in user — list/create/revoke
+	// personal tokens, see the connect-from-terminal snippet. Same
+	// auth posture as /admin but no AdminRequired narrowing.
+	r.Group(func(me chi.Router) {
+		me.Use(requireUserMW)
+		s.registerMeUIRoutes(me)
+	})
+
 	// ----- HTML catch-all -----
 	// Auth-gated: anonymous browsers redirect to /login?next=… so
 	// they get a friendly sign-in page instead of either a 401 JSON

@@ -188,12 +188,14 @@ func loginViewData(r *http.Request, username, errMsg string) authUIData {
 	return authUIData{
 		Title:         "Sign in",
 		WorkspaceName: "AgentBoard",
-		Heading:       "Sign in",
-		Subtitle:      "Use the username + password you set when claiming this board.",
-		Action:        "/login",
-		Submit:        "Sign in",
-		Error:         errMsg,
-		Hidden:        hidden,
+		Heading:       "Sign in to AgentBoard",
+		Subtitle: "AgentBoard is a shared git workspace humans and AI agents " +
+			"collaborate inside. Use the username + password you set when " +
+			"claiming this board.",
+		Action: "/login",
+		Submit: "Sign in",
+		Error:  errMsg,
+		Hidden: hidden,
 		Fields: []authUIField{
 			{Name: "username", Label: "Username", Type: "text",
 				Autocomplete: "username", Value: username, Required: true,
@@ -202,7 +204,9 @@ func loginViewData(r *http.Request, username, errMsg string) authUIData {
 				Autocomplete: "current-password", Required: true},
 		},
 		Foot: template.HTML(`No account? Ask an admin for an invite URL ` +
-			`(<code>/invite/&lt;id&gt;</code>).`),
+			`(<code>/invite/&lt;id&gt;</code>).<br>` +
+			`Curious what this is? ` +
+			`<a href="/_api/introduction">Read the introduction</a>.`),
 	}
 }
 

@@ -412,6 +412,12 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 	if wantRaw || wantDownload || !preview {
 		ct := contentTypeFor(ext)
 		w.Header().Set("Content-Type", ct)
+		// Raw responses are content-addressable by URL+params; they
+		// can be cached. But anything cached under the bare URL must
+		// vary by the headers that drive the preview/raw split so a
+		// later browser visit doesn't see a stale image-bytes payload
+		// when it should get the framed preview.
+		w.Header().Set("Vary", "Cookie, Accept, Sec-Fetch-Dest")
 		if wantDownload {
 			w.Header().Set("Content-Disposition",
 				`attachment; filename="`+filepath.Base(abs)+`"`)
@@ -1218,6 +1224,13 @@ type breadcrumb struct {
 // sidebar tree, breadcrumbs).
 func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, title string, content template.HTML, mb *MetaBar, wide bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Shell responses must not survive in browser cache — sessions
+	// change, content changes, and the same URL can return either the
+	// preview frame or raw bytes depending on Sec-Fetch-Dest. Vary
+	// ensures intermediaries don't mix the two; no-store prevents
+	// "back button shows old preview" surprises after a push.
+	w.Header().Set("Cache-Control", "no-store, private")
+	w.Header().Set("Vary", "Cookie, Accept, Sec-Fetch-Dest")
 	user := ""
 	if s.UserResolver != nil {
 		user = s.UserResolver(r)
