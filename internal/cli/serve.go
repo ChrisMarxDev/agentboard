@@ -18,6 +18,7 @@ import (
 	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	embedpkg "github.com/christophermarx/agentboard/internal/embed"
 	"github.com/christophermarx/agentboard/internal/gitserver"
+	"github.com/christophermarx/agentboard/internal/groups"
 	htmlserver "github.com/christophermarx/agentboard/internal/html"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/mcp"
@@ -97,6 +98,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	invStore, err := invitations.NewStore(dbConn.Conn())
 	if err != nil {
 		return fmt.Errorf("open invitations store: %w", err)
+	}
+	groupStore, err := groups.NewStore(dbConn.Conn())
+	if err != nil {
+		return fmt.Errorf("open groups store: %w", err)
 	}
 
 	// Bootstrap-admin invite on first boot.
@@ -328,6 +333,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Conn:        dbConn.Conn(),
 		Auth:        authStore,
 		Invitations: invStore,
+		Groups:      groupStore,
 		SkillFile:   embedpkg.SkillFile(),
 		GitServer:   gitSrv,
 		HTML:        htmlSrv,

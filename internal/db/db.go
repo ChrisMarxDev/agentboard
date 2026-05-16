@@ -1,6 +1,14 @@
-// Package db opens the project's SQLite connection for the auth +
-// invitations subsystems. The KV-data store has moved to files
-// (internal/store), so SQLite is reduced to operational metadata.
+// Package db opens the project's SQLite connection for the auth,
+// invitations, and groups subsystems. The KV-data store has moved
+// to files (internal/store), so SQLite is reduced to operational
+// metadata.
+//
+// Foreign keys are ENFORCED via `_foreign_keys=on` in the DSN. The
+// existing schemas already declare FK constraints (e.g.
+// user_tokens.username → users.username, group_members.username →
+// users.username); enforcement makes ON DELETE CASCADE actually
+// fire and surfaces orphan-row bugs as constraint failures instead
+// of silent corruption.
 //
 // One connection pool per process. Auth + co-stores share it so we
 // don't fight over the WAL file. Caller is responsible for Close on
@@ -28,7 +36,7 @@ type DB struct {
 // concurrent readers + a 5 s busy-timeout so brief lock contention
 // doesn't bubble up as errors.
 func Open(path string) (*DB, error) {
-	conn, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000")
+	conn, err := sql.Open("sqlite", path+"?_journal_mode=WAL&_busy_timeout=5000&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("db: open %s: %w", path, err)
 	}

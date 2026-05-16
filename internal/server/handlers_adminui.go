@@ -138,6 +138,67 @@ const adminUIPage = `<!doctype html>
 <div class="panel"><p class="empty">No invitations yet.</p></div>
 {{end}}
 
+<h2>Groups ({{len .Groups}})</h2>
+<div class="panel">
+  <form class="new-invite" method="post" action="/admin/groups/new" style="grid-template-columns:1fr auto">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <label>New group name
+      <input type="text" name="name" placeholder="e.g. marketing, finance, ops" required pattern="[a-zA-Z][a-zA-Z0-9_-]{0,31}">
+    </label>
+    <button type="submit">Create group</button>
+  </form>
+</div>
+{{if .Groups}}
+<div class="panel" style="padding:.25rem 0">
+  <table>
+    <thead><tr><th>Name</th><th>Members</th><th>Created</th><th>Manage</th></tr></thead>
+    <tbody>
+    {{range .Groups}}
+      <tr>
+        <td><strong>{{.Name}}</strong></td>
+        <td>{{len .Members}}</td>
+        <td><span class="ab-muted">{{.CreatedAt}}</span></td>
+        <td>
+          <details>
+            <summary style="cursor:pointer;color:var(--accent);font-size:.85rem">members</summary>
+            <div style="margin-top:.6rem;padding:.5rem;background:var(--bg);border-radius:6px">
+              {{if .Members}}
+                <ul style="margin:0;padding-left:1.1rem;font-size:.85rem">
+                {{range .Members}}
+                  <li>@{{.}}
+                    <form class="inline" method="post" action="/admin/groups/{{$.Name}}/members/{{.}}/remove" onsubmit="return confirm('Remove @{{.}} from {{$.Name}}?')">
+                      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                      · <button type="submit">remove</button>
+                    </form>
+                  </li>
+                {{end}}
+                </ul>
+              {{else}}
+                <p class="empty" style="margin:0;font-size:.85rem">no members</p>
+              {{end}}
+              <form class="new-invite" method="post" action="/admin/groups/{{.Name}}/members/new" style="grid-template-columns:1fr auto;margin-top:.6rem">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <label>Add user
+                  <input type="text" name="username" placeholder="username" required>
+                </label>
+                <button type="submit" style="padding:.35rem .8rem;font-size:.85rem">add</button>
+              </form>
+              <form class="inline" method="post" action="/admin/groups/{{.Name}}/delete" onsubmit="return confirm('Delete group {{.Name}} and all memberships?')" style="margin-top:.75rem">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <button type="submit" style="color:var(--error)">delete group</button>
+              </form>
+            </div>
+          </details>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="panel"><p class="empty">No groups yet. Permission rules in <code>.agentboard/permissions.yaml</code> reference these by name.</p></div>
+{{end}}
+
 <h2>Users ({{len .Users}})</h2>
 {{if .Users}}
 <div class="panel" style="padding:.25rem 0">
@@ -179,12 +240,19 @@ type adminUIUser struct {
 	CreatedAt   string
 }
 
+type adminUIGroup struct {
+	Name      string
+	CreatedAt string
+	Members   []string // usernames
+}
+
 type adminUIData struct {
 	WorkspaceName string
 	User          string
 	CSRF          string
 	Invitations   []adminUIInvitation
 	Users         []adminUIUser
+	Groups        []adminUIGroup
 	NewInviteURL  string
 }
 
@@ -194,6 +262,10 @@ func (s *Server) registerAdminUIRoutes(r chi.Router) {
 	r.Get("/admin", s.handleAdminHome)
 	r.Post("/admin/invitations/new", s.handleAdminCreateInvitation)
 	r.Post("/admin/invitations/{id}/revoke", s.handleAdminRevokeInvitation)
+	r.Post("/admin/groups/new", s.handleAdminCreateGroup)
+	r.Post("/admin/groups/{name}/delete", s.handleAdminDeleteGroup)
+	r.Post("/admin/groups/{name}/members/new", s.handleAdminAddGroupMember)
+	r.Post("/admin/groups/{name}/members/{username}/remove", s.handleAdminRemoveGroupMember)
 }
 
 func (s *Server) handleAdminHome(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +297,25 @@ func (s *Server) renderAdminHome(w http.ResponseWriter, r *http.Request, newInvi
 		}
 	}
 
+	var groupsList []adminUIGroup
+	if s.Groups != nil {
+		gs, err := s.Groups.List(r.Context())
+		if err == nil {
+			for _, g := range gs {
+				members, _ := s.Groups.Members(r.Context(), g.Name)
+				names := make([]string, 0, len(members))
+				for _, m := range members {
+					names = append(names, m.Username)
+				}
+				groupsList = append(groupsList, adminUIGroup{
+					Name:      g.Name,
+					CreatedAt: g.CreatedAt.UTC().Format("2006-01-02"),
+					Members:   names,
+				})
+			}
+		}
+	}
+
 	var users []adminUIUser
 	if s.Auth != nil {
 		list, err := s.Auth.ListUsers(true)
@@ -246,6 +337,7 @@ func (s *Server) renderAdminHome(w http.ResponseWriter, r *http.Request, newInvi
 		CSRF:          csrf,
 		Invitations:   invs,
 		Users:         users,
+		Groups:        groupsList,
 		NewInviteURL:  newInviteURL,
 	}
 	if user != nil {
@@ -311,6 +403,72 @@ func (s *Server) handleAdminRevokeInvitation(w http.ResponseWriter, r *http.Requ
 	id := chi.URLParam(r, "id")
 	if err := s.Invitations.Revoke(id); err != nil {
 		http.Error(w, "revoke failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
+}
+
+func (s *Server) handleAdminCreateGroup(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminCSRF(w, r) {
+		return
+	}
+	if s.Groups == nil {
+		http.Error(w, "groups store not wired", http.StatusServiceUnavailable)
+		return
+	}
+	name := r.FormValue("name")
+	if _, err := s.Groups.Create(r.Context(), name, resolveActor(r)); err != nil {
+		http.Error(w, "create failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
+}
+
+func (s *Server) handleAdminDeleteGroup(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminCSRF(w, r) {
+		return
+	}
+	if s.Groups == nil {
+		http.Error(w, "groups store not wired", http.StatusServiceUnavailable)
+		return
+	}
+	name := chi.URLParam(r, "name")
+	if err := s.Groups.Delete(r.Context(), name); err != nil {
+		http.Error(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
+}
+
+func (s *Server) handleAdminAddGroupMember(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminCSRF(w, r) {
+		return
+	}
+	if s.Groups == nil {
+		http.Error(w, "groups store not wired", http.StatusServiceUnavailable)
+		return
+	}
+	name := chi.URLParam(r, "name")
+	username := r.FormValue("username")
+	if err := s.Groups.AddMember(r.Context(), name, username); err != nil {
+		http.Error(w, "add failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
+}
+
+func (s *Server) handleAdminRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminCSRF(w, r) {
+		return
+	}
+	if s.Groups == nil {
+		http.Error(w, "groups store not wired", http.StatusServiceUnavailable)
+		return
+	}
+	name := chi.URLParam(r, "name")
+	username := chi.URLParam(r, "username")
+	if err := s.Groups.RemoveMember(r.Context(), name, username); err != nil {
+		http.Error(w, "remove failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/admin", http.StatusFound)

@@ -13,6 +13,7 @@ import (
 	"github.com/christophermarx/agentboard/internal/auth"
 	dbpkg "github.com/christophermarx/agentboard/internal/db"
 	"github.com/christophermarx/agentboard/internal/gitserver"
+	"github.com/christophermarx/agentboard/internal/groups"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/spf13/cobra"
@@ -547,4 +548,213 @@ func humanDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// --------------------------------------------------------------------
+// Group management
+// --------------------------------------------------------------------
+
+var adminGroupsCmd = &cobra.Command{
+	Use:   "groups",
+	Short: "Manage user groups (named collections referenced by permission rules)",
+	Long: `Groups are named collections of users that the permission
+system can reference. Subcommands cover the full CRUD surface, and
+mirror the admin UI panel.`,
+}
+
+var adminGroupsListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List every group with its member count",
+	Args:  cobra.NoArgs,
+	RunE:  runAdminGroupsList,
+}
+
+var adminGroupsCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a new group",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAdminGroupsCreate,
+}
+
+var adminGroupsDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a group (drops all memberships via FK cascade)",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAdminGroupsDelete,
+}
+
+var adminGroupsRenameCmd = &cobra.Command{
+	Use:   "rename <oldname> <newname>",
+	Short: "Rename a group; ID is preserved so YAML references stay valid",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runAdminGroupsRename,
+}
+
+var adminGroupsAddCmd = &cobra.Command{
+	Use:   "add <group> <username>",
+	Short: "Add a user to a group",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runAdminGroupsAdd,
+}
+
+var adminGroupsRemoveCmd = &cobra.Command{
+	Use:   "remove <group> <username>",
+	Short: "Remove a user from a group",
+	Args:  cobra.ExactArgs(2),
+	RunE:  runAdminGroupsRemove,
+}
+
+var adminGroupsMembersCmd = &cobra.Command{
+	Use:   "members <name>",
+	Short: "List members of a group",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runAdminGroupsMembers,
+}
+
+func init() {
+	adminGroupsCmd.AddCommand(adminGroupsListCmd)
+	adminGroupsCmd.AddCommand(adminGroupsCreateCmd)
+	adminGroupsCmd.AddCommand(adminGroupsDeleteCmd)
+	adminGroupsCmd.AddCommand(adminGroupsRenameCmd)
+	adminGroupsCmd.AddCommand(adminGroupsAddCmd)
+	adminGroupsCmd.AddCommand(adminGroupsRemoveCmd)
+	adminGroupsCmd.AddCommand(adminGroupsMembersCmd)
+	adminCmd.AddCommand(adminGroupsCmd)
+}
+
+// openGroupsStore opens the project's DB and returns a *groups.Store
+// plus a closer. Mirrors openAuthStore's shape.
+func openGroupsStore() (*groups.Store, func(), error) {
+	projPath := resolveProjectPath()
+	if _, err := os.Stat(projPath); os.IsNotExist(err) {
+		return nil, nil, fmt.Errorf("project not found at %s — run `agentboard serve` once to create it", projPath)
+	}
+	proj, err := project.Load(projPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load project: %w", err)
+	}
+	dbConn, err := dbpkg.Open(proj.DatabasePath())
+	if err != nil {
+		return nil, nil, fmt.Errorf("open database: %w", err)
+	}
+	store, err := groups.NewStore(dbConn.Conn())
+	if err != nil {
+		dbConn.Close()
+		return nil, nil, fmt.Errorf("open groups store: %w", err)
+	}
+	return store, func() { dbConn.Close() }, nil
+}
+
+func runAdminGroupsList(cmd *cobra.Command, _ []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	ctx := context.Background()
+	gs, err := store.List(ctx)
+	if err != nil {
+		return err
+	}
+	if len(gs) == 0 {
+		fmt.Println("No groups yet. Create one with `agentboard admin groups create <name>`.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tMEMBERS\tCREATED BY\tCREATED")
+	for _, g := range gs {
+		members, _ := store.Members(ctx, g.Name)
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n",
+			g.Name, len(members), g.CreatedBy,
+			g.CreatedAt.Local().Format("2006-01-02"))
+	}
+	return tw.Flush()
+}
+
+func runAdminGroupsCreate(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	g, err := store.Create(context.Background(), args[0], "cli")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("created group %s (id=%s)\n", g.Name, g.ID)
+	return nil
+}
+
+func runAdminGroupsDelete(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	if err := store.Delete(context.Background(), args[0]); err != nil {
+		return err
+	}
+	fmt.Printf("deleted group %s\n", args[0])
+	return nil
+}
+
+func runAdminGroupsRename(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	if err := store.Rename(context.Background(), args[0], args[1]); err != nil {
+		return err
+	}
+	fmt.Printf("renamed %s → %s\n", args[0], args[1])
+	return nil
+}
+
+func runAdminGroupsAdd(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	if err := store.AddMember(context.Background(), args[0], args[1]); err != nil {
+		return err
+	}
+	fmt.Printf("added @%s to %s\n", args[1], args[0])
+	return nil
+}
+
+func runAdminGroupsRemove(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	if err := store.RemoveMember(context.Background(), args[0], args[1]); err != nil {
+		return err
+	}
+	fmt.Printf("removed @%s from %s\n", args[1], args[0])
+	return nil
+}
+
+func runAdminGroupsMembers(cmd *cobra.Command, args []string) error {
+	store, closer, err := openGroupsStore()
+	if err != nil {
+		return err
+	}
+	defer closer()
+	members, err := store.Members(context.Background(), args[0])
+	if err != nil {
+		return err
+	}
+	if len(members) == 0 {
+		fmt.Printf("Group %s has no members.\n", args[0])
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "USERNAME\tADDED")
+	for _, m := range members {
+		fmt.Fprintf(tw, "@%s\t%s\n", m.Username, m.AddedAt.Local().Format("2006-01-02 15:04"))
+	}
+	return tw.Flush()
 }

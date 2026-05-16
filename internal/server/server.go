@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/christophermarx/agentboard/internal/auth"
+	"github.com/christophermarx/agentboard/internal/groups"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/mcp"
 	"github.com/christophermarx/agentboard/internal/project"
@@ -37,6 +38,7 @@ type Server struct {
 	Broadcaster *Broadcaster
 	MCP         *mcp.Server
 	Invitations *invitations.Store
+	Groups      *groups.Store
 	EditFn      EditFn    // POST /_api/edit committer
 	RestoreFn   RestoreFn // POST /_api/restore committer
 	Router      chi.Router
@@ -66,6 +68,7 @@ type ServerConfig struct {
 	Conn        *sql.DB
 	Auth        *auth.Store
 	Invitations *invitations.Store
+	Groups      *groups.Store
 	SkillFile   string
 	GitServer   http.Handler
 	HTML        http.Handler
@@ -91,6 +94,7 @@ func New(cfg ServerConfig) *Server {
 		Broadcaster: broadcaster,
 		MCP:         mcpServer,
 		Invitations: cfg.Invitations,
+		Groups:      cfg.Groups,
 		SkillFile:   cfg.SkillFile,
 		GitServer:   cfg.GitServer,
 		HTML:        cfg.HTML,
@@ -189,6 +193,7 @@ func (s *Server) buildRouter() chi.Router {
 			api.Get("/invitations", s.handleListInvitations)
 			api.Post("/invitations", s.handleCreateInvitation)
 			api.Delete("/invitations/{id}", s.handleRevokeInvitation)
+			s.registerAdminGroupRoutes(api)
 		})
 
 		r.Post("/mcp", s.MCP.ServeHTTP)
