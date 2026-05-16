@@ -1327,10 +1327,10 @@ func (s *Server) walkTreeDir(absDir, urlPrefix, currentPath string, depth int) [
 		if isDir {
 			nodeURL += "/"
 		}
+		// Keep the extension on file labels so the sidebar tells you
+		// what kind of leaf each entry is at a glance (foo.html vs
+		// foo.svg vs foo.json). Folders don't need an extension.
 		label := name
-		if !isDir {
-			label = strings.TrimSuffix(name, filepath.Ext(name))
-		}
 		nodeBase := urlPrefix + "/" + name
 		// "Open" — current request path goes through this folder. Used
 		// to auto-expand ancestors of the active file.
