@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/christophermarx/agentboard/internal/auth"
+	"github.com/christophermarx/agentboard/internal/permissions"
 )
 
 // POST /_api/edit — accepts form-encoded {path, body, message, csrf}
@@ -58,10 +60,34 @@ func (s *Server) handleEditSubmit(w http.ResponseWriter, r *http.Request) {
 	if message == "" {
 		message = "Edit " + path
 	}
+	if !s.allowWrite(w, r, "dogfood", user.Username, path) {
+		return
+	}
 	if err := s.EditFn(r.Context(), "dogfood", path, body, user.Username, message); err != nil {
 		respondError(w, http.StatusInternalServerError, "commit_failed", err.Error())
 		return
 	}
 	// Success → redirect back to the rendered file.
 	http.Redirect(w, r, "/"+path, http.StatusFound)
+}
+
+// allowWrite runs the configured WriteCheck (if any) for `path` and
+// writes a 403 response on a permissions.DenyError. Returns true when
+// the write is permitted (or no WriteCheck is wired), false when the
+// caller should return early — the response has already been written.
+func (s *Server) allowWrite(w http.ResponseWriter, r *http.Request, workspace, username, path string) bool {
+	if s.WriteCheck == nil {
+		return true
+	}
+	err := s.WriteCheck(r.Context(), workspace, username, []string{path})
+	if err == nil {
+		return true
+	}
+	var deny *permissions.DenyError
+	if errors.As(err, &deny) {
+		respondError(w, http.StatusForbidden, "FORBIDDEN", deny.Error())
+		return false
+	}
+	respondError(w, http.StatusInternalServerError, "permission_check_failed", err.Error())
+	return false
 }

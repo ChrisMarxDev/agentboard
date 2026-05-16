@@ -224,8 +224,15 @@ func (s *Server) toolPropose(r *http.Request, args map[string]json.RawMessage) (
 	branch := getString(args, "branch")
 	base := getString(args, "base")
 	changes := make([]ProposeFile, 0, len(fileList))
+	paths := make([]string, 0, len(fileList))
 	for _, f := range fileList {
 		changes = append(changes, ProposeFile{Path: f.Path, Body: f.Body})
+		paths = append(paths, f.Path)
+	}
+	if s.WriteCheck != nil {
+		if err := s.WriteCheck(r.Context(), ws, actor, paths); err != nil {
+			return nil, &RPCError{Code: -32000, Message: "propose: " + err.Error()}
+		}
 	}
 	res, err := s.ProposeFn(r.Context(), ProposeRequest{
 		Workspace: ws,

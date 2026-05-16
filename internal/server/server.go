@@ -39,8 +39,9 @@ type Server struct {
 	MCP         *mcp.Server
 	Invitations *invitations.Store
 	Groups      *groups.Store
-	EditFn      EditFn    // POST /_api/edit committer
-	RestoreFn   RestoreFn // POST /_api/restore committer
+	EditFn      EditFn       // POST /_api/edit committer
+	RestoreFn   RestoreFn    // POST /_api/restore committer
+	WriteCheck  WriteCheckFn // permissions gate (handlers_edit, handlers_restore)
 	Router      chi.Router
 	SkillFile   string
 
@@ -72,9 +73,17 @@ type ServerConfig struct {
 	SkillFile   string
 	GitServer   http.Handler
 	HTML        http.Handler
-	EditFn      EditFn    // POST /_api/edit handler; cli/serve.go bridges to gitserver.PutFile
-	RestoreFn   RestoreFn // POST /_api/restore handler; bridges to FileAt + PutFile
+	EditFn      EditFn       // POST /_api/edit handler; cli/serve.go bridges to gitserver.PutFile
+	RestoreFn   RestoreFn    // POST /_api/restore handler; bridges to FileAt + PutFile
+	WriteCheck  WriteCheckFn // permissions gate; cli/serve.go composes auth + groups + permissions
 }
+
+// WriteCheckFn gates a pending write. Returns nil if the actor may
+// write every path; *permissions.DenyError when one or more paths are
+// forbidden (handlers translate to 403). A nil WriteCheck on the
+// Server is treated as "always allow" so partial wiring is safe
+// during bring-up.
+type WriteCheckFn func(ctx context.Context, workspace, username string, paths []string) error
 
 // New constructs a Server. Subsystems are wired internally; the caller
 // only supplies the substrate (project, db, auth, invitations) and the
@@ -100,6 +109,7 @@ func New(cfg ServerConfig) *Server {
 		HTML:        cfg.HTML,
 		EditFn:      cfg.EditFn,
 		RestoreFn:   cfg.RestoreFn,
+		WriteCheck:  cfg.WriteCheck,
 	}
 	s.Router = s.buildRouter()
 	return s

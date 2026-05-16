@@ -49,6 +49,9 @@ func (s *Server) handleRestoreSubmit(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, "bad_request", "invalid path")
 		return
 	}
+	if !s.allowWrite(w, r, "dogfood", user.Username, path) {
+		return
+	}
 	if err := s.RestoreFn(r.Context(), "dogfood", path, sha, user.Username); err != nil {
 		respondError(w, http.StatusInternalServerError, "restore_failed", err.Error())
 		return

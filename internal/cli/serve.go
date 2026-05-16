@@ -22,6 +22,7 @@ import (
 	htmlserver "github.com/christophermarx/agentboard/internal/html"
 	"github.com/christophermarx/agentboard/internal/invitations"
 	"github.com/christophermarx/agentboard/internal/mcp"
+	"github.com/christophermarx/agentboard/internal/permissions"
 	"github.com/christophermarx/agentboard/internal/project"
 	"github.com/christophermarx/agentboard/internal/search"
 	"github.com/christophermarx/agentboard/internal/server"
@@ -328,6 +329,32 @@ func runServe(cmd *cobra.Command, args []string) error {
 		},
 	}
 
+	// WriteCheck composes auth + groups + permissions package to gate
+	// every write the runtime sees (handlers_edit, handlers_restore,
+	// agentboard_propose). The git smart-HTTP push path is gated
+	// separately via a pre-receive hook (follow-up).
+	writeCheck := func(ctx context.Context, workspace, username string, paths []string) error {
+		user, err := authStore.GetUser(username)
+		if err != nil {
+			return fmt.Errorf("permissions: lookup user %s: %w", username, err)
+		}
+		if user == nil {
+			return fmt.Errorf("permissions: user %s not found", username)
+		}
+		grps, _ := groupStore.MemberOf(ctx, username)
+		actor := permissions.Actor{
+			Username: user.Username,
+			Role:     permissions.Role(string(user.Kind)),
+			Groups:   grps,
+		}
+		wtPath := gitStore.WorktreePath(workspace)
+		rules, err := permissions.LoadForWorktree(wtPath)
+		if err != nil {
+			return fmt.Errorf("permissions: load rules: %w", err)
+		}
+		return rules.Allow(actor, paths)
+	}
+
 	srv := server.New(server.ServerConfig{
 		Project:     proj,
 		Conn:        dbConn.Conn(),
@@ -337,6 +364,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		SkillFile:   embedpkg.SkillFile(),
 		GitServer:   gitSrv,
 		HTML:        htmlSrv,
+		WriteCheck:  server.WriteCheckFn(writeCheck),
 		EditFn: func(ctx context.Context, workspace, path, body, actor, message string) error {
 			return gitStore.PutFile(ctx, workspace, path, body, actor, message)
 		},
@@ -396,6 +424,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	srv.MCP.GitStore = gitStore
 	srv.MCP.ProposeFn = proposeFn
+	srv.MCP.WriteCheck = mcp.WriteCheckFn(writeCheck)
 	srv.MCP.ResolveConflictFn = func(ctx context.Context, proposalID, file, resolution string) (*mcp.ProposeResult, error) {
 		r, err := gitStore.ResolveConflict(ctx, proposalID, file, resolution)
 		if err != nil {

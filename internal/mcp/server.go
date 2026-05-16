@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,13 @@ import (
 	"github.com/christophermarx/agentboard/internal/auth"
 	"github.com/christophermarx/agentboard/internal/gitserver"
 )
+
+// WriteCheckFn gates a pending write before the proposer runs. Returns
+// nil to allow, or *permissions.DenyError when one or more paths are
+// forbidden. cli/serve.go wires the impl (auth → groups → permissions).
+// A nil WriteCheck on the Server is treated as "always allow" so partial
+// bring-up still works.
+type WriteCheckFn func(ctx context.Context, workspace, username string, paths []string) error
 
 // Server implements the MCP Streamable HTTP transport.
 //
@@ -36,6 +44,9 @@ type Server struct {
 	// `clone_url`. Empty falls back to the inbound request's scheme +
 	// host.
 	PublicBaseURL string
+
+	// WriteCheck gates agentboard_propose by path. nil = open default.
+	WriteCheck WriteCheckFn
 
 	// Auth: tool-side bearer-to-user resolution for commit attribution.
 	Auth *auth.Store
