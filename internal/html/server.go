@@ -398,10 +398,22 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 	// Preview wins only when at least one signal says so. <img src>
 	// embeds without Sec-Fetch-Dest still send Accept: image/* — the
 	// Accept check correctly routes them to raw.
+	//
+	// `/assets/*` is the static-reference convention — pages embed
+	// these via <img src>, never navigate to them as a preview target.
+	// Forcing raw here removes the preview-shell-vs-raw negotiation
+	// entirely, which was leaking a stale cache state through
+	// Cloudflare's edge (CF Free only varies on Accept-Encoding —
+	// whatever header config populated the cache first persists for
+	// everyone). With this carve-out, /assets/<image>.svg is always
+	// raw bytes, CF caches the bytes, every browser context renders.
+	isAssetsPath := strings.HasPrefix(urlPath, "/assets/")
 	dest := r.Header.Get("Sec-Fetch-Dest")
 	acceptHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
 	preview := false
 	switch {
+	case isAssetsPath && isImageExt(ext):
+		preview = false
 	case dest == "document" || dest == "iframe":
 		preview = true
 	case dest != "" && dest != "empty":
@@ -418,6 +430,15 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 		// later browser visit doesn't see a stale image-bytes payload
 		// when it should get the framed preview.
 		w.Header().Set("Vary", "Cookie, Accept, Sec-Fetch-Dest")
+		// Force CF + browser to refetch instead of locking in the
+		// first response that lands in cache. Static asset bytes are
+		// cheap to re-serve and the workspace-write path mutates
+		// them frequently enough that stale-cache asymmetries
+		// (chart.svg shows old bytes, flow.svg shows current) are
+		// strictly worse than a cache miss per visit.
+		if isAssetsPath && isImageExt(ext) {
+			w.Header().Set("Cache-Control", "no-cache, private, must-revalidate")
+		}
 		if wantDownload {
 			w.Header().Set("Content-Disposition",
 				`attachment; filename="`+filepath.Base(abs)+`"`)
