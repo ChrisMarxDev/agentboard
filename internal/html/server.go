@@ -373,17 +373,31 @@ func (s *Server) renderFile(w http.ResponseWriter, r *http.Request, urlPath, abs
 
 	wantRaw := r.URL.Query().Get("raw") != ""
 	wantDownload := r.URL.Query().Get("download") != ""
-	// Resource-fetch detection. Modern browsers (Chrome, Firefox,
-	// Safari) set Sec-Fetch-Dest on every fetch — "document" or
-	// "iframe" for top-level nav, "image"/"style"/"script"/"font"/etc.
-	// for resource fetches like <img>, <link>, <script>. We use this
-	// as the primary signal so `<img src="/photo.jpg">` works without
-	// needing `?raw=1`. The default at the bare URL stays "preview
-	// shell" — so clicking an image link in the sidebar shows the
-	// framed view (GitHub-style), not raw bytes.
+	// Preview vs raw — two signals, combined defensively because no
+	// single header is reliable through proxies (Cloudflare Tunnel
+	// strips Sec-Fetch-Dest in some configs).
+	//
+	//   Sec-Fetch-Dest (modern browsers): "document"/"iframe" =
+	//     top-level navigation → preview. Anything else (image,
+	//     script, style, font, ...) = resource fetch → raw.
+	//   Accept header: legacy fallback. text/html present → preview.
+	//     Otherwise (image/*, application/json, */*) → raw.
+	//
+	// Preview wins only when at least one signal says so. <img src>
+	// embeds without Sec-Fetch-Dest still send Accept: image/* — the
+	// Accept check correctly routes them to raw.
 	dest := r.Header.Get("Sec-Fetch-Dest")
-	isResourceFetch := dest != "" && dest != "document" && dest != "iframe" && dest != "empty"
-	if wantRaw || wantDownload || isResourceFetch {
+	acceptHTML := strings.Contains(r.Header.Get("Accept"), "text/html")
+	preview := false
+	switch {
+	case dest == "document" || dest == "iframe":
+		preview = true
+	case dest != "" && dest != "empty":
+		preview = false // explicit resource fetch
+	default:
+		preview = acceptHTML
+	}
+	if wantRaw || wantDownload || !preview {
 		ct := contentTypeFor(ext)
 		w.Header().Set("Content-Type", ct)
 		if wantDownload {
