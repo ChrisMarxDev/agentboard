@@ -1078,6 +1078,83 @@ const seededLogoSVG = `<?xml version="1.0" encoding="UTF-8"?>
 </svg>
 `
 
+// SeededChartSVG is a small bar-chart-style demo at /assets/chart.svg.
+// Shows that data viz works fine as authored SVG — no extra component
+// system needed.
+var SeededChartSVG = seededChartSVG
+
+const seededChartSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" role="img" aria-label="Sprint outcome bar chart">
+  <style>
+    .bar { fill: #2563eb; }
+    .bar.warn { fill: #d97706; }
+    .label { font: 10px ui-sans-serif, system-ui, sans-serif; fill: #5c6470; }
+    .axis { stroke: #e1e4ea; stroke-width: 1; }
+  </style>
+  <line class="axis" x1="40" y1="110" x2="230" y2="110"/>
+  <line class="axis" x1="40" y1="20" x2="40" y2="110"/>
+  <rect class="bar"      x="55"  y="40" width="28" height="70"/>
+  <rect class="bar"      x="93"  y="55" width="28" height="55"/>
+  <rect class="bar warn" x="131" y="80" width="28" height="30"/>
+  <rect class="bar"      x="169" y="25" width="28" height="85"/>
+  <text class="label" x="69"  y="125" text-anchor="middle">auth</text>
+  <text class="label" x="107" y="125" text-anchor="middle">qol</text>
+  <text class="label" x="145" y="125" text-anchor="middle">infra</text>
+  <text class="label" x="183" y="125" text-anchor="middle">docs</text>
+  <text class="label" x="20"  y="25"  text-anchor="end">100</text>
+  <text class="label" x="20"  y="113" text-anchor="end">0</text>
+</svg>
+`
+
+// SeededFlowSVG is a small node-and-arrow flow diagram demonstrating
+// authored SVG for architecture docs. Lives at /assets/flow.svg.
+var SeededFlowSVG = seededFlowSVG
+
+const seededFlowSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 140" role="img" aria-label="Request flow: browser → server → worktree">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5c6470"/>
+    </marker>
+    <style>
+      .node { fill: #f7f8fa; stroke: #2563eb; stroke-width: 1.5; }
+      .label { font: 12px ui-sans-serif, system-ui, sans-serif; fill: #1a1d24; text-anchor: middle; }
+      .small { font: 10px ui-monospace, monospace; fill: #5c6470; }
+      .edge { stroke: #5c6470; stroke-width: 1.5; fill: none; }
+    </style>
+  </defs>
+  <rect class="node" x="10"  y="50" width="90" height="40" rx="6"/>
+  <text class="label" x="55"  y="74">browser</text>
+  <rect class="node" x="145" y="50" width="90" height="40" rx="6"/>
+  <text class="label" x="190" y="74">server</text>
+  <rect class="node" x="280" y="50" width="90" height="40" rx="6"/>
+  <text class="label" x="325" y="74">worktree</text>
+  <path class="edge" d="M100,70 L143,70" marker-end="url(#arr)"/>
+  <path class="edge" d="M235,70 L278,70" marker-end="url(#arr)"/>
+  <text class="small" x="121" y="62" text-anchor="middle">GET /file</text>
+  <text class="small" x="256" y="62" text-anchor="middle">read</text>
+  <path class="edge" d="M278,90 Q190,130 100,90" marker-end="url(#arr)"/>
+  <text class="small" x="190" y="125" text-anchor="middle">rendered HTML</text>
+</svg>
+`
+
+// SeededAvatarSVG is a generic circular-gradient avatar placeholder
+// at /assets/avatar.svg, demoing image use beyond logos + charts.
+var SeededAvatarSVG = seededAvatarSVG
+
+const seededAvatarSVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Avatar placeholder">
+  <defs>
+    <radialGradient id="a" cx="35%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#fcd34d"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="30" fill="url(#a)"/>
+  <text x="32" y="40" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="22" font-weight="600" fill="#1a1d24">A</text>
+</svg>
+`
+
 // SeededSampleCSV is a small CSV demonstrating how the dashboard
 // serves data files: rendered as preformatted text inline. Agents
 // authoring CSV reports can drop them in alongside their docs.
@@ -1143,15 +1220,78 @@ renderer picks behavior from the extension. Authors drop bytes; the
 dashboard surfaces them with the right content-type and the right
 chrome.</p>
 
-<h2>Rendered demo</h2>
+<h2>Rendered demos</h2>
 
-<div class="demo-img">
-  <img src="/assets/logo.svg" alt="AgentBoard logo">
-  <div class="ab-muted" style="margin-top:.5rem;font-size:.8rem">
-    Embedded from <code>/assets/logo.svg</code> — SVG served with
-    <code>image/svg+xml</code>.
+<p class="ab-muted">Each tile below uses a different embed pattern so
+you can see how the renderer handles image fetches in different
+situations.</p>
+
+<div class="img-grid">
+
+  <div class="demo-img">
+    <img src="/assets/logo.svg" alt="AgentBoard logo">
+    <div class="caption">
+      <code>&lt;img src="/assets/logo.svg"&gt;</code><br>
+      Bare URL — modern browsers set <code>Sec-Fetch-Dest: image</code>
+      so the server returns raw bytes automatically.
+    </div>
   </div>
+
+  <div class="demo-img">
+    <img src="/assets/chart.svg" alt="Bar chart">
+    <div class="caption">
+      <code>&lt;img src="/assets/chart.svg"&gt;</code><br>
+      Authored SVG can carry its own styles + data — no chart library
+      required.
+    </div>
+  </div>
+
+  <div class="demo-img">
+    <img src="/assets/flow.svg?raw=1" alt="Request flow">
+    <div class="caption">
+      <code>?raw=1</code> — explicit override. Forces raw bytes even
+      if the request looks like a top-level navigation. Useful in
+      background-image CSS where headers aren't reliable.
+    </div>
+  </div>
+
+  <div class="demo-img">
+    <img src="/assets/avatar.svg" alt="Avatar" style="max-width:96px">
+    <div class="caption">
+      Avatar placeholder. Small SVG, same content-type, embeds at any
+      size the page wants.
+    </div>
+  </div>
+
+  <div class="demo-img">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" role="img" style="max-width:200px">
+      <rect width="200" height="60" rx="6" fill="#2563eb"/>
+      <text x="100" y="38" text-anchor="middle" font-family="ui-monospace,monospace" font-size="14" fill="white">inline &lt;svg&gt;</text>
+    </svg>
+    <div class="caption">
+      Inline <code>&lt;svg&gt;</code> in HTML — no network fetch, no
+      content-type negotiation, fastest to render. Pick this for tiny
+      glyphs and badges.
+    </div>
+  </div>
+
+  <div class="demo-img" style="background:none;border:0;padding:0;text-align:left">
+    <div style="background:linear-gradient(135deg, #2563eb, #a855f7);height:120px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-weight:600">
+      CSS gradient
+    </div>
+    <div class="caption">
+      Sometimes you don't need an image at all. CSS gradients +
+      pseudo-elements cover most "decorative tile" use cases.
+    </div>
+  </div>
+
 </div>
+
+<style>
+  .img-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 1.5rem 0; }
+  .demo-img .caption { margin-top: .65rem; font-size: .8rem; color: var(--text-secondary); line-height: 1.4; }
+  .demo-img .caption code { font-size: .85em; }
+</style>
 
 <h2>What renders how</h2>
 

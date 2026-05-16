@@ -185,6 +185,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		{"pages/file-types.html", project.SeededFilesDemoHTML, "Demo: file types"},
 		{"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "Update sprint board"},
 		{"assets/logo.svg", project.SeededLogoSVG, "Add demo logo (SVG)"},
+		{"assets/chart.svg", project.SeededChartSVG, "Add bar-chart demo (SVG)"},
+		{"assets/flow.svg", project.SeededFlowSVG, "Add flow-diagram demo (SVG)"},
+		{"assets/avatar.svg", project.SeededAvatarSVG, "Add avatar placeholder (SVG)"},
 		{"data/sprint-14.csv", project.SeededSampleCSV, "Add sample CSV"},
 		{"data/scratch.txt", project.SeededSampleTXT, "Add sample plain-text note"},
 	} {
