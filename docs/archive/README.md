@@ -6,9 +6,8 @@ codebase. Read them as design history, not as a contract.
 
 The live design surface lives at the repo root:
 
-- **`spec.md`** — the locked design contract. Single source of truth for the project shape.
-- **`CORE_GUIDELINES.md`** — the 13 product principles.
-- **`spec-plugins.md`** — companion to principle §10 ("Version compositions, not components"); still load-bearing.
+- **`spec.md`** — the design contract. Single source of truth for the project shape.
+- **`CORE_GUIDELINES.md`** — the product principles.
 - **`AUTH.md`** — auth design (tokens + browser sessions).
 - **`HOSTING.md`**, **`SCALE.md`** — deployment + hosted infra.
 - **`seams_to_watch.md`** — consciously-deferred concerns.
@@ -19,16 +18,17 @@ The live design surface lives at the repo root:
 
 | File | Why archived |
 | --- | --- |
-| `spec-2026-04-pre-rework.md` | The original v2 spec. Marked superseded on 2026-04-28; finally moved out of the root in the everything-is-a-file pass. Describes SQLite KV + the parallel `/api/v2` namespace that cuts 1–4 deleted. Historical context only. |
-| `REWRITE-cuts-1-4.md` | Snapshot of where cuts 1–4 landed (post-files-first, pre-everything-is-a-file). Internally inconsistent — calls 8 tools "the data-plane set" but lists domain-specific names. The next rewrite (cuts 5–8 in `spec.md §11`) supersedes it. |
-| `REWRITE-cuts-5-6.md` | The implementation plan for Cut 5 (mdx + store merge) and Cut 6 (MCP collapse to 10 tools). Both cuts landed; archive for the cut-by-cut history of what landed when. The current contract lives in `spec.md` + `CHANGES.md`. |
-| `spec-desktop.md` | Brainstorm. Tauri-shell desktop wrapper exploration. Not on the roadmap; revisit when the hosted offering is more mature. |
-| `spec-docs.md` | Brainstorm. Mapped the docs-platform feature space (Docusaurus, Mintlify, etc.) onto AgentBoard. Useful as a "future docs surface" net. |
-| `spec-files.md` | Draft. Files-feature design. Superseded by what actually shipped under `/api/files/*` + the files-first store. |
-| `spec-file-storage.md` | Draft. Phases 0–4 of files-first; Phase 5 ("remove SQLite KV") landed via cuts 1–4. The next rewrite (cuts 5–8) goes further: SQLite gone everywhere. |
-| `spec-grab.md` | Draft. Three UX tracks for the Grab feature; track 1 shipped at `agentboard_grab` + the `/grab` UI. |
-| `spec-knowledge.md` | Draft. PRD for unified knowledge + dashboards. The shape it described shipped via the files-first single-tree refactor. |
-| `spec-sessions.md` | Draft. Optional sessions feature spec. Replaced by the simpler view-broker / share-cookie shape currently shipping. |
+| `spec-2026-04-pre-rework.md` | Original v2 spec describing SQLite KV + the `/api/v2` namespace. Cuts 1–4 deleted it. Historical only. |
+| `REWRITE-cuts-1-4.md` | Snapshot of where cuts 1–4 landed (post-files-first, pre-everything-is-a-file). Superseded by later cuts. |
+| `REWRITE-cuts-5-6.md` | Implementation plan for Cut 5 (`mdx + store` merge) and Cut 6 (MCP collapse to 10 tools). Both cuts landed in the file-store era; the entire file store was retired in the git-substrate pivot. |
+| `spec-plugins.md` | React-component "bricks vs. compositions" plugin architecture. The whole `.jsx` component layer was retired in the git-substrate pivot — pages are now `.html`/`.md`/JSON files rendered server-side. No bricks, no compositions versioning, no plugin runtime. Kept for the principle of "the content layer versions, the substrate doesn't" — still load-bearing in spirit. |
+| `spec-desktop.md` | Tauri-shell desktop wrapper exploration. Not on the roadmap. |
+| `spec-docs.md` | Mapped the docs-platform feature space (Docusaurus, Mintlify, etc.) onto AgentBoard. Useful as a "future docs surface" net. |
+| `spec-files.md` | Files-feature design. Superseded by what shipped, then retired by the git pivot. |
+| `spec-file-storage.md` | Phases 0–4 of files-first; the entire files-first store is gone post-pivot. |
+| `spec-grab.md` | Three UX tracks for the Grab feature; track 1 shipped, then retired (no longer in the 6-tool MCP surface). |
+| `spec-knowledge.md` | PRD for unified knowledge + dashboards. The shape it described shipped via the files-first single-tree refactor, then re-shipped via the git working-tree mirror. |
+| `spec-sessions.md` | Optional sessions feature spec. Replaced by browser-session cookies + `oat_*` audience-scoped OAuth tokens. |
 
 If a future change wants to revive one of these designs, copy it
 back to the root and refresh the **Status** line. Don't link to

@@ -233,7 +233,6 @@ func (s *Server) buildRouter() chi.Router {
 			api.Post("/webhooks/{id}/test", s.handleTestWebhook)
 		})
 
-
 		r.Post("/mcp", s.MCP.ServeHTTP)
 		r.Get("/mcp", s.MCP.ServeHTTP)
 		r.Post("/_api/edit", s.handleEditSubmit)

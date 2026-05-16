@@ -7,7 +7,7 @@ func TestExtractHTMLTitle(t *testing.T) {
 		`<!doctype html><title>Hello</title><p>x</p>`:                  "Hello",
 		`<!doctype html><title class="x">  spaced  </title>`:           "spaced",
 		`<!doctype html><html><head><title>Deep</title></head></html>`: "Deep",
-		`<p>no title</p>`:                                              "",
+		`<p>no title</p>`: "",
 	}
 	for in, want := range cases {
 		if got := extractHTMLTitle(in); got != want {

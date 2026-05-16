@@ -67,22 +67,6 @@ Each entry follows the same shape:
 
 ## Architecture
 
-### Single esbuild instance, synchronous per-request
-
-- **What.** Every MDX page compile and every user-component compile goes through one embedded esbuild call. No pooling, no caching past in-memory maps.
-- **Why it's OK today.** One user, sub-second builds, pages change rarely.
-- **Breaks when.** Hundreds of pages, many concurrent MCP writes from parallel agents, or binary-size sensitivity (esbuild is ~15 MB of the binary).
-- **Mitigation options.** Persistent esbuild service, content-addressed cache on disk, or lazily shelling out to a sidecar `esbuild` binary downloaded on first run.
-- **Context.** `spec.md` §23 Q6 already names binary size as a concern.
-
-### User components: catalog registered but not actually bundled
-
-- **What.** `internal/components/manager.go` reads `components/*.jsx` and populates the catalog with their source, but there's no esbuild step that produces `/api/components.js` as a runnable bundle. The frontend's component registry only imports built-ins statically. User components appear in `GET /api/components` but won't render on a page.
-- **Why it's OK today.** Phase 1 scope per `spec.md` §21 hasn't closed the loop yet; no tests or users depend on user-component rendering working end-to-end.
-- **Breaks when.** A user writes a `.jsx` file and expects `<MyWidget />` to render on a page. Or `--allow-component-upload` is used seriously.
-- **Mitigation options.** Wire esbuild's Build API over `components/`, expose the bundle at `/api/components.js`, have `componentRegistry.ts` import it dynamically at startup and on `components-updated` SSE.
-- **Context.** Noticed during the component-upload plan. `bruno/component-upload/` passes because we only test the write + catalog paths, not render.
-
 ### Data store write serialization
 
 - **What.** All writes go through a per-key mutex in Go. No batching.

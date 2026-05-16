@@ -83,14 +83,13 @@ thereafter only the sha256 hash is stored.
   fails on the PK uniqueness. No re-use, ever, without a rename.
 - **The only way to rename** is `agentboard admin rename-user <old> <new>`
   on the host. It updates `users.username` and `user_tokens.username` in a
-  transaction. It does NOT rewrite free-text references (MDX page bodies,
-  data-value strings, assignees arrays). The CLI warns; the operator
-  decides whether to grep + rewrite.
-- **All cross-references store the username as a string.**
-  `data.updated_by = "alice"`, page bodies contain `@alice`, cards carry
-  `assignees: ["alice", "bob"]`. No FK on the data plane — agents write
-  plain strings — but attribution always resolves as long as the user row
-  exists.
+  transaction. It does NOT rewrite free-text references inside workspace
+  files (page bodies, `assignees:` fields, taskboard cards, etc.).
+  The CLI warns; the operator decides whether to grep + rewrite.
+- **All cross-references store the username as a string.** Page bodies
+  contain `@alice`, taskboard cards carry `assignees: ["alice", "bob"]`,
+  commit metadata records the bearer's username. Attribution resolves
+  as long as the user row exists.
 
 ## HTTP auth
 
@@ -314,7 +313,7 @@ Glob only. Three tokens:
 - `**` matches any run of characters including `/`.
 
 Ergonomic shortcut: `foo/**` also matches `foo` exactly, so
-`/api/data/**` covers both `/api/data` and `/api/data/dev.metrics`.
+`/pages/**` covers both `/pages` and `/pages/intro.html`.
 
 ### Common recipes
 
@@ -323,20 +322,18 @@ Ergonomic shortcut: `foo/**` also matches `foo` exactly, so
 {
   "access_mode": "restrict_to_list",
   "rules": [
-    {"action":"allow","pattern":"/api/data/**","methods":["GET"]},
-    {"action":"allow","pattern":"/api/content/**","methods":["GET"]},
-    {"action":"allow","pattern":"/api/files/**","methods":["GET"]},
-    {"action":"allow","pattern":"/api/events","methods":["GET"]}
+    {"action":"allow","pattern":"/**",          "methods":["GET"]},
+    {"action":"allow","pattern":"/_api/events", "methods":["GET"]}
   ]
 }
 ```
 
-**Ops agent, secrets quarantined**:
+**Agent that can author pages but not touch `/secrets/`**:
 ```json
 {
   "access_mode": "allow_all",
   "rules": [
-    {"action":"deny","pattern":"/api/data/secrets.**","methods":["*"]}
+    {"action":"deny","pattern":"/secrets/**","methods":["*"]}
   ]
 }
 ```
@@ -370,13 +367,14 @@ Ergonomic shortcut: `foo/**` also matches `foo` exactly, so
 
 ### Agent realm (token-gated)
 
-`/api/data/*`, `/api/content/*`, `/api/files/*`, `/api/skills/*`,
-`/api/errors`, `/api/grab`, `/api/events`, `/mcp`. Rules narrow access
-per-user.
+Everything under `/_api/*` that isn't on the open list, the smart-HTTP
+git endpoint `/git/<workspace>.git`, the MCP endpoint `/mcp`, and the
+workspace-content surface at `/` (the dashboard renderer). Rules narrow
+access per-user.
 
-PATs (`ab_*`) accepted everywhere in this list; OAuth access tokens
-(`oat_*`) accepted on `/mcp` only — see "OAuth-issued tokens" above
-for the audience-scoping rule.
+PATs (`ab_*`) accepted everywhere; OAuth access tokens (`oat_*`)
+accepted on `/mcp` only — see "OAuth-issued tokens" above for the
+audience-scoping rule.
 
 ### Admin realm (admin-token-gated)
 
@@ -445,13 +443,11 @@ build if a new tool's name or description contains forbidden substrings.
 
 The data model is already set up for this:
 
-- `@alice` in free text → parsed at render time via a `<RichText>`
-  component that calls `POST /api/users/resolve` and replaces matches
-  with a `<Mention>` badge. Plain text on disk; no pre-resolved shapes.
-- Cards/tasks accept a top-level `assignees: ["alice", "bob"]` field.
-  Components (Kanban, Table, List) look for it and render avatars.
-- Remark plugin for MDX pages does the same @username → `<Mention>`
-  transformation at compile time.
+- `@alice` in free text → resolved at render time. The renderer calls
+  `POST /_api/users/resolve` and replaces matches with a styled mention.
+  Plain text on disk; no pre-resolved shapes.
+- Taskboard cards accept a top-level `assignees: ["alice", "bob"]` field.
+  The kanban renderer reads it and renders avatars.
 
 Nothing about the auth schema needs to change to support these.
 

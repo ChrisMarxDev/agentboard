@@ -3,9 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"

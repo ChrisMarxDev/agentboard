@@ -212,7 +212,7 @@ func (s *Server) toolPropose(r *http.Request, args map[string]json.RawMessage) (
 		return nil, &RPCError{Code: -32602, Message: "files required"}
 	}
 	var fileList []struct {
-		Path string `json:"path"`
+		Path string  `json:"path"`
 		Body *string `json:"body"`
 	}
 	if err := json.Unmarshal(rawFiles, &fileList); err != nil {
@@ -369,4 +369,3 @@ func (s *Server) toolFireEvent(r *http.Request, args map[string]json.RawMessage)
 		"event":  event,
 	}), nil
 }
-

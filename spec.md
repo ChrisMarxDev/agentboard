@@ -26,15 +26,12 @@ the concurrency model, and Claude-class agents are fluent in resolving merge
 conflicts.
 
 The web UI is **a viewer on the working tree**. The server keeps a
-working-tree mirror of `HEAD` of the default branch on disk; the SPA reads
-`.md` files out of that tree and renders them as MDX pages with embedded
-components. When `HEAD` moves, the working tree updates and SSE notifies open
-browsers. The frontend never knows there's a git repo underneath — it just
-reads files.
-
-This collapses three things that used to be separate stores in the v0.13
-build (page tree, files-first store, activity log) into one tree of files
-backed by one git history.
+working-tree mirror of `HEAD` of the default branch on disk; the dashboard
+renders files straight from that tree — `.html` as expressive pages,
+`.md` through goldmark, JSON as kanban or syntax-highlighted source,
+binaries with the right content-type. When `HEAD` moves, the working
+tree updates and SSE notifies open browsers. The renderer doesn't know
+there's a git repo underneath — it just reads files.
 
 ---
 
@@ -126,23 +123,19 @@ SKILL, never in the bootstrap sentence.
 One Go process. Listens on a port. Three things share that port:
 
 1. **Smart-HTTPS git** at `/git/<workspace>.git` — `git clone`, `pull`,
-   `push`, branches, tags. Implementation is a thin CGI wrapper around
-   the system `git http-backend` for the initial cuts (battle-tested,
-   correct on day one); the Cut 8 polish swaps in [`go-git`][go-git]
-   for a fully pure-Go single-binary story.
-2. **Read API** at `/api/<path>` — the existing SPA-facing shape, unchanged.
-   Returns the rendered page envelope, folder listing, stream tail, or binary
-   file. Backed by the working-tree mirror, not by the bare repo or any
-   custom index.
+   `push`, branches, tags. Thin CGI wrapper around the system
+   `git http-backend`.
+2. **Dashboard** under `/` — server-rendered HTML over the workspace's
+   working tree (`internal/html/`). `.md` renders through goldmark,
+   `.html` inlines into the dashboard shell, JSON with `columns`+`cards`
+   renders as a kanban, everything else gets a preview or download
+   affordance based on its extension. No build step.
 3. **MCP** at `/mcp` — convenience layer for agents whose runtime can't shell
    out to `git`. The same git operations (clone-as-bundle, branch, propose,
    resolve-conflict) exposed as JSON-RPC tools. See §6.
 
 Auth (bearer tokens, OAuth, browser sessions) sits in front of all three.
-Same shape as v0.13 — the auth design carries over verbatim from
-[`AUTH.md`](./AUTH.md).
-
-[go-git]: https://github.com/go-git/go-git
+See [`AUTH.md`](./AUTH.md).
 
 ---
 
@@ -170,17 +163,18 @@ manual file edit, anything), `git reset --hard <ref>` rebuilds it.
 
 Everything the user composes:
 
-- `.md` pages — frontmatter (YAML) + optional MDX body. Same shape as v0.13.
-- Folders of `.md` — kanban boards, issue lists, anything collection-shaped.
+- `.html` pages — full layout control, design-system tokens, no build step.
+  The expressive primary primitive.
+- `.md` pages — short prose, READMEs, briefs. Rendered via goldmark.
+- `.json` typed views — taskboards with `columns` + `cards` render as
+  live kanban. Other JSON renders as syntax-highlighted text.
 - `.ndjson` streams — append-only logs. Activity feeds, telemetry.
-- Binaries — images, PDFs, exports. Stored as ordinary blobs (LFS only if
-  someone has multi-gig assets; defer).
-- `.jsx` components — user-authored React bricks, dropped into
-  `components/`. The watcher picks them up from the working tree on
-  rebuild.
+- Binaries — images, PDFs, fonts, exports. Served with the right
+  content-type or a preview affordance.
 - `SKILL.md` skill bundles — folder layout, no special treatment.
 
-All addressed at `/api/<path>` for reads, and via `git push` to update.
+All addressed at their natural path (`/pages/foo.html`, `/boards/sprint.json`)
+and updated via `git push` or in-browser edit form.
 
 ### In SQLite (operational state)
 
@@ -194,22 +188,19 @@ The carve-out from CORE_GUIDELINES §13 carries over without changes:
 - Inbox notifications (delivery state — the messages themselves are commits
   in git).
 
-### Things that *go away*
+### What git already provides
 
-The page manager, the files-first store, the v2 envelope, `_meta.version`
-CAS, the collection / singleton / stream catalog, the FTS index over store
-leaves, the page-lock table, the page-approval table, the content_history
-shadow tree, the activity ndjson under `.agentboard/`. All of these are
-**replaced by git itself**:
+The custom storage primitives a content-management system would
+normally need are all delegated to git:
 
-| v0.13 mechanism | Git equivalent |
+| Need | Git mechanism |
 |---|---|
-| `_meta.version` CAS | non-fast-forward push rejection |
-| `content_history/<path>.ndjson` | `git log -- <path>` |
-| `.agentboard/activity.ndjson` | `git reflog` + `git log --all` |
-| page locks | branches (`agent-claude-1/feature/X`) |
-| page approvals | tags or merged PRs |
-| collection rescan | `git ls-tree` |
+| Optimistic concurrency | non-fast-forward push rejection |
+| Per-doc history | `git log -- <path>` |
+| Activity log | `git reflog` + `git log --all` |
+| Working in isolation | branches |
+| Approval gates | tags or merged PRs |
+| Folder enumeration | `git ls-tree` |
 
 ---
 
@@ -252,17 +243,17 @@ where review ceremony is overhead.
 
 ## 6. MCP surface
 
-Smaller than v0.13. Most operations are now git itself, not our API; MCP
-exists for agents whose runtime cannot shell out to `git` (see §7) and for
-*notifications* that are inherently server-side.
+Six tools. Most operations are now git itself, not a custom API; MCP
+exists for agents whose runtime cannot shell out to `git` (see §7) and
+for *notifications* that are inherently server-side.
 
 ```
 agentboard_workspaces       → list workspaces visible to this token
 
 agentboard_pull(ws, ref?)   → fetch + return the working tree as a bundle
-                              (files keyed by path, with frontmatter and
-                              body for .md leaves). For agents that read
-                              but don't clone.
+                              (files keyed by path, with body and any
+                              parsed frontmatter for textual leaves).
+                              For agents that read but don't clone.
 
 agentboard_propose(ws,
                    base,
@@ -284,17 +275,13 @@ agentboard_subscribe(events)→ open an SSE-shaped MCP stream of
                               push, merge, conflict, mention events
                               for workspaces this token can read.
 
-agentboard_grab(picks)      → unchanged from v0.13. Materializer that
-                              assembles a list of leaves into agent-ready
-                              text. Pure read, works against the working
-                              tree.
-
-agentboard_fire_event(...)  → unchanged from v0.13. Emit on webhook bus.
+agentboard_fire_event(...)  → emit a user-triggered event onto the
+                              outbound webhook bus.
 ```
 
-That's seven tools. Agents who use the git CLI directly need only
-`agentboard_workspaces`, `agentboard_subscribe`, `agentboard_grab`,
-`agentboard_fire_event` — the other three are the git-less fallback path.
+Agents who use the git CLI directly need only `agentboard_workspaces`,
+`agentboard_subscribe`, and `agentboard_fire_event` — the other three
+are the git-less fallback path.
 
 ---
 
@@ -341,7 +328,7 @@ events get a structured `conflict.push_rejected` with the offending files
 attached; same outcome, different transport.
 
 The standard `<<<<<<< / ======= / >>>>>>>` markers are the repair manual.
-Claude resolves these well today on code; the same skill applies to MDX
+Claude resolves these well today on code; the same skill applies to HTML / Markdown
 frontmatter and body equally.
 
 For the always-PR path, conflicts are surfaced at merge time. A failed
@@ -353,77 +340,38 @@ server commits and retries the merge.
 
 ## 9. The web UI
 
-The SPA we shipped in v0.13 carries over with essentially no shape
-changes. It still:
+The dashboard is server-rendered HTML over the workspace's working tree.
+There is no SPA bundle, no client-side compilation, no separate
+frontend. Everything ships in the Go binary.
 
-- Renders MDX pages with embedded components.
-- Listens to SSE for live updates.
-- Auto-attaches `<Kanban>` to the rendering page's folder (cards-as-pages).
-- Reads `frontmatter` for the metadata panel (§14 enabled this — it stays).
-- Honors the `wide: true` per-page width opt-in.
+What the renderer does:
 
-What changes:
+- Walks the working tree on every request; the file extension picks
+  the renderer.
+- `.html` inlines straight into the dashboard shell — full layout
+  control via design-system CSS tokens (`--ab-accent`, `--ab-radius`,
+  etc.). The expressive primary primitive.
+- `.md` renders through goldmark with the same design-system shell.
+- `.json` containing `columns` + `cards` renders as a kanban board.
+- `.csv` renders as a table preview.
+- SVG / PNG / JPG / PDF render with the right `Content-Type` or a
+  preview affordance based on `Sec-Fetch-Dest`.
+- `?history=1` renders `git log -- <path>` for any file.
+- `?diff=<sha>` renders the unified diff at a revision.
+- `?edit=1` renders an edit form; POST `/_api/edit` writes a commit
+  through the server's identity.
+- `?q=<needle>` (at the workspace root) renders FTS5 search results.
 
-- "Current state" is HEAD of the default branch by default. A branch
-  picker can be added later for viewing other branches; the dogfood
-  instance probably never needs it.
-- "Activity feed" component reads `git log` instead of an NDJSON. Same
-  shape on the wire.
-- Per-page edit history (the meta bar's "edited 3h ago by alice") comes
-  from `git log -- <path>` instead of `_meta`. Same UI.
-- `_meta` is gone from frontmatter. The server-stamped fields move into
-  git (commit metadata) and stop polluting the YAML.
+Listens to SSE for live updates. When the post-receive hook fires, the
+working tree updates and connected browsers get a Reload toast.
 
-Components built against the old `<Metric source="value" />` shape work
-unchanged — `source=` still binds to the rendering page's frontmatter,
-and folder collections still work via `source="path/"`. Per CORE_GUIDELINES
-§14, content lives inside its file. Git makes that load-bearing instead
-of just a slogan.
-
----
-
-## 10. What ships first
-
-Implementation order (Cuts), each landable independently:
-
-**Cut 1 — Git endpoint.** `go-git` smart-HTTPS at `/git/<ws>.git`,
-behind existing auth, single hard-coded test workspace. Goal: `git clone`
-from cowork against `agentboard.hextorical.com` succeeds end-to-end.
-
-**Cut 2 — Working-tree mirror.** Post-receive hook checks out the
-default branch into `<datadir>/worktrees/<ws>/`. The watcher we already
-have re-indexes the page tree from there. Goal: pushing an `.md` file
-shows up in the SPA's left nav.
-
-**Cut 3 — Read API on the working tree.** Repoint
-`handlers_unified.go::handleUnifiedRead` to the working tree. Drop the
-page manager's in-memory index; the watcher continues to feed the SSE
-broadcaster. Goal: `/api/<path>` returns the right shape with zero
-behavior change for readers.
-
-**Cut 4 — Retire the v2 file store.** Delete
-`internal/store/{singleton,collection,stream,catalog}.go` and the data
-tier dispatch. Keep the page subset (which is now the only subset).
-Goal: smaller binary, simpler audit surface.
-
-**Cut 5 — MCP rewrite.** Replace the 10-tool batch CRUD with the seven
-tools in §6. The git-less fallback path is the focus; agents with
-`git` use the CLI.
-
-**Cut 6 — Concurrency policy + always-PR mode.** Per-workspace toggle,
-proposal table, the `proposal_merge` MCP call, the conflict-surfacing
-plumbing.
-
-**Cut 7 — Repointed dogfood.** The hextorical instance moves to the
-new substrate. The preservation branch stays running on a different
-port for a week to allow comparison.
-
-**Cut 8 — Cleanup.** Drop the deprecated routes, drop the legacy
-fields from `_meta`, scrub the docs.
+Per-page edit history (the meta bar's "edited 3h ago by alice") comes
+from `git log -- <path>`. Commit metadata is the source of truth; no
+parallel `_meta` block lives in frontmatter.
 
 ---
 
-## 11. Non-goals
+## 10. Non-goals
 
 To avoid scope drift:
 
@@ -443,25 +391,7 @@ To avoid scope drift:
 
 ---
 
-## 12. Compatibility with the v0.13 (filebase) branch
-
-The preservation branch `filebase-cms-custom-substrate-13.5.26` keeps
-the v0.13 implementation alive for reference. Nothing on `main` is
-required to maintain backwards-compatibility with v0.13's API shape
-(`/api/data/*` is already retired; `_meta` is about to go).
-
-Operators who want to migrate a v0.13 instance to the new substrate:
-`git init --bare`, `git add .`, `git commit`, push the bare repo into
-the new binary's `<datadir>/repos/<name>.git`. The `.md` files come
-across unchanged. The v0.13 `.agentboard/activity.ndjson` becomes the
-first commit message; no point in replaying history we don't have to.
-
-A `agentboard migrate-from-filebase <old-project>` CLI command lands
-in Cut 7 to mechanize that flow.
-
----
-
-## 13. Open product questions
+## 11. Open product questions
 
 Recording, not resolving. Future contributors: the answers go here.
 

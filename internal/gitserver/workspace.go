@@ -434,9 +434,9 @@ func seedInitialCommit(bare, source string, actor string) error {
 // operational artifacts that shouldn't enter git history.
 func copyTree(source, dest string) error {
 	skip := map[string]bool{
-		".agentboard":   true,
-		".git":          true,
-		"agentboard":    true, // the built binary
+		".agentboard":     true,
+		".git":            true,
+		"agentboard":      true, // the built binary
 		"agentboard.yaml": true, // operator config; per §13 stays in SQLite-land
 	}
 	return filepath.Walk(source, func(p string, info os.FileInfo, err error) error {

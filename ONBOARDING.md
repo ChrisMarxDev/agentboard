@@ -230,7 +230,7 @@ One skill, one set of Bash/MCP permissions. Operations it owns:
 | Install binary | Homebrew / tap, or signed GH release download with checksum verify |
 | Start/stop server | Background process management, PID tracking |
 | Open browser | Platform-aware `open` / `xdg-open` / `start` |
-| Seed first page | Write MDX into the project dir |
+| Seed first page | Commit an `.html`/`.md` page into the workspace |
 | Call MCP tools | Issue data writes to demonstrate realtime |
 | Diagnose | If port taken, binary missing, MCP disconnected → explain + repair |
 | Tear down | Stop server, clean project dir on request |
@@ -297,7 +297,7 @@ adjacent sub-skills in the same plugin) for:
 
 - **"open my dashboard"** — opens the browser tab if closed, starts server if
   stopped.
-- **"add a page for <X>"** — scaffolds an MDX page with relevant components.
+- **"add a page for <X>"** — scaffolds an `.html` page in the workspace.
 - **"stop AgentBoard"** — clean shutdown.
 - **"reset"** — nuke the project, reseed.
 - **"update AgentBoard"** — upgrade the binary to the latest release.
@@ -391,7 +391,7 @@ To keep the flow sharp, onboarding explicitly is **not**:
 
 - A config wizard. No questions before the dashboard appears. Defaults get you
   live; customization comes later and is optional.
-- A tutorial on dashboards, MDX, or MCP. We show, don't tell. The user learns
+- A tutorial on the dashboard, file types, or MCP. We show, don't tell. The user learns
   by watching their own actions show up in the UI.
 - A multi-user / team setup. Single user, single laptop, single binary.
 - A cloud signup. Nothing leaves the user's machine during onboarding.

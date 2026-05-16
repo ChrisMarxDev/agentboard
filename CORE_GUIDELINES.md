@@ -30,7 +30,7 @@ When tempted to add a feature to the core, ask: *can this be a component, a page
 
 ## 4. AI is the primary author
 
-The expected writer of pages, components, and data is an LLM (Claude, agents, scripts). Every public surface — REST verbs, MCP tool names, MDX syntax, component prop shapes — is optimized for what an LLM naturally produces, not for human ergonomics.
+The expected writer of pages, components, and data is an LLM (Claude, agents, scripts). Every public surface — REST verbs, MCP tool names, HTML/Markdown conventions, JSON typed views — is optimized for what an LLM naturally produces, not for human ergonomics.
 
 If a "more correct" design is harder for an agent to call, the agent-friendly version wins.
 
@@ -42,15 +42,15 @@ No SQL panels, no log viewers as primary UX, no "advanced" toggles, no jargon in
 
 ## 6. Rendering is one-way
 
-Storage is flexible. Scalars can live inline in MDX (the page is the truth — `<Status state="running" label="Deploy" />`). Collections, cross-page values, and agent-pushed state live in the KV store (atomic updates matter there). Files live in `content/`. A component reads from whichever source the author picked.
+Storage is flexible. Scalars can live inline in HTML or Markdown (the page is the truth). Collections, cross-page values, and agent-pushed state live in a sibling file (atomic updates matter there). Files live in `content/`. A component reads from whichever source the author picked.
 
 What's **not** flexible is the flow direction:
 
-- A render path **never mutates durable state.** Components read; they don't write back. No useEffect that does `PUT /api/data`, no submit handler that writes a file.
+- A render path **never mutates durable state.** Components read; they don't write back. No useEffect that does `POST /_api/edit`, no submit handler that writes a file.
 - A write path (REST, MCP, file save) **never produces UI directly.** It mutates and emits an SSE event. The UI observes the event and re-reads. No HTTP handler ships HTML.
 - **Components don't compute; they display.** Transform your data on the way in or on the way out, not during render.
 
-Ephemeral UI state — sort order on a Table, expand/collapse on a folder, pending picks in Grab mode — is separate from durable state. localStorage and React state are fine. Those aren't "data" in this principle's sense.
+Ephemeral UI state — sort order on a Table, expand/collapse on a folder, pending picks in Grab mode — is separate from durable state. localStorage is fine. Those aren't "data" in this principle's sense.
 
 The rule, in one line: **state → render, never render → state.** It's what lets agents and humans co-author the same page without stepping on each other.
 
@@ -62,7 +62,7 @@ AgentBoard must remain connector-friendly: stable APIs, documented data shapes, 
 
 ## 8. Schemas document, don't enforce
 
-Data shapes live in `meta.props`, in component source, in `/api/data/schema` — as **documentation for the author** (Claude), not as runtime validation gates. Components are liberal in what they accept (`Chart` already takes array-of-objects OR `{labels, values}` OR `{name, value}` pairs); Claude is conservative in what it sends because it has read the docs.
+Data shapes live in file naming conventions and rendering rules — as **documentation for the author** (Claude), not as runtime validation gates. Components are liberal in what they accept (`Chart` already takes array-of-objects OR `{labels, values}` OR `{name, value}` pairs); Claude is conservative in what it sends because it has read the docs.
 
 This is Postel's Law, inverted: the "conservative send" is the AI's job, not the server's. Don't sprinkle `ajv`, Zod, or hand-rolled validators into handlers to reject non-conforming content. If Claude produces the wrong shape, the fix is better docs (or a clearer `meta`), not a 400.
 
@@ -76,11 +76,11 @@ These aren't format enforcement; they're safety. Keep rejecting malformed paths,
 
 ## 9. Generic primitives, steer usage through docs
 
-When a new product concept appears (skills, runbooks, prompts, whatever shows up next), ship the thinnest generic mechanism that could support it — an endpoint, a file convention, a component prop — and push the specialization into skills, `CLAUDE.md`, component `meta.props`, and authored MDX pages. Resist adding typed routes, type-specific React components, or dedicated UI chrome for a single concept: those accumulate linearly and foreclose future variants.
+When a new product concept appears (skills, runbooks, prompts, whatever shows up next), ship the thinnest generic mechanism that could support it — an endpoint, a file convention, a component prop — and push the specialization into skills, `CLAUDE.md`, file conventions, and authored HTML/Markdown pages. Resist adding typed routes, type-specific server-rendered handlers, or dedicated UI chrome for a single concept: those accumulate linearly and foreclose future variants.
 
 The test: *could this concept be discovered through an existing list endpoint + an authored page with generic components?* If yes, that's the shape. Code is for what can't be expressed as a file + a doc.
 
-A thin backend discovery layer (e.g. walk `files/foo/*`, parse a manifest) is fine — it's a convention, not a specialization. What's not fine is mirroring that convention all the way up into hardcoded React routes, specialized hooks, and sidebar icons. Those should always be authored content.
+A thin backend discovery layer (e.g. walk `files/foo/*`, parse a manifest) is fine — it's a convention, not a specialization. What's not fine is mirroring that convention all the way up into hardcoded routes, specialized server handlers, and sidebar icons. Those should always be authored content.
 
 **Concrete heuristic:** if the PR adds more than ~50 frontend LOC for a new content type, stop and ask whether a generic component + an authored page would do the job instead.
 
@@ -120,11 +120,11 @@ The test: *if an agent calls this wrong, does the response tell it how to succee
 
 ## 13. Content is files; operational state stays in the database
 
-The surface that humans and agents directly compose — pages, dashboards, data values, collection items (tasks, customers, runbooks…), user-authored streams, skills, binary uploads, components — lives as files under one tree. Three leaf types: `.md` (YAML frontmatter + optional MDX body), `.ndjson` (append-only stream), and binary. Folders are collections.
+The surface that humans and agents directly compose — pages, dashboards, taskboards, briefs, decks, skills, binary uploads — lives as files in a git repo. Files come in shapes the renderer recognizes: `.html` for expressive pages, `.md` for prose, `.json` for typed views like kanban boards, `.ndjson` for streams, binaries for everything else. Folders are folders.
 
 Backup is `tar` the project root. Migration is `mv`. Audit is `grep`. A new content type is a path convention, not a new product feature.
 
-**Operational state stays in SQLite.** Users, tokens, sessions, invitations, teams + members, webhook subscriptions, OAuth clients, page locks, the activity log, the content_history index, FTS5 search index, the rate-limit bucket — none of these are composed by hand. They're machine-managed indexes that an admin reads through dedicated UIs, never as raw text. Putting them in files would buy nothing and cost concurrent-write safety, indexed lookups, and atomicity guarantees SQLite already gives us.
+**Operational state stays in SQLite.** Users, tokens, sessions, invitations, webhook subscriptions, OAuth clients, the rate-limit bucket — none of these are composed by hand. They're machine-managed indexes that an admin reads through dedicated UIs, never as raw text. Putting them in files would buy nothing and cost concurrent-write safety, indexed lookups, and the atomicity guarantees SQLite gives us. (Per-doc history and the activity log live in git, not SQLite — `git log` is the audit trail.)
 
 The line: *do agents and humans compose this directly?* If yes, it's a file. If no, it's a row.
 
@@ -132,7 +132,7 @@ This is the unblocker for #4 and #9 on the content side: agents author, read, an
 
 **Carve-outs.**
 
-- **Server-owned `_meta` fields** (version, modified_by, created_at) live in frontmatter but the server writes them; agents echo `_meta.version` for CAS but cannot forge other fields.
+- **Commit metadata is the server's source of truth** for "who edited this and when". Files don't carry their own `modified_by` / `created_at` blocks — those live in `git log -- <path>`.
 - **Operational rows are not "missing files."** Don't relocate users, tokens, etc. into `_system/` paths to satisfy this principle — the principle has already opted them out.
 - **Ephemeral state** — open SSE connections, request-scoped caches, the in-flight rate-limit bucket — does not need to land anywhere durable. Anything you'd lose on a process restart and not miss is fair game for memory.
 
@@ -142,19 +142,20 @@ The test: *can I tar the project root, drop the SQLite operational database, res
 
 ## 14. Content lives inside its file
 
-A leaf in the tree owns its content. A page's title, status, metric values, kanban columns — they live in *that page's* frontmatter and body, not in a sibling file referenced by key. Components resolve `source=` against the page they render in by default: `<Metric source="value">` reads the rendering page's frontmatter, full stop. There is no "data tier", no `data/<key>` parallel namespace, no scalar-by-id lookup. One container per content unit.
+A leaf in the tree owns its content. A page's title, status, metric values, kanban columns — they live in *that page's* body (or its frontmatter, for `.md` files), not in a sibling file referenced by key. There is no "data tier", no `data/<key>` parallel namespace, no scalar-by-id lookup. One container per content unit.
 
-**Three explicit carve-outs, and that's the entire list:**
+**Carve-outs the substrate honors:**
 
-- **Folder collections** — `<Kanban source="tasks/">` reads every `tasks/*.md` because cards-as-pages is the cleanest way to model many-of-the-same-thing. Trailing slash on the source is the marker.
-- **Streams** — `<Log source="deploys">` tails an NDJSON leaf. Streams are a separate shape because line-append-atomically is a different storage problem from page edits.
-- **Binaries** — `<Image src="/api/files/banner.png">` references an uploaded blob via URL, not a `source=` prop. Treat them like any other static asset.
+- **Folder layouts** — a folder of `.md` files (e.g. `tasks/*.md`) is a perfectly fine way to model many-of-the-same-thing. The renderer doesn't have to know it's a "collection"; it just lists the folder.
+- **Typed views via `.json`** — a `.json` file with `{columns, cards}` renders as a kanban. The shape lives in the file; the renderer reads it.
+- **Streams** — `.ndjson` files are append-only logs.
+- **Binaries** — images, PDFs, fonts referenced from pages via plain `<img src>` or `<a href>`. Treat them like any other static asset.
 
-Anything else — "store this number somewhere, then reference it by key from another page" — is forbidden. The view broker actively refuses to resolve cross-page singleton references (per spec §7), and the write dispatcher refuses to invent a `data/` namespace for JSON-envelope writes; a `PUT` with `{"value": 42}` body lands as frontmatter on a `.md` page at the same path. If two pages need the same value, denormalize, or move both into a folder collection.
+What's forbidden is "store this number somewhere, then reference it by key from another page". If two pages need the same value, denormalize, or factor both into the same file.
 
-This is the unblocker for #5 and #4 on the agent side: a non-technical reader can answer *"where does this value come from?"* by looking at the page in front of them, and an agent that wants to bump a number writes one `PATCH` to one path. It also removes the single biggest trap that previously led agents to invent parallel directory structures — when the docs talked about a "data tier" with "data keys", agents created `roasters/data/cups_today` to mirror the API split. One container per content unit means there's no parallel namespace to extrapolate into.
+This is the unblocker for #5 and #4 on the agent side: a non-technical reader can answer *"where does this value come from?"* by looking at the page in front of them, and an agent that wants to bump a number commits one change to one file. It also removes the trap that previously led agents to invent parallel directory structures.
 
-The test: *delete every other file under content/ and only keep the page you're reading. Does it still render its own scalars?* If the answer is "no, the metric value lived in `dev.users` somewhere else", that's a violation. Folder collections, streams, and binaries are the legitimate exceptions; nothing else.
+The test: *delete every other file in the repo and only keep the page you're reading. Does it still render its own content?* If the answer is "no, the value lived in `dev.users` somewhere else", that's a violation.
 
 ---
 
@@ -196,7 +197,7 @@ The git-substrate pivot was checked against every principle below. Result: each 
 | 2 | Local-first, hosted-possible — same binary | **Par.** Same binary; the only state on disk is `<datadir>/repos/*.git` + `<datadir>/worktrees/*` + SQLite. Tar still backs the whole thing up. |
 | 3 | Plugin architecture for everything that grows | **Stronger.** Components are `.jsx` blobs in the repo. They now version with the rest of the workspace — branches, history, and merges apply to components for free. |
 | 4 | AI is the primary author | **Stronger.** Branches let multiple agents work in parallel without stepping on each other. The whole-file CAS that previously serialized agent edits is replaced by git's merge model, which agents already speak. |
-| 5 | Humans are the primary reader, and they're not technical | **Par.** The UI never exposes git unless we want it to. Default view is HEAD of main; readers see live `.md` files and rendered MDX, same as today. |
+| 5 | Humans are the primary reader, and they're not technical | **Par.** The UI never exposes git unless we want it to. Default view is HEAD of main; readers see live `.md` and `.html` files rendered server-side, same as today. |
 | 6 | Rendering is one-way | **Par.** The SPA reads the working tree; nothing on the read path can mutate state. Writes go through git push (or MCP `propose`), never through a render component. |
 | 7 | Reliable rails for an agentic world | **Stronger.** Optimistic locking via `_meta.version` was a half-implementation of what git's fast-forward semantics give us in full. Agents trying to push concurrently get a real, well-defined retry loop instead of a CAS race. |
 | 8 | Schemas document, don't enforce | **Par.** Frontmatter shape stays freeform; the server still doesn't validate. `git diff` is a better authoring aid for the agent than any schema check would be. |

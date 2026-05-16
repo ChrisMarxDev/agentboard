@@ -5,7 +5,7 @@ import "strings"
 // Rule is one access-control entry attached to an agent identity.
 //
 // Semantics:
-//   - Pattern matches against the HTTP request path (e.g. /api/data/foo.bar).
+//   - Pattern matches against the HTTP request path (e.g. /pages/intro.html).
 //   - Methods is the list of HTTP methods the rule applies to. ["*"] matches
 //     any method.
 //   - Action says what to do when the rule matches: "allow" or "deny".
@@ -90,8 +90,8 @@ func methodMatches(methods []string, method string) bool {
 // are compared as-is.
 //
 // Ergonomic shorthand: a pattern ending in "/**" also matches the parent
-// prefix without the trailing slash, so `/api/data/**` covers both
-// `/api/data` and `/api/data/foo/bar`. This mirrors .gitignore behavior
+// prefix without the trailing slash, so `/pages/**` covers both
+// `/pages` and `/pages/intro.html`. This mirrors .gitignore behavior
 // and what users intuitively write.
 //
 // The implementation is iterative with a single level of backtracking so a

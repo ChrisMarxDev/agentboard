@@ -1,6 +1,6 @@
 # AgentBoard — Concept Spec
 
-> **Status**: pre-technical. Captures the soul, the primitives, and the interaction model. The technical surface (storage, API, MCP, frontend wiring) is being rewritten in parallel; this document is what the technical surface should serve. When the rewrite lands, `spec.md` is the **how**; this is the **what** and **why**.
+> **Status**: the *why* document. Captures the soul, the audience, the interaction model. The technical *how* lives in [`spec.md`](./spec.md) — current architecture is a git server + server-rendered HTML dashboard. Older sections below describing specific data primitives (singleton / collection / stream JSON shapes, `tasks.*` namespacing, MDX composition) are pre-pivot framing kept for the principles they carry; the implementation moved to git-native files and HTML/Markdown/JSON renderers. If a specific data-model claim in this file contradicts `spec.md`, the spec wins.
 
 ---
 
@@ -20,15 +20,15 @@ One Go binary, one folder, three commands to running. Files on disk for everythi
 
 ### 3.1 Files are the durable truth
 
-Every artifact the team produces — pages, data, tasks, files, skills — lives in a folder on disk. Three immutable shapes per key:
+Every artifact the team produces — pages, dashboards, taskboards, briefs, decks, skills — lives in a git repo on disk:
 
-- **Singleton** — `data/<key>.json`
-- **Collection** — `data/<key>/<id>.json`
-- **Stream** — `data/<key>.ndjson`
+- **HTML pages** for anything expressive (full layout, design-system tokens, no build).
+- **Markdown** for prose (READMEs, briefs, changelogs).
+- **JSON typed views** (`{columns, cards}`) for taskboards; other typed shapes render as the file extension implies.
+- **NDJSON streams** for append-only logs.
+- **Binaries** (images, PDFs, fonts) committed alongside everything else.
 
-Shape is set on first write and never changes. Indexes, search, locks, tail buffers are derived state held in memory and rebuilt on restart.
-
-This is what makes the project `cat`-able, `tar`-able, and recoverable from a crash without surgery.
+Git is the substrate. Indexes (full-text search, the working-tree mirror) are derived state rebuilt on demand. This is what makes the project `git clone`-able, `tar`-able, and recoverable from a crash without surgery.
 
 ### 3.2 Agents are first-class writers
 

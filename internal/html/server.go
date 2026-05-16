@@ -1,18 +1,17 @@
-// Package html is the server-rendered dashboard surface introduced by
-// the substrate pivot (spec-filesystem-substrate.md). Replaces the
-// React SPA + MDX renderer with Go templates over the workspace's
-// working-tree mirror.
+// Package html is the server-rendered dashboard surface. Go templates
+// over the workspace's working-tree mirror — no client-side
+// compilation, no separate frontend bundle.
 //
 // What it does:
 //
 //   - GET /<path> serves the file at <worktree>/<path>:
-//       .md  → renders via goldmark, wrapped in the shell.
-//       .html → served as-is (sandboxed iframe in a future cut for
-//               untrusted-by-design content; for now inline).
-//       .json → pretty-printed with a small "structured data" wrapper
-//               (typed views will replace this for known kinds in a
-//               later cut).
-//       binary → served with the file's content-type, no chrome.
+//     .md  → renders via goldmark, wrapped in the shell.
+//     .html → served as-is (sandboxed iframe in a future cut for
+//     untrusted-by-design content; for now inline).
+//     .json → pretty-printed with a small "structured data" wrapper
+//     (typed views will replace this for known kinds in a
+//     later cut).
+//     binary → served with the file's content-type, no chrome.
 //
 //   - GET /<dir>/ either serves index.html if present or auto-renders
 //     a GitHub-style directory listing.
@@ -353,12 +352,12 @@ func (s *Server) renderDirectory(w http.ResponseWriter, r *http.Request, urlPath
 //
 // Three escape hatches let the wrapper get out of the way:
 //   - ?raw=1                — write the raw bytes with the proper
-//                             content-type. Used by <img src> embeds.
+//     content-type. Used by <img src> embeds.
 //   - ?download=1           — same, plus Content-Disposition:
-//                             attachment. Used by the Download button.
+//     attachment. Used by the Download button.
 //   - Accept header missing "text/html" — the caller is a curl-style
-//                             tool or a resource fetcher (<img>,
-//                             <link>, <script>). Send raw bytes.
+//     tool or a resource fetcher (<img>,
+//     <link>, <script>). Send raw bytes.
 //
 // .md/.html/.json always render rich; the Accept-based escape doesn't
 // apply to them because those are meant for browser consumption.

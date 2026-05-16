@@ -1,169 +1,50 @@
-# Roadmap — pivot to the git substrate
+# Roadmap
 
-> Eight cuts from where `main` is today (v0.13 file-based store) to the
-> spec-defined system (git server + working-tree mirror). Each cut is
-> landable independently. The dogfood instance keeps running v0.13
-> throughout; the new substrate proves itself on a parallel port before
-> the cutover lands.
->
-> The earlier "Road to v1" plan and everything it referenced are
-> superseded by this. The previous content lives on the preservation
-> branch `filebase-cms-custom-substrate-13.5.26` if needed.
+> What ships next on the post-pivot AgentBoard (git substrate + HTML dashboard). Items are roughly ordered by leverage, not by commitment — the live work is whatever earns its way to the top.
 
 ---
 
-## Cut 1 — Git endpoint live
+## Workspace UX
 
-**Goal:** `git clone https://_:$TOKEN@agentboard.hextorical.com/git/probe.git`
-from cowork succeeds end-to-end against the existing binary.
+- **Branch picker** — toggle the working-tree mirror to a non-default branch for read-only browsing. The "always-PR" workspace policy (see spec §5) becomes useful the moment this lands.
+- **Per-page lock affordance** — a workspace-author can mark a page "human approval only"; agent commits to that path are rejected with a clear "needs review" error pointing at a merge tool.
+- **Diff visualization on history rows** — current `?history=1` lists commits; clicking through to `?diff=<sha>` works but is plain. Side-by-side view, syntax highlighting per file extension.
+- **Inline mentions** — `@username` in any rendered file resolves to the dashboard's user table; clicking opens that user's recent activity.
 
-- Add `go-git` as a dep.
-- New handler at `/git/<workspace>.git` running the smart-HTTPS protocol
-  (info/refs + git-upload-pack + git-receive-pack). Behind the existing
-  auth chain.
-- Create one hard-coded test workspace `probe.git` with a seed commit.
-- Verify clone + commit + push round-trip from cowork.
+## Discovery
 
-**Exit:** the cowork-probe loop we ran on 2026-05-13 succeeds against
-our binary.
+- **Workspace-level search facets** — current FTS is full-text only. Add filters by extension, path prefix, last-edited-by, last-edited-since.
+- **Recent activity feed at `/`** — bare list of the N most recent commits across workspaces this user can read.
+- **Saved searches** — bookmark `/?q=foo&type=md&owner=alice` as a named view.
 
----
+## Agent quality-of-life
 
-## Cut 2 — Working-tree mirror
+- **Long-poll `agentboard_subscribe`** — the tool exists; the SSE shape works through the dashboard. Wire it through MCP so agents can wait on `conflict.push_rejected` instead of polling.
+- **`agentboard_propose` bundle responses** — return the full working-tree bundle on conflict, not just the file list, so the agent can resolve in one round-trip.
+- **Skill registry** — a workspace can ship `SKILL.md` files in well-known paths; the dashboard surfaces them in a Skills tab so new agents can browse them.
 
-**Goal:** a `git push` ends up rendered in the SPA.
+## Hosting
 
-- For each workspace: a working-tree directory at
-  `<datadir>/worktrees/<name>/` that the server keeps checked out to
-  the workspace's default branch.
-- Post-receive hook updates the mirror and fires `page-updated` events
-  through the existing SSE broadcaster.
-- Crash recovery: at startup, `git reset --hard <ref>` rebuilds the
-  mirror from the bare repo if anything looks off.
+- **Persistent-volume Coolify path** — the dogfood instance currently runs on ephemeral storage (`/tmp`); a small volume + the right Coolify env keep state across auto-stops. See `HOSTING.md` for the open work.
+- **`scripts/new-board.sh` polish** — provisioning a per-friend board takes one command today; the rough edges are around DNS + Cloudflare token plumbing.
 
-**Exit:** push a `.md` file into the probe workspace; it appears in the
-SPA's left nav within ~1s.
+## Substrate hardening
 
----
+- **`go-git` swap-in** — the smart-HTTP endpoint currently shells out to `git http-backend`. The CGI dependency is fine but a pure-Go single-binary story is cleaner. Mostly a drop-in swap once `go-git`'s push semantics are verified against the current test suite.
+- **Always-PR concurrency policy** — push-to-main works for personal scratch; shared production wants every change to land on a feature branch with explicit merge. The proposal table + `proposal_merge` MCP call are sketched in spec §5; needs implementation.
+- **Workspace-level rate limits** — per-token rate limit on push exists; add a per-workspace cap so one runaway agent can't fill the disk in a tight loop.
 
-## Cut 3 — Read API on the working tree
+## Documentation + outreach
 
-**Goal:** `/api/<path>` reads from the working tree, not the page
-manager.
-
-- Repoint `handlers_unified.go::handleUnifiedRead` to walk the working
-  tree directly. The bundle shape is unchanged.
-- The watcher continues to fire the same SSE events.
-- Drop the in-memory page index gradually — keep a thin cache only if
-  measurements show it matters.
-
-**Exit:** the SPA renders against the working-tree mirror with no
-visible behavior change. The page manager package is the next thing
-slated for deletion.
+- **Landing page refresh** — `landing/` Astro site is from the file-store era; the value prop needs to match "git workspace humans + agents share".
+- **One-page install guide for non-developers** — Homebrew formula + an install script that handles the systemd / launchd plumbing.
+- **Recorded demo of the full flow** — clone → commit → push → see it in the browser → SSE toast. Under 90 seconds. Used in the landing page and the README.
 
 ---
 
-## Cut 4 — Retire the v2 file store
+## Deliberately not on this roadmap
 
-**Goal:** delete code we no longer need.
-
-- Remove `internal/store/{singleton,collection,stream,catalog}.go` and
-  their handlers.
-- Remove the dispatch logic in `handlers_unified.go` that used to pick
-  between page tier and data tier (post-§14 there's only one tier; this
-  is the last cleanup).
-- Remove `.agentboard/activity.ndjson` writing. Activity is `git log`.
-- Remove `_meta.version` stamping on writes. CAS is git.
-- Remove the page-lock + page-approval tables.
-
-**Exit:** smaller binary, smaller test surface. The `internal/store/`
-package shrinks to the parts that drive search and frontmatter parsing.
-
----
-
-## Cut 5 — MCP rewrite
-
-**Goal:** the seven tools from spec §6, replacing the v0.13 ten-tool
-batch CRUD.
-
-- Drop `agentboard_write / patch / append / delete / request_file_upload`.
-- Add `agentboard_workspaces / pull / propose / resolve_conflict /
-  subscribe`.
-- Keep `agentboard_grab` and `agentboard_fire_event` unchanged.
-- Update the seeded `SKILL.md` in `internal/project/init.go` to teach
-  the new surface.
-
-**Exit:** an agent who reads `agentboard_workspaces` and the bundled
-SKILL knows how to clone, propose changes, and resolve conflicts —
-either by shelling out to `git` or via MCP fallback.
-
----
-
-## Cut 6 — Concurrency policy + always-PR
-
-**Goal:** the two policies from spec §5.
-
-- Per-workspace toggle in the registry: `policy: push-to-main |
-  always-pr`.
-- New `proposals` SQLite table for the always-PR path.
-- `agentboard_propose` accepts a branch name and bypasses any
-  push-to-main rules.
-- `proposal_merge` MCP call and a small UI affordance to merge a
-  proposal.
-
-**Exit:** a shared production workspace can require PRs while a
-personal scratch workspace stays push-to-main. The same agent toolchain
-works against both.
-
----
-
-## Cut 7 — Dogfood cutover
-
-**Goal:** `agentboard.hextorical.com` runs on the new substrate.
-
-- Build the `agentboard migrate-from-filebase` CLI: `git init`, `git
-  add`, `git commit` over the v0.13 working tree.
-- Run the migration against `/root/agentboard-data/` into a fresh
-  workspace.
-- Switch DNS / tmux to the new binary; keep the v0.13 binary on a
-  fallback port for one week.
-- Verify the kanban + frontmatter metadata panel + skills + activity
-  feed all render correctly against the new substrate.
-
-**Exit:** the live dogfood instance is fully on the git substrate; the
-fallback v0.13 stays available for comparison.
-
----
-
-## Cut 8 — Cleanup + documentation
-
-**Goal:** the codebase looks like the new system, not the old one with
-new bits bolted on.
-
-- Drop the v0.13 fallback binary; archive the project state from the
-  preservation branch.
-- Scrub the docs of v0.13-era language (the seeded SKILL still mentions
-  some `.agentboard/` paths that no longer exist).
-- Final pass on `ISSUES.md` — anything left from v0.13 is either fixed
-  by the substrate change or carried as a real issue against the new
-  shape.
-
-**Exit:** the project description on the README, the seeded SKILL, and
-the dogfood `/skills` page all describe the same product. The next
-contributor reading any of them gets the same picture.
-
----
-
-## What's deliberately not on this roadmap
-
-- A built-in PR review UI. Read the diff via `git diff` or look at the
-  branch via the SPA's branch picker (which arrives whenever Cut 6
-  benefits from it, not before).
-- A built-in issue tracker. Issues are files in `issues/`; the existing
-  kanban already renders them.
-- Real-time collaborative editing. The agent collaboration model is
-  "push to a branch, merge fast-forward, rebase on conflict" — not
-  CRDTs.
-- Mobile app. Web UI only.
-- Marketplace. Plugins-as-files in `components/` with URL installs is
-  the model in `spec-plugins.md`; that doesn't change with the pivot.
+- A hosted SaaS plan. AgentBoard is self-host-first. We don't operate boards for paying customers; we ship the software they run.
+- A general-purpose data store. Files are the artifacts. There is no `/api/data` plane; data shapes are file conventions (taskboard JSON, CSV, frontmatter on Markdown), and the renderers handle them.
+- A native desktop app. The web UI is the only UI. Agents use git or MCP; humans use the browser.
+- Real-time collaborative editing of prose. Two agents disagreeing about a file is git-merge territory, not CRDT territory.

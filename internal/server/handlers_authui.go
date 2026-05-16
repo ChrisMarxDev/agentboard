@@ -339,7 +339,7 @@ func inviteViewData(id, role, username, errMsg string) authUIData {
 			{Name: "username", Label: "Username", Type: "text",
 				Autocomplete: "username", Value: username, Required: true,
 				Pattern: "[a-z0-9_-]+",
-				Hint: "Lowercase letters, digits, underscore, hyphen. Usernames are permanent."},
+				Hint:    "Lowercase letters, digits, underscore, hyphen. Usernames are permanent."},
 			{Name: "password", Label: "Password", Type: "password",
 				Autocomplete: "new-password", Required: true,
 				Hint: "Minimum 12 characters. Used for browser sign-in only."},
