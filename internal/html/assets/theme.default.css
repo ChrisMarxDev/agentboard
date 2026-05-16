@@ -1,0 +1,194 @@
+/*
+ * AgentBoard theme reference — copy this into `theme.css` at the
+ * workspace root to activate it, then edit freely.
+ *
+ * How styling works:
+ *
+ *   1. The dashboard always loads `/_static/design-system.css` first
+ *      (this is built into the binary; you can't edit it from the
+ *      workspace).
+ *   2. The shell's own scaffolding `<style>` block loads next — it
+ *      owns the page layout (header, sidebar, main), so you generally
+ *      shouldn't override those rules.
+ *   3. If a file named `theme.css` exists at the workspace root, the
+ *      shell loads it LAST. Anything in this file beats both of the
+ *      above. The cascade is your friend.
+ *
+ * The most useful overrides are the CSS custom properties (the
+ * `--ab-*` and unprefixed tokens) defined here. Change a token's
+ * value and every component that reads it picks up the new value
+ * automatically — no per-component edits.
+ *
+ * Live-reload: the dashboard subscribes to SSE push events. Edit
+ * theme.css, `git push` (or use the in-browser editor), and open
+ * tabs offer a "Reload" toast. The change lands without a manual
+ * deploy.
+ *
+ * Path & history: this file is just a file. `(history)` and `(edit)`
+ * work on it; you can `git log` its evolution; you can revert via
+ * the restore button.
+ */
+
+:root {
+  /* ----- Surface palette ----------------------------------------- */
+  /* `--bg` is the page background. `--bg-secondary` is sidebars,
+   * cards, the meta strip — anything that should feel inset.        */
+  --bg: #ffffff;
+  --bg-secondary: #f7f8fa;
+
+  /* ----- Text ---------------------------------------------------- */
+  /* `--text` is body copy. `--text-secondary` is metadata,
+   * timestamps, "last edit by …" — anything you want to recede.     */
+  --text: #1a1d24;
+  --text-secondary: #5c6470;
+
+  /* ----- Lines + edges ------------------------------------------- */
+  /* Borders, table cell separators, the divider above the meta bar.
+   * Keep this subtle — too dark and the page looks like a spreadsheet. */
+  --border: #e1e4ea;
+
+  /* ----- Accent -------------------------------------------------- */
+  /* Used for links, the active-nav highlight, button backgrounds,
+   * mark-highlighted search snippets.                                */
+  --accent: #2563eb;
+  /* The 8%-opacity wash that sits under active sidebar entries +
+   * inside `.ab-badge.accent`. Keep it derived from --accent so a
+   * token change ripples through.                                   */
+  --accent-light: rgba(37, 99, 235, 0.08);
+
+  /* ----- Semantic colors ----------------------------------------- */
+  --success: #16a34a;
+  --warning: #d97706;
+  --error:   #dc2626;
+
+  /* ----- AB-prefixed stable tokens ------------------------------- */
+  /* The `--ab-*` set is the agent-facing contract — these are the
+   * names referenced by `.ab-card`, `.ab-metric`, `.ab-badge`, etc.
+   * in `/_static/design-system.css`, plus by any user-authored HTML
+   * that imports the design system. Override these to restyle every
+   * component at once.                                              */
+  --ab-bg:     var(--bg);
+  --ab-fg:     var(--text);
+  --ab-border: var(--border);
+  --ab-accent: var(--accent);
+  --ab-mono:   ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ab-radius: 6px;
+  --ab-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.03);
+}
+
+/* ----- Dark mode ----------------------------------------------------
+ * Respects the OS preference. If you want to force light or dark on
+ * everyone regardless of OS, replace the @media block with a flat
+ * `:root { … }` and delete the OS query. Or wire a manual toggle by
+ * setting `data-theme="dark"` on `<html>` and switching on that.    */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --bg-secondary: #161a21;
+    --text: #e5e7eb;
+    --text-secondary: #9ba2ad;
+    --border: #2a2f38;
+    --accent-light: rgba(96, 165, 250, 0.16);
+  }
+}
+
+/* ===================================================================
+ * EXAMPLE OVERRIDES — uncomment one or write your own.
+ * ===================================================================
+ *
+ * Each block below is a self-contained recipe. Pick one, uncomment,
+ * adjust to taste. Combining them stacks fine.
+ */
+
+/* --- Warm accent (amber instead of blue) ----------------------------
+ *
+ * :root {
+ *   --accent: #d97706;
+ *   --accent-light: rgba(217, 119, 6, 0.10);
+ * }
+ */
+
+/* --- Softer corners + heavier shadows --------------------------------
+ *
+ * :root {
+ *   --ab-radius: 12px;
+ *   --ab-shadow: 0 4px 12px rgba(0, 0, 0, 0.06),
+ *                0 0 0 1px rgba(0, 0, 0, 0.04);
+ * }
+ */
+
+/* --- Custom typography ------------------------------------------------
+ *
+ * body { font-family: "Inter", system-ui, sans-serif; }
+ * h1, h2, h3 { font-family: "Inter Display", "Inter", sans-serif;
+ *              letter-spacing: -0.02em; }
+ * code, pre, .ab-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+ *
+ * If you want to load a web font, add the @import at the very top
+ * of this file (CSS rules require @import before everything else):
+ *
+ * @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+ */
+
+/* --- Header branding -------------------------------------------------
+ * The workspace name in the header is plain text by default. To swap
+ * it for an image (logo at /assets/logo.svg, say), hide the text and
+ * use a background-image on the brand link:
+ *
+ * header .brand a {
+ *   display: inline-block;
+ *   width: 140px; height: 28px;
+ *   background: url("/assets/logo.svg?raw=1") left center / contain no-repeat;
+ *   font-size: 0; color: transparent;
+ * }
+ *
+ * The `?raw=1` query is mandatory here — without it the browser
+ * fetches the SVG's preview shell, not the image bytes.
+ */
+
+/* --- Different accent in dark mode -----------------------------------
+ *
+ * @media (prefers-color-scheme: dark) {
+ *   :root {
+ *     --accent: #a5b4fc;
+ *     --accent-light: rgba(165, 180, 252, 0.16);
+ *   }
+ * }
+ */
+
+/* --- Per-content-type styling -----------------------------------------
+ * Style only certain page types by selecting on the title or content.
+ * Example: dim the taskboard's "Done" lane so the eye drifts to "Doing".
+ *
+ * .taskboard .lane:nth-child(3) { opacity: 0.55; }
+ */
+
+/* --- Custom utility class -----------------------------------------
+ * Add your own helpers. They'll be available in any authored .html
+ * file on this workspace.
+ *
+ * .quiet { color: var(--text-secondary); font-size: 0.85rem; }
+ * .pop   { color: var(--accent); font-weight: 600; }
+ */
+
+/* ===================================================================
+ * COMPONENT REFERENCE — what tokens each built-in component reads.
+ * ===================================================================
+ *
+ * .ab-card                — bg/border/radius/shadow from --ab-*
+ * .ab-badge               — bg-secondary + border;
+ *   .ab-badge.accent      — accent-light + accent text
+ *   .ab-badge.success     — success
+ *   .ab-badge.warn        — warning
+ *   .ab-badge.error       — error
+ * .ab-metric              — bg-secondary card with text + accent
+ * .ab-kbd                 — terminal-key chip
+ * .ab-muted / .ab-mono    — text-secondary and monospace helpers
+ * .taskboard              — the typed-view kanban; lanes inherit
+ *                           bg-secondary; cards inherit bg + border
+ * .preview-meta           — file preview header (filename, size, etc.)
+ * .img-preview            — checker-bg image frame
+ * .text-preview           — monospace preview block for text-ish files
+ *
+ * Source of truth: /_static/design-system.css.
+ */

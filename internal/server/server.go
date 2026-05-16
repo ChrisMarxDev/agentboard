@@ -158,6 +158,12 @@ func (s *Server) buildRouter() chi.Router {
 	}
 
 	// ----- public endpoints (always anonymous) -----
+	// Embedded design-system + theme assets at /_static/*. Must be
+	// reachable by anonymous visitors so the login + invite UIs can
+	// load their stylesheet. Bypasses every middleware.
+	if hs, ok := s.HTML.(interface{ StaticHandler() http.Handler }); ok {
+		r.Handle("/_static/*", hs.StaticHandler())
+	}
 	r.Get("/_api/health", s.handleHealth)
 	r.Get("/_api/setup/status", s.handleSetupStatus)
 	r.Get("/_api/config", s.handleConfig)

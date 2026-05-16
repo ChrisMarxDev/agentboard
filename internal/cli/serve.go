@@ -147,9 +147,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// file into their own tool-home — we don't pre-fork it into n
 	// directories. The board itself doesn't special-case the path; it's
 	// just markdown at the root, like the README.
-	if err := gitStore.EnsureFile(context.Background(), "dogfood",
+	//
+	// PutFile (content-idempotent) rather than EnsureFile (presence-
+	// idempotent): the SKILL is the agent contract, and contract drift
+	// is a bug. Workspaces that need a custom SKILL should commit it as
+	// `MY-SKILL.md` or similar instead of editing the canonical file.
+	if err := gitStore.PutFile(context.Background(), "dogfood",
 		"SKILL.md", project.SeededRootSkill, "system",
-		"Add canonical SKILL"); err != nil {
+		"Sync canonical SKILL"); err != nil {
 		log.Printf("Warning: could not seed SKILL.md: %v", err)
 	}
 	// Retire the legacy skill paths from any previously-seeded board.

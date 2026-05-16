@@ -240,6 +240,18 @@ func (s *Server) serveStatic(w http.ResponseWriter, r *http.Request, sub string)
 	http.FileServer(s.assetsMu).ServeHTTP(w, r2)
 }
 
+// StaticHandler returns a handler that serves the embedded /_static/*
+// asset bundle (design-system.css, theme.default.css, etc.). Mounted
+// at /_static/* by the server outside the auth gate so the login
+// page can pull design-system.css while anonymous.
+func (s *Server) StaticHandler() http.Handler {
+	s.lazyInit()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub := strings.TrimPrefix(r.URL.Path, "/_static/")
+		s.serveStatic(w, r, sub)
+	})
+}
+
 // resolvePath joins `rel` to the worktree root and rejects anything
 // that escapes via .. or symlinks. Returns the cleaned absolute path
 // (which may not exist on disk).
@@ -1223,6 +1235,9 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 	showEdit := showHistory && user != ""
 	// Show the admin link in the header for admin-kind users.
 	isAdmin := s.IsAdminFn != nil && s.IsAdminFn(r)
+	// Workspace-level theme: load /theme.css at the end of the head
+	// if the file exists at the worktree root. Single stat per render.
+	hasTheme := s.workspaceHasTheme()
 	data := map[string]any{
 		"Title":           title,
 		"WorkspaceName":   s.Workspace,
@@ -1237,11 +1252,25 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		"ShowHistoryLink": showHistory,
 		"ShowEditLink":    showEdit,
 		"IsAdmin":         isAdmin,
+		"HasThemeCSS":     hasTheme,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "shell", data); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+// workspaceHasTheme reports whether the workspace ships a theme.css
+// at the worktree root. Cheap stat — gives agents a single-file
+// override surface for workspace-wide styling without template churn.
+// Used by renderShell to conditionally inject `<link href="/theme.css">`
+// at the end of the shell's <head>.
+func (s *Server) workspaceHasTheme() bool {
+	if s.WorktreeRoot == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(s.WorktreeRoot, "theme.css"))
+	return err == nil && !info.IsDir()
 }
 
 func breadcrumbsFor(urlPath string) []breadcrumb {

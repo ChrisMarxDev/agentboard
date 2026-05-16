@@ -268,6 +268,46 @@ Via MCP: ` + "`agentboard_propose`" + ` returns a conflicts list on rejection;
 call ` + "`agentboard_resolve_conflict(proposal, file, resolution)`" + ` once
 per conflicted file, and the proposal retries.
 
+## Styling the workspace
+
+The dashboard supports one-file workspace-wide theming. Drop a file
+named ` + "`theme.css`" + ` at the workspace root and the shell loads it
+**last** in the document ` + "`<head>`" + ` — after the embedded design
+system, after the shell's own scaffolding. Anything you write there
+overrides both.
+
+The most useful surface is the CSS custom properties (` + "`--ab-*`" + ` and
+unprefixed tokens like ` + "`--bg`, `--text`, `--accent`, `--border`" + `).
+Every built-in component reads them, so a single token change
+ripples through ` + "`.ab-card`, `.ab-badge`, `.taskboard`," + ` etc.
+
+For a starting point, fetch the well-commented reference at
+[` + "`/_static/theme.default.css`" + `](/_static/theme.default.css) — it
+documents every token, shows example overrides (warm accent, custom
+typography, header logo via background-image, dark-mode tweaks), and
+lists which tokens each built-in component reads. Copy it to
+` + "`/theme.css`" + ` and edit.
+
+### git
+` + "```bash" + `
+curl -o theme.css http://<host>/_static/theme.default.css
+$EDITOR theme.css   # adjust --ab-accent, fonts, etc.
+git add theme.css
+git commit -m "Theme: warmer palette"
+git push
+` + "```" + `
+
+### MCP
+` + "```" + `
+agentboard_propose({
+  workspace: "<ws>",
+  message: "Theme: warmer palette",
+  files: [{ path: "theme.css", body: ":root { --accent: #d97706; ... }" }]
+})
+` + "```" + `
+
+Open tabs receive an SSE "Reload" toast after the push. No deploy step.
+
 ## Where this skill lives
 
 This skill ships at ` + "`/SKILL.md`" + ` — the workspace root, one file,
