@@ -51,3 +51,4 @@ bruno/.env
 # Local dogfood / dev tokens — never commit
 .tokens.local
 *.token.local
+.claude/scheduled_tasks.lock

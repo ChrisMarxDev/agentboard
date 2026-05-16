@@ -160,6 +160,13 @@ func (s *Store) Create(ctx context.Context, id string, createdBy string, seed st
 		if out, err := runGit("", "config", "--file", filepath.Join(bare, "config"), "receive.denyCurrentBranch", "ignore"); err != nil {
 			return nil, fmt.Errorf("git config receive.denyCurrentBranch: %w (output: %s)", err, out)
 		}
+		// Install the §5.2 permission gate. Best-effort: log and continue
+		// on failure so a hook problem doesn't block workspace creation
+		// entirely. The retrofit on Server boot (InstallAllHooks) will
+		// re-attempt next time.
+		if err := s.InstallPreReceiveHook(id); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: install pre-receive hook for %s: %v\n", id, err)
+		}
 	}
 
 	// Initial seed: if a non-empty seed directory is supplied, build

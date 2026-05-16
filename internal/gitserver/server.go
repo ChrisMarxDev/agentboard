@@ -36,6 +36,10 @@ type Server struct {
 	Store          *Store
 	Hooks          Hooks
 	GitHTTPBackend string // path to git-http-backend (defaults via discoverBackend)
+	// ProjectPath is propagated to the pre-receive hook as
+	// AGENTBOARD_PROJECT_PATH so the hook subprocess knows which
+	// project DB to open for permission resolution.
+	ProjectPath string
 }
 
 // New builds a Server pointed at the workspace registry. Discovers
@@ -111,6 +115,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"REMOTE_ADDR=" + r.RemoteAddr,
 		"HTTP_GIT_PROTOCOL=" + r.Header.Get("Git-Protocol"),
 		"PATH=" + os.Getenv("PATH"),
+		// Threaded through to the pre-receive hook installed by
+		// InstallPreReceiveHook. The hook needs to know which user
+		// authenticated (for permission resolution) and which project
+		// directory holds the auth DB.
+		"AGENTBOARD_USER=" + remoteUser,
+		"AGENTBOARD_PROJECT_PATH=" + s.ProjectPath,
+		"AGENTBOARD_WORKSPACE=" + ws,
 	}
 	// Some git clients send `Content-Encoding: gzip` which git-http-backend
 	// handles natively if the env var is set.

@@ -251,6 +251,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open git server: %w", err)
 	}
+	gitSrv.ProjectPath = proj.Path
+	// Retrofit the pre-receive hook onto every existing bare repo at
+	// boot so legacy workspaces fall under §5.2 enforcement on the
+	// next push. Best-effort: warn but continue if a single hook
+	// install fails — the server still gates writes at the HTTP
+	// and MCP layers regardless.
+	if err := gitStore.InstallAllHooks(); err != nil {
+		log.Printf("Warning: install pre-receive hooks: %v", err)
+	}
 
 	// MCP shims that translate between the gitserver API and the
 	// mcp-package types.
