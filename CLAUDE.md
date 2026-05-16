@@ -8,7 +8,7 @@
 > - **[`CORE_GUIDELINES.md`](./CORE_GUIDELINES.md)** — the product principles. §15 (workspace teaches the agent) is the principle the whole architecture exists to serve.
 > - **[`ROADMAP.md`](./ROADMAP.md)** — what ships next.
 >
-> **Domain contracts:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`spec-plugins.md`](./spec-plugins.md) (workspace-extension contract), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).
+> **Domain contracts:** [`AUTH.md`](./AUTH.md) (tokens + browser sessions), [`HOSTING.md`](./HOSTING.md) + [`SCALE.md`](./SCALE.md) (deploy), [`seams_to_watch.md`](./seams_to_watch.md) (consciously-deferred security/architectural concerns — read before widening the trust boundary).
 >
 > **Historical context:** [`ISSUES.md`](./ISSUES.md) is the live bug list. Earlier rewrite snapshots and aspirational drafts live under [`docs/archive/`](./docs/archive/) — historical only.
 

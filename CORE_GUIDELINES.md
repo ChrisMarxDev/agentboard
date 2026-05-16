@@ -96,7 +96,7 @@ Concretely:
 - **Component updates are software releases**, rolled forward/back through the update channel, not through the content timeline.
 - **Missing or failed bricks render a graceful placeholder** ("GithubIssues not installed"). They don't take the page down.
 
-The plugin ecosystem (`spec-plugins.md`) is the contract side of this principle: it's what keeps "the brick honors its contract" from being wishful thinking.
+(The git-substrate pivot dropped the JSX brick + composition layer; this principle now lives on as a discipline for whatever future stable-primitive layer rebuilds. Earlier framing in `docs/archive/spec-plugins.md`.)
 
 ## 11. Leverage agents; stay dependency-free
 
