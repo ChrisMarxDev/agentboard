@@ -156,9 +156,10 @@ treat them as ordinary work.
 
 ## Authentication
 
-Every endpoint except ` + "`/_api/health`" + ` needs a credential. The format
-is ` + "`ab_<43 chars>`" + ` for personal tokens, or ` + "`oat_<…>`" + ` for
-audience-scoped OAuth tokens minted via the MCP onboarding flow.
+Every endpoint except ` + "`/_api/health`" + ` needs a credential. The
+format is ` + "`ab_<43 chars>`" + ` for personal tokens. Mint them from
+` + "`/me`" + ` once you've claimed an admin or member account via an
+invite link.
 
 For git the token rides as HTTP Basic auth:
 
@@ -392,8 +393,8 @@ cat > taskboards/sprint.json <<'EOF'
     {"id": "c1", "title": "Ship Taskboard", "column": "doing",
      "labels": ["substrate"], "assignees": ["alice"],
      "priority": 1, "order": 1.0},
-    {"id": "c2", "title": "Add OAuth", "column": "done",
-     "labels": ["mcp"], "priority": 2}
+    {"id": "c2", "title": "Ship Activity Feed", "column": "done",
+     "labels": ["wiki"], "priority": 2}
   ]
 }
 EOF

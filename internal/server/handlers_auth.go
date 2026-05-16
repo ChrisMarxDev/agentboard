@@ -150,7 +150,7 @@ func (s *Server) resolveCallerForAuthMe(r *http.Request) (*auth.User, bool) {
 	// hitting /api/auth/me" check working.
 	if ah := r.Header.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
 		token := strings.TrimPrefix(ah, "Bearer ")
-		if !strings.HasPrefix(token, auth.OAuthAccessPrefix) && token != "" {
+		if token != "" {
 			if user, _, err := s.Auth.ResolveToken(auth.HashToken(token)); err == nil {
 				return user, true
 			}

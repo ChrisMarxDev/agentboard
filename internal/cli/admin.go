@@ -89,8 +89,8 @@ var adminRevokeSessionsCmd = &cobra.Command{
 	Use:   "revoke-sessions <username>",
 	Short: "Revoke every active browser session for a user",
 	Long: `Marks every unrevoked row in user_sessions for the named user as
-revoked. Bearer tokens (PATs, OAuth access tokens) are NOT touched —
-use 'agentboard admin rotate' for those. This is the lockout-recovery
+revoked. Bearer tokens (PATs) are NOT touched — use
+'agentboard admin rotate' for those. This is the lockout-recovery
 hammer for "I think my browser cookie was stolen".`,
 	Args: cobra.ExactArgs(1),
 	RunE: runAdminRevokeSessions,

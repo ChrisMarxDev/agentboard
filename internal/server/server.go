@@ -4,7 +4,7 @@
 // components, files, and grab are all gone (spec-filesystem-substrate.md).
 // What remains:
 //
-//   - Auth (sessions + tokens + OAuth) at /_api/auth/*, /oauth/*, /.well-known
+//   - Auth (sessions + tokens) at /_api/auth/*
 //   - Admin user / token / invitation management at /_api/admin/*
 //   - Webhook subscriber management at /_api/admin/webhooks
 //   - MCP at /mcp
@@ -140,12 +140,6 @@ func (s *Server) buildRouter() chi.Router {
 			"/_api/auth/me",
 			"/_api/health",
 			"/_api/invitations",
-			"/.well-known/oauth-protected-resource",
-			"/.well-known/oauth-authorization-server",
-			"/oauth/register",
-			"/oauth/authorize",
-			"/oauth/authorize/decide",
-			"/oauth/token",
 			"/_api/events",
 		},
 	})
@@ -183,14 +177,6 @@ func (s *Server) buildRouter() chi.Router {
 		r.Post("/_api/auth/logout", s.handleAuthLogout)
 		r.Get("/_api/auth/me", s.handleAuthMe)
 	})
-
-	// OAuth (RFC 9728 + RFC 7591 dynamic registration).
-	r.Get("/.well-known/oauth-protected-resource", auth.HandleProtectedResourceMetadata)
-	r.Get("/.well-known/oauth-authorization-server", auth.HandleAuthorizationServerMetadata)
-	r.Post("/oauth/register", s.handleOAuthRegister)
-	r.Get("/oauth/authorize", s.handleOAuthAuthorize)
-	r.Post("/oauth/authorize/decide", s.handleOAuthAuthorizeDecide)
-	r.Post("/oauth/token", s.handleOAuthToken)
 
 	// ----- auth-gated endpoints -----
 	r.Group(func(r chi.Router) {

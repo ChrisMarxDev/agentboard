@@ -17,7 +17,6 @@ type ctxKey int
 const (
 	ctxUser ctxKey = iota + 1
 	ctxToken
-	ctxOAuth
 	ctxSession
 )
 
@@ -41,18 +40,10 @@ func UserFromContext(ctx context.Context) *User {
 	return v
 }
 
-// TokenFromContext returns the specific PAT token row used to
-// authenticate the request, or nil. Returns nil when the request was
-// authenticated via an OAuth-issued access token (see OAuthFromContext).
+// TokenFromContext returns the specific token row used to authenticate
+// the request, or nil when authentication came via a session cookie.
 func TokenFromContext(ctx context.Context) *UserToken {
 	v, _ := ctx.Value(ctxToken).(*UserToken)
-	return v
-}
-
-// OAuthFromContext returns the OAuth access record used to authenticate
-// the request, or nil. Populated only when the Bearer carried `oat_*`.
-func OAuthFromContext(ctx context.Context) *OAuthAccessRecord {
-	v, _ := ctx.Value(ctxOAuth).(*OAuthAccessRecord)
 	return v
 }
 
@@ -85,11 +76,8 @@ type MiddlewareConfig struct {
 //  3. Otherwise a valid token is required. Missing/revoked/deactivated
 //     → 401. The SPA catches 401 via apiFetch and redirects to /login.
 //
-// Two token spaces are accepted: PATs (`ab_*`, the existing user_tokens
-// surface) and OAuth-issued access tokens (`oat_*`, minted via the
-// /oauth/* flow for Claude.ai-style Custom Connectors). OAuth tokens
-// are audience-bound — they're only valid against the MCP resource
-// they were issued for, enforced here.
+// Tokens are PATs (`ab_*`) from the user_tokens surface. Members
+// manage their own via /me; admins manage anyone's via /_admin.
 //
 // There is no "zero-users = open" shortcut — fresh instances route
 // through /invite/* to claim admin. The server never runs unauthed
@@ -148,35 +136,6 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 			}
 			hash := HashToken(token)
 
-			// OAuth-issued access tokens carry an explicit prefix so we
-			// can route them to the audience-aware resolver without a
-			// double DB hit on bogus credentials.
-			if strings.HasPrefix(token, OAuthAccessPrefix) {
-				rec, user, err := store.ResolveAccessToken(hash)
-				if err != nil {
-					if errors.Is(err, ErrOAuthTokenInvalid) || errors.Is(err, ErrUserDeactivated) {
-						unauthorized(w, r)
-						return
-					}
-					writeJSONError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "auth lookup error")
-					return
-				}
-				// Per the MCP authorization spec (RFC 8707 + 9728), an
-				// OAuth access token is bound to a single MCP resource
-				// (its audience). Refuse to validate it for any other
-				// path or any other host this binary serves.
-				if !isMCPPath(r.URL.Path) || rec.Audience != CanonicalMCPResourceURL(r) {
-					unauthorized(w, r)
-					return
-				}
-				updater.touchOAuth(rec.ID)
-				ctx := context.WithValue(r.Context(), ctxUser, user)
-				ctx = context.WithValue(ctx, ctxOAuth, rec)
-				next.ServeHTTP(w, r.WithContext(ctx))
-				return
-			}
-
-			// PAT path — unchanged.
 			user, tok, err := store.ResolveToken(hash)
 			if err != nil {
 				if errors.Is(err, ErrNotFound) || errors.Is(err, ErrTokenRevoked) || errors.Is(err, ErrUserDeactivated) {
@@ -193,13 +152,6 @@ func TokenMiddleware(store *Store, cfg MiddlewareConfig) func(http.Handler) http
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
-}
-
-// isMCPPath reports whether the request is targeting the MCP resource.
-// Kept narrow on purpose: OAuth tokens are bound to /mcp (canonical
-// resource) and must not unlock unrelated /api/* surfaces.
-func isMCPPath(p string) bool {
-	return p == "/mcp" || strings.HasPrefix(p, "/mcp/")
 }
 
 // AuthorizeMiddleware enforces per-user access_mode + rules. Reads the
@@ -227,9 +179,8 @@ func AuthorizeMiddleware() func(http.Handler) http.Handler {
 
 // CSRFMiddleware enforces the double-submit cookie pattern on
 // state-changing requests authenticated by a session cookie. Bearer-
-// authenticated requests (PAT or OAuth access token) are exempt —
-// Bearer is not auto-attached by the browser, so cross-origin attacks
-// can't smuggle one along.
+// authenticated requests are exempt — Bearer is not auto-attached by
+// the browser, so cross-origin attacks can't smuggle one along.
 //
 // Rule:
 //   - Method ∈ {GET, HEAD, OPTIONS} → pass.
@@ -346,11 +297,8 @@ func extractToken(r *http.Request) string {
 }
 
 func unauthorized(w http.ResponseWriter, r *http.Request) {
-	// Always emit a Bearer challenge with the protected-resource-metadata
-	// URL so OAuth-aware MCP clients (Claude.ai Custom Connectors, any
-	// client following the MCP authorization spec) can discover the
-	// authorization server from a bare 401. RFC 9728 §5.1.
-	w.Header().Add("WWW-Authenticate", BearerChallenge(r))
+	// Plain Bearer challenge — `ab_*` PATs are the only token space.
+	w.Header().Add("WWW-Authenticate", `Bearer realm="AgentBoard"`)
 
 	// Basic challenge fires for two distinct callers:
 	//   - Browser top-level navigations — triggers the native auth
@@ -415,7 +363,7 @@ func RequireUserMiddleware(store *Store) func(http.Handler) http.Handler {
 			}
 			// Bearer first — bearer-authenticated agents (e.g. ops
 			// curl) get straight through.
-			if token := extractToken(r); token != "" && !strings.HasPrefix(token, OAuthAccessPrefix) {
+			if token := extractToken(r); token != "" {
 				if user, tok, err := store.ResolveToken(HashToken(token)); err == nil {
 					ctx := context.WithValue(r.Context(), ctxUser, user)
 					ctx = context.WithValue(ctx, ctxToken, tok)
@@ -459,7 +407,7 @@ func SoftAuthMiddleware(store *Store) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Bearer first — bearer-authenticated agents still want
 			// their identity visible.
-			if token := extractToken(r); token != "" && !strings.HasPrefix(token, OAuthAccessPrefix) {
+			if token := extractToken(r); token != "" {
 				if user, tok, err := store.ResolveToken(HashToken(token)); err == nil {
 					ctx := context.WithValue(r.Context(), ctxUser, user)
 					ctx = context.WithValue(ctx, ctxToken, tok)
@@ -517,12 +465,6 @@ func newUsageUpdater(store *Store) *usageUpdater {
 func (u *usageUpdater) touch(tokenID string) {
 	if u.shouldUpdate(tokenID) {
 		_ = u.store.TouchTokenLastUsed(tokenID)
-	}
-}
-
-func (u *usageUpdater) touchOAuth(tokenID string) {
-	if u.shouldUpdate("oauth:" + tokenID) {
-		_ = u.store.TouchOAuthLastUsed(tokenID)
 	}
 }
 

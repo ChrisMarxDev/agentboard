@@ -53,7 +53,7 @@ func introductionManifest() map[string]any {
 				"auth":      "HTTP Basic — username can be anything, password is your ab_* token",
 				"recipe":    "git clone http://user:ab_…@<host>/git/dogfood.git",
 			},
-			"dashboard": "Every path under / that isn't /_api, /_static, /git, /mcp, /oauth, /.well-known, or /invite is served by the HTML renderer reading the workspace's working tree. .md files are rendered with goldmark, .html files inline-sandboxed, .json shown as JSON, .txt as preformatted text, directories as listings.",
+			"dashboard": "Every path under / that isn't /_api, /_static, /git, /mcp, or /invite is served by the HTML renderer reading the workspace's working tree. .md files are rendered with goldmark, .html files inline-sandboxed, .json shown as JSON, .txt as preformatted text, directories as listings.",
 		},
 		"mcp": map[string]any{
 			"transport": "streamable-http",
@@ -207,7 +207,8 @@ There are **no envelopes** and no transcoded schema — the bytes you commit are
 | ` + "`agentboard_subscribe`" + ` | poll for events since a cursor |
 | ` + "`agentboard_fire_event`" + ` | dispatch a webhook-shaped event |
 
-OAuth-based auth is wired (` + "`/.well-known/oauth-protected-resource`" + `, ` + "`/oauth/register`" + `, ` + "`/oauth/authorize`" + `, ` + "`/oauth/token`" + `) so Claude-family clients can auto-onboard.
+Agents authenticate with the same ` + "`ab_*`" + ` bearer tokens humans
+use; mint one from ` + "`/me`" + ` and hand it to the agent via env-var.
 
 ---
 

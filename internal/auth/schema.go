@@ -88,9 +88,6 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("auth migrate: %w", err)
 	}
-	if _, err := db.Exec(oauthSchemaSQL); err != nil {
-		return fmt.Errorf("auth migrate (oauth): %w", err)
-	}
 
 	// Check whether this DB was at v1 (no password_hash column on
 	// users). On a fresh install schemaSQL above already created the
