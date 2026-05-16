@@ -8,9 +8,7 @@
 //     .md  → renders via goldmark, wrapped in the shell.
 //     .html → served as-is (sandboxed iframe in a future cut for
 //     untrusted-by-design content; for now inline).
-//     .json → pretty-printed with a small "structured data" wrapper
-//     (typed views will replace this for known kinds in a
-//     later cut).
+//     .json → pretty-printed in a code block.
 //     binary → served with the file's content-type, no chrome.
 //
 //   - GET /<dir>/ either serves index.html if present or auto-renders
@@ -656,17 +654,6 @@ func stripTag(s, name string) string {
 }
 
 func (s *Server) renderJSON(w http.ResponseWriter, r *http.Request, urlPath string, raw []byte) {
-	// Typed view: if the JSON's shape matches a taskboard, render it
-	// as a kanban board. Otherwise fall back to pretty-printed JSON.
-	if tb, ok := parseTaskboard(raw); ok {
-		title := tb.Title
-		if title == "" {
-			title = pathLabel(urlPath)
-		}
-		s.renderShell(w, r, urlPath, title, renderTaskboardBody(tb), nil, true)
-		return
-	}
-
 	pretty := indentJSON(raw)
 	body := fmt.Sprintf(`<h1>%s</h1><pre><code>%s</code></pre>`,
 		template.HTMLEscapeString(pathLabel(urlPath)),

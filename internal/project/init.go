@@ -275,7 +275,7 @@ overrides both.
 The most useful surface is the CSS custom properties (` + "`--ab-*`" + ` and
 unprefixed tokens like ` + "`--bg`, `--text`, `--accent`, `--border`" + `).
 Every built-in component reads them, so a single token change
-ripples through ` + "`.ab-card`, `.ab-badge`, `.taskboard`," + ` etc.
+ripples through ` + "`.ab-card`, `.ab-badge`," + ` etc.
 
 For a starting point, fetch the well-commented reference at
 [` + "`/_static/theme.default.css`" + `](/_static/theme.default.css) — it
@@ -366,46 +366,6 @@ Edit the file, commit, push. That's it.
 ` + "`agentboard_pull`" + ` the file, change the body locally, ` + "`agentboard_propose`" + `
 the new body. Whole-file writes only; there is no field-level patch.
 
-## Build a taskboard
-
-A JSON file whose top-level shape has ` + "`columns`" + ` and ` + "`cards`" + ` arrays
-renders as a kanban board (the **Taskboard typed view**) instead of as
-pretty-printed JSON. Drop it anywhere — convention is ` + "`taskboards/`" + `
-but the path doesn't matter.
-
-### git
-` + "```bash" + `
-mkdir -p taskboards
-cat > taskboards/sprint.json <<'EOF'
-{
-  "title": "Sprint 14",
-  "columns": [
-    {"id": "todo",  "label": "To do"},
-    {"id": "doing", "label": "In progress"},
-    {"id": "done",  "label": "Done"}
-  ],
-  "cards": [
-    {"id": "c1", "title": "Ship Taskboard", "column": "doing",
-     "labels": ["substrate"], "assignees": ["alice"],
-     "priority": 1, "order": 1.0},
-    {"id": "c2", "title": "Ship Activity Feed", "column": "done",
-     "labels": ["wiki"], "priority": 2}
-  ]
-}
-EOF
-git add taskboards/sprint.json
-git commit -m "Add sprint 14 board"
-git push
-` + "```" + `
-
-To move a card, edit its ` + "`column`" + ` field and push. To add a card,
-append to the ` + "`cards`" + ` array. Whole-file rewrites are the unit —
-there is no field-level patch RPC.
-
-The dashboard renders ` + "`/taskboards/sprint.json`" + ` as a kanban board.
-The JSON file remains the source of truth; cloning the workspace
-gives you the bytes you can edit offline.
-
 ## Host a binary
 
 Commit binary files directly into the workspace alongside the doc
@@ -441,7 +401,8 @@ non-modal "reload" toast via SSE on ` + "`/_api/events`" + ` when a push lands.
 // without a runtime, and it ships zero proprietary syntax. We keep
 // markdown for two conventional surfaces — the bootstrap README and
 // Anthropic-format SKILL.md — and use HTML for everything else
-// authored. Typed views (Taskboard, etc.) stay structured JSON.
+// authored. Structured data ships as JSON or NDJSON without a typed
+// renderer — agents read the raw bytes when they need the shape.
 
 // SeededIndexHTML is the home page seeded at index.html. HTML, not
 // markdown, because the substrate pivot named HTML as the primary
@@ -484,9 +445,8 @@ const seededIndexHTML = `<!doctype html>
   <h1>AgentBoard</h1>
   <p>A shared workspace — a git repo a small team of humans and AI agents
      collaborate inside. Every file in this tree is served as-is by the
-     dashboard: HTML renders as expressive pages, JSON with
-     <code>columns</code>+<code>cards</code> renders as a kanban,
-     markdown renders through goldmark.</p>
+     dashboard: HTML renders as expressive pages, markdown renders
+     through goldmark, JSON renders pretty-printed.</p>
 </section>
 
 <section class="grid">
@@ -494,11 +454,6 @@ const seededIndexHTML = `<!doctype html>
     <div class="eyebrow">Read</div>
     <div class="label">Getting started</div>
     <div class="desc">Authored HTML — what an expressive page looks like.</div>
-  </a>
-  <a class="card-link" href="/taskboards/sprint.json">
-    <div class="eyebrow">Typed view</div>
-    <div class="label">Sprint board</div>
-    <div class="desc">A JSON file rendered as a live kanban.</div>
   </a>
   <a class="card-link" href="/pages/changelog.html">
     <div class="eyebrow">Activity</div>
@@ -589,9 +544,8 @@ const seededGettingStartedHTML = `<!doctype html>
   <div>
     <strong>HTML is the primary expressive primitive.</strong> Reach for it
     for read-once content that wants a layout. Reach for <em>markdown</em>
-    only for conventional docs (READMEs, SKILL.md). Reach for <em>typed
-    JSON</em> when the content has queryable structure (taskboards now;
-    more types coming).
+    only for conventional docs (READMEs, SKILL.md). Reach for <em>JSON
+    or NDJSON</em> when agents need to query the bytes.
   </div>
 </div>
 
@@ -607,13 +561,6 @@ const seededGettingStartedHTML = `<!doctype html>
   </div>
   <div class="step">
     <div class="n">02</div>
-    <h3>Typed views</h3>
-    <p>Structured JSON the server renders as a typed surface. A file
-       with <code>columns</code>+<code>cards</code> renders as a
-       <a href="/taskboards/sprint.json">kanban board</a>.</p>
-  </div>
-  <div class="step">
-    <div class="n">03</div>
     <h3>Markdown</h3>
     <p>For conventional docs — READMEs, change logs, agent skills.
        Rendered through goldmark with GitHub-flavored extensions.</p>
@@ -632,9 +579,9 @@ git add pages/notes.html
 git commit -m "Add notes"
 git push
 
-# push a typed view
-git add taskboards/sprint.json
-git commit -m "Update sprint board"
+# push structured data
+git add data/sprint-14.csv
+git commit -m "Update sprint metrics"
 git push</code></pre>
 
 <h2>Comparison</h2>
@@ -646,8 +593,10 @@ git push</code></pre>
   <tbody>
     <tr><td>Landing page, dashboard, demo</td><td><code>.html</code></td>
         <td>Full layout control, custom CSS, design-system tokens.</td></tr>
-    <tr><td>Kanban board, structured data</td><td><code>.json</code></td>
-        <td>Typed view renders + stays queryable for typed APIs.</td></tr>
+    <tr><td>Kanban, status board, table</td><td><code>.html</code></td>
+        <td>CSS grid + one section per column; no typed renderer required.</td></tr>
+    <tr><td>Structured data agents will query</td><td><code>.json</code></td>
+        <td>Stays queryable; renders pretty-printed for humans.</td></tr>
     <tr><td>README, skill, change log prose</td><td><code>.md</code></td>
         <td>Convention. Short prose; humans glance.</td></tr>
     <tr><td>Image, PDF, font</td><td>(binary)</td>
@@ -791,13 +740,6 @@ const seededChangelogHTML = `<!doctype html>
        reflex. Switched to authored <code>.html</code>: home,
        getting-started, changelog, roadmap. Markdown stays for READMEs and
        SKILL.md per convention.</p>
-  </li>
-  <li>
-    <time>2026-05-13</time>
-    <h3>Taskboard typed view (substrate cut E)</h3>
-    <p><span class="pill substrate">substrate</span>
-       JSON files with <code>columns</code>+<code>cards</code> render as
-       kanban boards. See <a href="/taskboards/sprint.json">/taskboards/sprint.json</a>.</p>
   </li>
   <li>
     <time>2026-05-13</time>
@@ -1164,9 +1106,8 @@ prose, prefer .md or .html.
 `
 
 // SeededFilesDemoHTML walks visitors through the file-type matrix:
-// markdown, HTML, JSON (taskboard), JSON (generic), images, CSV,
-// plain text, history/diff/restore on any of them. Linked from the
-// home page as "what files render how".
+// markdown, HTML, JSON, images, CSV, plain text, history/diff/restore
+// on any of them. Linked from the home page as "what files render how".
 var SeededFilesDemoHTML = seededFilesDemoHTML
 
 const seededFilesDemoHTML = `<!doctype html>
@@ -1289,15 +1230,10 @@ situations.</p>
       <td><a href="/pages/getting-started.html">/pages/getting-started.html</a></td>
     </tr>
     <tr>
-      <td>.json (taskboard)</td>
-      <td>If the top-level shape has <code>columns</code>+<code>cards</code>,
-          renders as a kanban (Taskboard typed view).</td>
-      <td><a href="/taskboards/sprint.json">/taskboards/sprint.json</a></td>
-    </tr>
-    <tr>
-      <td>.json (generic)</td>
-      <td>Other JSON renders as pretty-printed text inside a
-          <code>&lt;pre&gt;</code>.</td>
+      <td>.json</td>
+      <td>Pretty-printed inside a <code>&lt;pre&gt;</code>. For a kanban,
+          write an HTML page with CSS grid — same visual outcome,
+          fewer rules.</td>
       <td>—</td>
     </tr>
     <tr>
@@ -1350,192 +1286,6 @@ ceremony.</p>
 </p>
 `
 
-// SeededSprintTaskboardJSON is a working Taskboard example. Shape
-// matches what the renderer recognizes: top-level ` + "`columns`" + ` and
-// ` + "`cards`" + ` arrays. Cards span all three lanes so a visitor lands on
-// a realistic board, not an empty one.
-var SeededSprintTaskboardJSON = seededSprintTaskboardJSON
-
-const seededSprintTaskboardJSON = `{
-  "kind": "taskboard",
-  "title": "Sprint 14",
-  "columns": [
-    {"id": "backlog", "label": "Backlog"},
-    {"id": "todo",    "label": "To do"},
-    {"id": "doing",   "label": "In progress"},
-    {"id": "done",    "label": "Done"}
-  ],
-  "cards": [
-    {
-      "id": "c-done-auth-ui",
-      "title": "Human-facing auth UI",
-      "column": "done",
-      "body": "/login, /logout, /invite/<id> as real HTML forms. Self-tested by test/dogfood/auth-e2e.sh.",
-      "labels": ["auth", "ux"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 0.5
-    },
-    {
-      "id": "c-done-mobile-shell",
-      "title": "Mobile-responsive dashboard shell",
-      "column": "done",
-      "body": "Collapsible sidebar overlay, larger tap targets.",
-      "labels": ["ux", "mobile"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 1.0
-    },
-    {
-      "id": "c-done-html-primitive",
-      "title": "HTML as primary expressive primitive",
-      "column": "done",
-      "body": "Seeded examples switched from .md to .html. Markdown stays for READMEs / SKILLs.",
-      "labels": ["substrate"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 2.0
-    },
-    {
-      "id": "c-done-taskboard",
-      "title": "Taskboard typed view",
-      "column": "done",
-      "body": "JSON with columns+cards renders as kanban (you're looking at it).",
-      "labels": ["substrate", "typed-view"],
-      "assignees": ["claude"],
-      "priority": 2,
-      "order": 3.0
-    },
-    {
-      "id": "c-done-history",
-      "title": "Page history viewer",
-      "column": "done",
-      "body": "?history=1 lists commits via git log --follow on the bare repo.",
-      "labels": ["history", "qol"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 4.0
-    },
-    {
-      "id": "c-done-nested-tree",
-      "title": "Sidebar nested folders",
-      "column": "done",
-      "body": "Recurses 3 levels via <details>/<summary>. No JS dependency.",
-      "labels": ["ux", "qol"],
-      "assignees": ["claude"],
-      "priority": 2,
-      "order": 5.0
-    },
-    {
-      "id": "c-done-diff",
-      "title": "Diff between revisions",
-      "column": "done",
-      "body": "?diff=<sha> renders colored unified diff. History rows link in.",
-      "labels": ["history", "qol"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 6.0
-    },
-    {
-      "id": "c-done-sse-toast",
-      "title": "Live page-changed toast (SSE)",
-      "column": "done",
-      "body": "Workspace pushes broadcast over /_api/events; dashboard pops a Reload toast.",
-      "labels": ["collab", "qol"],
-      "assignees": ["claude"],
-      "priority": 2,
-      "order": 7.0
-    },
-    {
-      "id": "c-done-search",
-      "title": "Full-text search",
-      "column": "done",
-      "body": "SQLite FTS5 over the working tree; rebuilt on push. /?q=needle renders hits.",
-      "labels": ["discovery", "qol"],
-      "assignees": ["claude"],
-      "priority": 2,
-      "order": 8.0
-    },
-    {
-      "id": "c-done-unclaimed-redirect",
-      "title": "Unclaimed-board → /invite redirect",
-      "column": "done",
-      "body": "/login short-circuits to the bootstrap invitation on fresh deploys.",
-      "labels": ["auth", "ux"],
-      "assignees": ["claude"],
-      "priority": 3,
-      "order": 9.0
-    },
-    {
-      "id": "c-done-inbrowser-edit",
-      "title": "In-browser edit",
-      "column": "done",
-      "body": "Cookie-auth + CSRF + PutFile round-trip. (edit) link in the meta-bar.",
-      "labels": ["editing", "qol"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 10.0
-    },
-    {
-      "id": "c-done-skill-root",
-      "title": "Single SKILL.md at root",
-      "column": "done",
-      "body": "Retired the skills/agentboard/ folder split; one canonical /SKILL.md. Agent tools mirror or symlink it into their own conventions.",
-      "labels": ["substrate", "convention"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 11.0
-    },
-    {
-      "id": "c-done-restore",
-      "title": "Restore-from-history one-click",
-      "column": "done",
-      "body": "(restore) button on every history row for signed-in users.",
-      "labels": ["history", "qol"],
-      "assignees": ["claude"],
-      "priority": 2,
-      "order": 12.0
-    },
-    {
-      "id": "c-doing-self-loop",
-      "title": "Self-checking dev loop",
-      "column": "doing",
-      "body": "Auto-iterate on auth + content + QOL features under unsupervised 3-hour window.",
-      "labels": ["dogfood", "process"],
-      "assignees": ["claude"],
-      "priority": 1,
-      "order": 0.5
-    },
-    {
-      "id": "c-backlog-mention",
-      "title": "Mention typed view",
-      "column": "backlog",
-      "body": "Materialize @mentions across the worktree into /mentions/<user>.",
-      "labels": ["typed-view"],
-      "priority": 2,
-      "order": 1.0
-    },
-    {
-      "id": "c-backlog-presence",
-      "title": "Presence: who's looking now",
-      "column": "backlog",
-      "body": "Long-poll viewer list; avatars in the meta-bar.",
-      "labels": ["collab", "qol"],
-      "priority": 3,
-      "order": 3.0
-    },
-    {
-      "id": "c-backlog-pr-mode",
-      "title": "Always-PR workspace policy",
-      "column": "backlog",
-      "body": "Server creates a branch + holds the merge until approval.",
-      "labels": ["substrate"],
-      "priority": 3,
-      "order": 4.0
-    }
-  ]
-}
-`
 
 // InitProject creates a new project from the welcome template.
 func InitProject(projectPath string) (*Project, error) {

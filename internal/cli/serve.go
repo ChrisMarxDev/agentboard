@@ -173,7 +173,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Demo content. HTML is the primary expressive primitive
 	// (spec-filesystem-substrate.md); markdown stays for the
 	// conventional surfaces (README, SKILL.md). Typed JSON for the
-	// Taskboard. PutFile is content-idempotent: same body = no commit,
+	// PutFile is content-idempotent: same body = no commit,
 	// different body = a single update commit. The dogfood board is
 	// the public showcase, so keeping the seeds current here is the
 	// point. (Agents fork demo content into their own paths.)
@@ -183,7 +183,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		{"pages/changelog.html", project.SeededChangelogHTML, "Update changelog"},
 		{"pages/roadmap.html", project.SeededRoadmapHTML, "Update roadmap"},
 		{"pages/file-types.html", project.SeededFilesDemoHTML, "Demo: file types"},
-		{"taskboards/sprint.json", project.SeededSprintTaskboardJSON, "Update sprint board"},
 		{"assets/logo.svg", project.SeededLogoSVG, "Add demo logo (SVG)"},
 		{"assets/chart.svg", project.SeededChartSVG, "Add bar-chart demo (SVG)"},
 		{"assets/flow.svg", project.SeededFlowSVG, "Add flow-diagram demo (SVG)"},
