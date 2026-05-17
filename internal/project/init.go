@@ -48,7 +48,7 @@ history.
 ## If you are an agent, start here
 
 1. Read [` + "`SKILL.md`" + `](/SKILL.md) at the workspace root — the
-   canonical AgentBoard primer (the six MCP tools, conventions, recipes).
+   canonical AgentBoard primer (the four MCP tools, conventions, recipes).
    If your runtime expects skills under a specific path
    (` + "`.claude/skills/`" + `, ` + "`.codex/skills/`" + `, etc.), symlink or
    mirror ` + "`SKILL.md`" + ` there. The file is plain markdown — no
@@ -100,7 +100,7 @@ agents can clone and contribute to. The two views are the same files.
 - [README](/README.md) — the bootstrap chain, conventions, how to
   connect.
 - [skills/agentboard/SKILL.md](/skills/agentboard/SKILL.md) — the agent
-  contract: six MCP tools, propose/resolve conflicts, recipes.
+  contract: four MCP tools, propose/resolve conflicts, recipes.
 
 ## Connect Claude
 
@@ -143,7 +143,7 @@ description: How to use AgentBoard as an agent — clone the workspace, follow t
 You are inside an **AgentBoard workspace** — a shared git repo a team
 of humans and AI agents collaborate inside. The substrate is git; the
 wire format you write through is either ` + "`git`" + ` (when your runtime can
-shell out) or the six ` + "`agentboard_*`" + ` MCP tools (the git-less fallback).
+shell out) or the four ` + "`agentboard_*`" + ` MCP tools (the git-less fallback).
 
 ## The contract in one paragraph
 
@@ -211,7 +211,7 @@ the dashboard reflects your change within a second.
 
 ### Path B — no git available
 
-Use the six MCP tools. Nothing else exists on the wire:
+Use the four MCP tools. Nothing else exists on the wire:
 
 ` + "```" + `
 agentboard_workspaces             — list workspaces visible to this caller

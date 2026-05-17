@@ -57,6 +57,17 @@ func init() {
 const zeroSHA = "0000000000000000000000000000000000000000"
 
 func runInternalPreReceive(cmd *cobra.Command, _ []string) error {
+	// Server-internal pushes (seed loop, sync-seed, EditFn / RestoreFn /
+	// ProposeFn → PutFile, anything that goes through
+	// gitserver.runGitInInternal) carry an AGENTBOARD_INTERNAL=1 env
+	// sentinel that the smart-HTTP CGI deliberately does NOT propagate
+	// (see gitserver/server.go cmd.Env — it enumerates every var
+	// explicitly). Pass through without permission evaluation: callers
+	// already gated through permissions.Rules.Allow at the application
+	// layer.
+	if os.Getenv("AGENTBOARD_INTERNAL") == "1" {
+		return nil
+	}
 	if internalPreRecvUser == "" || internalPreRecvUser == "anonymous" {
 		// Anonymous push shouldn't happen post-auth-middleware, but
 		// if it does, deny.

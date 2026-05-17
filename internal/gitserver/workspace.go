@@ -256,7 +256,7 @@ func (s *Store) EnsureAbsent(ctx context.Context, workspaceID, path, actor, comm
 	if out, err := runGitIn(tmp, "commit", "-m", commitMsg); err != nil {
 		return fmt.Errorf("git commit: %w (output: %s)", err, out)
 	}
-	if out, err := runGitIn(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
+	if out, err := runGitInInternal(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
 		return fmt.Errorf("git push: %w (output: %s)", err, out)
 	}
 	_, _ = s.SyncWorktree(ctx, workspaceID)
@@ -350,7 +350,7 @@ func (s *Store) writeFile(ctx context.Context, workspaceID, path, body, actor, c
 	if out, err := runGitIn(tmp, "commit", "-m", commitMsg); err != nil {
 		return fmt.Errorf("git commit: %w (output: %s)", err, out)
 	}
-	if out, err := runGitIn(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
+	if out, err := runGitInInternal(tmp, "push", "origin", "HEAD:"+ws.DefaultBranch); err != nil {
 		return fmt.Errorf("git push: %w (output: %s)", err, out)
 	}
 	// Re-sync the working-tree mirror so the SPA sees the new file
@@ -431,7 +431,7 @@ func seedInitialCommit(bare, source string, actor string) error {
 	if out, err := runGitIn(tmp, "commit", "--allow-empty", "-m", "Initial commit (migrated from v0.13 substrate)"); err != nil {
 		return fmt.Errorf("git commit: %w (output: %s)", err, out)
 	}
-	if out, err := runGitIn(tmp, "push", "origin", "HEAD:main"); err != nil {
+	if out, err := runGitInInternal(tmp, "push", "origin", "HEAD:main"); err != nil {
 		return fmt.Errorf("git push: %w (output: %s)", err, out)
 	}
 	return nil
@@ -694,6 +694,21 @@ func runGit(dir string, args ...string) (string, error) {
 func runGitIn(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+// runGitInInternal is the server-internal variant of runGitIn used by
+// PutFile / EnsureFile / seedInitialCommit. Sets AGENTBOARD_INTERNAL=1
+// so the pre-receive hook (which gates raw `git push` from clients via
+// the smart-HTTP path) skips its permission check. The smart-HTTP CGI
+// in gitserver/server.go enumerates its env explicitly and does NOT
+// include AGENTBOARD_INTERNAL, so a remote push can never set this
+// sentinel — it's a trusted-call-site marker only.
+func runGitInInternal(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "AGENTBOARD_INTERNAL=1")
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
