@@ -10,5 +10,5 @@ Now README.md is right here in your cwd. Read it — it points you at skills/age
 When you're done reading your way in, tell me:
  1. What kind of workspace this is.
  2. What open work it surfaces.
- 3. Whether you'd contribute via git or via the MCP fallback (the seven agentboard_* tools), and why.
+ 3. Whether you'd contribute via git or via the MCP fallback (the four agentboard_* tools), and why.
  4. What you'd do first if I asked you to ship something here.
