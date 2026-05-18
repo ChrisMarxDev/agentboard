@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/christophermarx/agentboard/internal/auth"
@@ -206,7 +207,7 @@ const adminUIPage = `<!doctype html>
 {{if .Users}}
 <div class="panel" style="padding:.25rem 0">
   <table>
-    <thead><tr><th>Username</th><th>Kind</th><th>Display name</th><th>Created</th></tr></thead>
+    <thead><tr><th>Username</th><th>Kind</th><th>Display name</th><th>Created</th><th>Status</th><th>Action</th></tr></thead>
     <tbody>
     {{range .Users}}
       <tr>
@@ -214,6 +215,21 @@ const adminUIPage = `<!doctype html>
         <td><span class="kind {{.Kind}}">{{.Kind}}</span></td>
         <td>{{if .DisplayName}}{{.DisplayName}}{{else}}<span class="empty">—</span>{{end}}</td>
         <td><span class="ab-muted">{{.CreatedAt}}</span></td>
+        <td>
+          {{if .Deactivated}}<span class="status expired">deactivated {{.DeactivatedAt}}</span>
+          {{else}}<span class="status active">active</span>{{end}}
+        </td>
+        <td>
+          {{if .Deactivated}}<span class="ab-muted">—</span>
+          {{else if eq .Username $.User}}<span class="ab-muted">(you)</span>
+          {{else}}
+            <form class="inline" method="post" action="/admin/users/{{.Username}}/deactivate"
+                  onsubmit="return confirm('Deactivate @{{.Username}}? Their tokens will be revoked and they can no longer sign in. Username is reserved — no one else can reuse it.')">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <button type="submit" style="color:var(--error)">deactivate</button>
+            </form>
+          {{end}}
+        </td>
       </tr>
     {{end}}
     </tbody>
@@ -237,10 +253,12 @@ type adminUIInvitation struct {
 }
 
 type adminUIUser struct {
-	Username    string
-	Kind        string
-	DisplayName string
-	CreatedAt   string
+	Username      string
+	Kind          string
+	DisplayName   string
+	CreatedAt     string
+	Deactivated   bool
+	DeactivatedAt string
 }
 
 type adminUIGroup struct {
@@ -269,6 +287,7 @@ func (s *Server) registerAdminUIRoutes(r chi.Router) {
 	r.Post("/admin/groups/{name}/delete", s.handleAdminDeleteGroup)
 	r.Post("/admin/groups/{name}/members/new", s.handleAdminAddGroupMember)
 	r.Post("/admin/groups/{name}/members/{username}/remove", s.handleAdminRemoveGroupMember)
+	r.Post("/admin/users/{username}/deactivate", s.handleAdminDeactivateUser)
 	r.Get("/admin/permissions", s.handleAdminPermissionsPage)
 	r.Post("/admin/permissions/save", s.handleAdminPermissionsSave)
 }
@@ -326,12 +345,17 @@ func (s *Server) renderAdminHome(w http.ResponseWriter, r *http.Request, newInvi
 		list, err := s.Auth.ListUsers(true)
 		if err == nil {
 			for _, u := range list {
-				users = append(users, adminUIUser{
+				ui := adminUIUser{
 					Username:    u.Username,
 					Kind:        string(u.Kind),
 					DisplayName: u.DisplayName,
 					CreatedAt:   u.CreatedAt.UTC().Format("2006-01-02 15:04"),
-				})
+				}
+				if u.DeactivatedAt != nil {
+					ui.Deactivated = true
+					ui.DeactivatedAt = u.DeactivatedAt.UTC().Format("2006-01-02")
+				}
+				users = append(users, ui)
 			}
 		}
 	}
@@ -457,6 +481,29 @@ func (s *Server) handleAdminAddGroupMember(w http.ResponseWriter, r *http.Reques
 	username := r.FormValue("username")
 	if err := s.Groups.AddMember(r.Context(), name, username); err != nil {
 		http.Error(w, "add failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusFound)
+}
+
+func (s *Server) handleAdminDeactivateUser(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminCSRF(w, r) {
+		return
+	}
+	if s.Auth == nil {
+		http.Error(w, "auth store not wired", http.StatusServiceUnavailable)
+		return
+	}
+	username := chi.URLParam(r, "username")
+	caller := auth.UserFromContext(r.Context())
+	// Mirror the REST handler's self-deactivate guard so the UI can't
+	// trick an admin into locking themselves out.
+	if caller != nil && strings.EqualFold(caller.Username, username) {
+		http.Error(w, "cannot deactivate yourself; invite or promote another admin first", http.StatusBadRequest)
+		return
+	}
+	if err := s.Auth.Deactivate(username); err != nil {
+		http.Error(w, "deactivate failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	http.Redirect(w, r, "/admin", http.StatusFound)

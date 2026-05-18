@@ -87,6 +87,12 @@ type Server struct {
 	Workspace    string // workspace id; shown in the header
 	Branch       string // default branch; shown in the header
 
+	// ReadOnly suppresses every interactive affordance — sign-in link,
+	// edit form, live-reload SSE script. Used by the `agentboard view`
+	// desktop-style viewer, which points the renderer at a local
+	// directory with no auth, no MCP, no /_api surface behind it.
+	ReadOnly bool
+
 	// UserResolver returns the current user's name for the request, or
 	// empty string for anonymous. Optional — defaults to anonymous.
 	UserResolver func(r *http.Request) string
@@ -921,6 +927,10 @@ func (s *Server) renderDiff(w http.ResponseWriter, r *http.Request, urlPath, dif
 // POSTs to /_api/edit (a real, CSRF-gated endpoint in the server
 // package). Anonymous visitors get bounced to /login?next=...
 func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, urlPath string) {
+	if s.ReadOnly {
+		http.NotFound(w, r)
+		return
+	}
 	rel := strings.Trim(strings.TrimPrefix(urlPath, "/"), "/")
 	if rel == "" {
 		http.Error(w, "edit requires a file path", http.StatusBadRequest)
@@ -1427,9 +1437,10 @@ func (s *Server) renderShell(w http.ResponseWriter, r *http.Request, urlPath, ti
 		"MetaBar":         mb,
 		"Wide":            wide,
 		"ShowHistoryLink": showHistory,
-		"ShowEditLink":    showEdit,
+		"ShowEditLink":    showEdit && !s.ReadOnly,
 		"IsAdmin":         isAdmin,
 		"HasThemeCSS":     hasTheme,
+		"ReadOnly":        s.ReadOnly,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "shell", data); err != nil {
 		http.Error(w, "render: "+err.Error(), http.StatusInternalServerError)

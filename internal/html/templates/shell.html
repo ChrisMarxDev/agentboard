@@ -101,7 +101,7 @@
     <input name="q" placeholder="Search…" aria-label="Search the workspace" autocomplete="off">
   </form>
   <span class="spacer"></span>
-  <span class="user">{{if .User}}@{{.User}}{{else}}<a href="/login">sign in</a>{{end}}</span>
+  <span class="user">{{if .User}}@{{.User}}{{else if not .ReadOnly}}<a href="/login">sign in</a>{{end}}</span>
 </header>
 <div class="backdrop" onclick="document.body.classList.remove('nav-open');document.querySelector('.menu-btn').setAttribute('aria-expanded','false')"></div>
 <aside id="ab-nav">
@@ -254,7 +254,7 @@
   });
 })();
 </script>
-<script>
+{{if not .ReadOnly}}<script>
 (function(){
   // Live-reload toast. Subscribes to /_api/events; when the
   // workspace this dashboard is rendering gets a push, offer a
@@ -292,7 +292,7 @@
   });
   // Heartbeats and the initial 'connected' event are uninteresting.
 })();
-</script>
+</script>{{end}}
 </body>
 </html>
 {{end}}
