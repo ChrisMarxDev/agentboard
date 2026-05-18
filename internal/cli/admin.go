@@ -758,3 +758,74 @@ func runAdminGroupsMembers(cmd *cobra.Command, args []string) error {
 	}
 	return tw.Flush()
 }
+
+// --------------------------------------------------------------------
+// admin put-file — write/replace a file in a workspace via gitserver
+// --------------------------------------------------------------------
+
+var adminPutFileMessage string
+
+var adminPutFileCmd = &cobra.Command{
+	Use:   "put-file <workspace> <path>",
+	Short: "Commit a file to a workspace from a local source (stdin or --from)",
+	Long: `Writes <local-source> as <path> on the workspace's default branch
+and commits with --message. Uses the same gitserver.PutFile that
+EditFn / RestoreFn / ProposeFn go through, so the post-receive hooks
+(worktree mirror sync + SSE broadcast + FTS5 reindex) fire normally.
+
+Server-internal push: the operation bypasses the .agentboard/permissions.yaml
+gate (CLI access is itself the privilege), but does NOT skip the
+content-idempotent check — a file with identical bytes won't produce
+an empty commit.
+
+Examples:
+  agentboard admin put-file dogfood pages/notes.md < notes.md
+  cat board.html | agentboard admin put-file dogfood agency/boards/sprint.html --message "Convert sprint board to HTML kanban"`,
+	Args: cobra.ExactArgs(2),
+	RunE: runAdminPutFile,
+}
+
+func init() {
+	adminPutFileCmd.Flags().StringVarP(&adminPutFileMessage, "message", "m", "", "Commit message (default derived from path)")
+	adminCmd.AddCommand(adminPutFileCmd)
+}
+
+func runAdminPutFile(cmd *cobra.Command, args []string) error {
+	workspaceID := args[0]
+	path := args[1]
+	if strings.Contains(path, "..") || strings.HasPrefix(path, "/") {
+		return fmt.Errorf("invalid path %q (no .. or leading /)", path)
+	}
+	body, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("read stdin: %w", err)
+	}
+	msg := adminPutFileMessage
+	if msg == "" {
+		msg = "Update " + path
+	}
+	projPath := resolveProjectPath()
+	conn, err := dbpkg.Open(filepath.Join(projPath, ".agentboard", "data.sqlite"))
+	if err != nil {
+		return fmt.Errorf("open db: %w", err)
+	}
+	defer conn.Close()
+	gitRoot := filepath.Join(projPath, ".agentboard")
+	store, err := gitserver.NewStore(conn.Conn(), gitRoot)
+	if err != nil {
+		return fmt.Errorf("open git workspace store: %w", err)
+	}
+	ctx := context.Background()
+	ws, err := store.Get(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	if ws == nil {
+		return fmt.Errorf("workspace %q not found", workspaceID)
+	}
+	if err := store.PutFile(ctx, workspaceID, path, string(body), "cli", msg); err != nil {
+		return fmt.Errorf("put file: %w", err)
+	}
+	fmt.Printf("committed %s/%s (%d bytes)\n", workspaceID, path, len(body))
+	return nil
+}
